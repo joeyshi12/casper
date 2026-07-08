@@ -14,13 +14,6 @@ On reconnect the client replays exactly what it missed.
 - **Observability** - credits spent, context-window usage, and turn duration.
 - **PWA** - installable, responsive, auto-reconnects on unlock/network return.
 
-## Layout
-
-- `shared/` - `@casper/shared`: the TypeScript contract (ACP, WS, REST types).
-- `server/` - Fastify HTTP + WebSocket gateway that owns the `kiro-cli acp`
-  child processes and a per-session replay buffer.
-- `web/` - React + Vite PWA.
-
 ## Develop
 
 Requires Node 18.20+ and an authenticated `kiro-cli` on `PATH`.
