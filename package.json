@@ -1,0 +1,31 @@
+{
+  "name": "casper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Casper — mobile-first AI chat over kiro-cli ACP",
+  "workspaces": [
+    "shared",
+    "server",
+    "web"
+  ],
+  "engines": {
+    "node": ">=18.20.0"
+  },
+  "scripts": {
+    "build:shared": "npm run build --workspace @casper/shared",
+    "dev": "npm run build:shared && concurrently -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm run dev --workspace @casper/server",
+    "dev:web": "npm run dev --workspace @casper/web",
+    "build": "npm run build:shared && npm run build --workspace @casper/server && npm run build --workspace @casper/web",
+    "start": "npm run start --workspace @casper/server",
+    "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present",
+    "test": "npm run build:shared && tsx scripts/unit.ts",
+    "probe": "npm run build:shared && tsx scripts/acp-probe.ts",
+    "e2e": "npm run build:shared && tsx scripts/bridge-e2e.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@casper/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && cross-env NODE_OPTIONS=--experimental-global-webcrypto vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@casper/shared": "*",
+    "@tanstack/react-virtual": "^3.11.2",
+    "mermaid": "^11.4.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0",
+    "shiki": "^1.24.2",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.5",
+    "vite-plugin-pwa": "^0.21.1"
+  }
+}

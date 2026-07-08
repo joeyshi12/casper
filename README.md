@@ -1,4 +1,4 @@
-# 👻 Casper
+# casper
 
 A web client for `kiro-cli`, over its Agent Client Protocol (ACP).
 Start a long Kiro task and it keeps running server-side tab.
@@ -144,4 +144,3 @@ npm run e2e     # full server: prompt, disconnect mid-turn, reconnect, replay
 Casper launches kiro with `--trust-all-tools` so unattended runs never block on
 approvals - the agent can run commands and write files without confirmation.
 Always set `CASPER_TOKEN` and put the server behind HTTPS before exposing it.
-# casper

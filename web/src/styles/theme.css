@@ -1,0 +1,113 @@
+/* Nord Deep theme. The Polar Night base sits a shade below the canonical nord0
+   for a darker background, with Frost blues and Aurora accents. */
+
+:root {
+  /* Nord Deep - base (darker than canonical nord0 #2e3440) */
+  --n-abyss: #21262f; /* app background */
+  --n0: #2e3440; /* raised surface */
+  --n1: #3b4252; /* cards, inputs */
+  --n2: #434c5e; /* hover / borders */
+  --n3: #4c566a; /* faint lines, disabled */
+
+  /* Snow Storm - text */
+  --n4: #d8dee9; /* muted text */
+  --n5: #e5e9f0; /* body text */
+  --n6: #eceff4; /* strong text */
+
+  /* Frost - primary UI accents */
+  --frost-teal: #8fbcbb; /* nord7 */
+  --frost: #88c0d0; /* nord8 - primary accent */
+  --frost-blue: #81a1c1; /* nord9 */
+  --frost-deep: #5e81ac; /* nord10 */
+
+  /* Aurora - states */
+  --aurora-red: #bf616a; /* nord11 - error / stop */
+  --aurora-orange: #d08770; /* nord12 - running / warning */
+  --aurora-yellow: #ebcb8b; /* nord13 - credits */
+  --aurora-green: #a3be8c; /* nord14 - success / done */
+  --aurora-purple: #b48ead; /* nord15 - accents */
+
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* Fixed layout metrics - used to keep everything aligned. */
+  --header-h: 56px;
+  --gutter: 16px;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--n-abyss);
+  color: var(--n5);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+  color: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--n2);
+  border-radius: var(--r-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+a {
+  color: var(--frost);
+}
+
+:focus-visible {
+  outline: 2px solid var(--frost);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
