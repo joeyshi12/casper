@@ -8,7 +8,7 @@
 # Overridable via env: CASPER_REPO, CASPER_DIR, CASPER_PORT, CASPER_BRANCH.
 set -euo pipefail
 
-REPO="${CASPER_REPO:-https://github.com/YOUR_ORG/casper.git}"
+REPO="${CASPER_REPO:-https://github.com/joeyshi12/casper.git}"
 BRANCH="${CASPER_BRANCH:-main}"
 DIR="${CASPER_DIR:-$HOME/.local/share/casper}"
 PORT="${CASPER_PORT:-4319}"
