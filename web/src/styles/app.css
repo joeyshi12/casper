@@ -50,9 +50,6 @@
     align-items: flex-start;
     gap: 6px;
   }
-  .obs {
-    margin-left: 0;
-  }
 }
 /* Desktop: the back arrow is redundant next to a permanent sidebar. */
 @media (min-width: 769px) {
@@ -1139,7 +1136,6 @@
 /* Observability */
 /* Live stats - the right-hand side of the single bar below the prompt. */
 .obs {
-  margin-left: auto;
   flex-shrink: 0;
 }
 .obs-strip {
@@ -1197,11 +1193,12 @@
   background: var(--n-abyss);
 }
 /* One bar below the prompt: config (agent/model) on the left, live stats on
-   the right. */
+   the right. When the bar wraps to two rows, both rows left-align. */
 .composer-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   gap: 8px 12px;
   padding: 0 var(--gutter) calc(10px + var(--safe-bottom));
 }
