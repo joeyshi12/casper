@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="/assets/banner.svg" alt="Casper banner" width="100%" />
+</p>
+
 # casper
 
 A web client for `kiro-cli`, over its Agent Client Protocol (ACP).
