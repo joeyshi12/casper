@@ -828,6 +828,9 @@
   align-self: flex-start;
   max-width: 100%;
   color: var(--n5);
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 .thinking {
@@ -893,6 +896,20 @@
 }
 
 /* Markdown */
+.md {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.md a {
+  color: var(--frost);
+  text-decoration: underline;
+  text-decoration-color: var(--frost-deep);
+  overflow-wrap: break-word;
+  word-break: break-all;
+}
+.md a:hover {
+  text-decoration-color: var(--frost);
+}
 .md > *:first-child {
   margin-top: 0;
 }
