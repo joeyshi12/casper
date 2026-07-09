@@ -1132,6 +1132,31 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* Inline images from tool calls (e.g. charts, screenshots). */
+.toolcall-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--n1);
+}
+.toolcall-image-link {
+  display: block;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  border: 1px solid var(--n2);
+  transition: border-color 0.12s;
+}
+.toolcall-image-link:hover {
+  border-color: var(--frost);
+}
+.toolcall-image {
+  display: block;
+  max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+  background: var(--n0);
+}
 
 /* Observability */
 /* Live stats - the right-hand side of the single bar below the prompt. */
