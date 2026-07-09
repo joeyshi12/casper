@@ -7,6 +7,7 @@ import type {
   ModelsResponse,
   SessionDetail,
   SessionListResponse,
+  TreeResponse,
 } from '@casper/shared';
 
 // Auth is a server-set httpOnly session cookie, established via POST /api/login
@@ -64,4 +65,13 @@ export const api = {
     req('POST', `/api/sessions/${id}/model`, { modelId }),
   setMode: (id: string, modeId: string) =>
     req('POST', `/api/sessions/${id}/mode`, { modeId }),
+  /** List files/directories in a session's workspace. */
+  tree: (id: string, relativePath = '') =>
+    req<TreeResponse>(
+      'GET',
+      `/api/sessions/${id}/tree?path=${encodeURIComponent(relativePath)}`,
+    ),
+  /** Trigger a file download from a session's workspace. */
+  downloadUrl: (id: string, relativePath: string) =>
+    `/api/sessions/${id}/download?path=${encodeURIComponent(relativePath)}`,
 };

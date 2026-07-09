@@ -150,6 +150,12 @@ export class SessionManager {
     return this.sessions.get(sessionId)?.store;
   }
 
+  /** Get a session's working directory. Opens the session in memory if needed. */
+  async getSessionCwd(sessionId: string): Promise<string> {
+    const s = await this.ensureOpen(sessionId);
+    return s.cwd;
+  }
+
   hasSession(sessionId: string): boolean {
     return this.sessions.has(sessionId);
   }

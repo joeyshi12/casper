@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { useStore } from '../../state/store.js';
 import type { ConnStatus } from '../../api/SessionSocket.js';
 import { Transcript } from '../chat/Transcript.js';
+import { FileTree } from '../chat/FileTree.js';
 import { Composer } from '../chat/Composer.js';
 import { ObservabilityPanel } from '../observability/ObservabilityPanel.js';
 import { ModelPicker, AgentPicker } from '../controls/Pickers.js';
@@ -42,6 +44,8 @@ export function ChatPane({
   const currentModeId = useStore((s) => s.currentModeId);
   const currentModelId = useStore((s) => s.currentModelId);
   const title = useStore((s) => s.sessions.find((x) => x.sessionId === s.activeId)?.title);
+  const activeId = useStore((s) => s.activeId);
+  const [showTree, setShowTree] = useState(false);
 
   if (!hasActive) {
     return (
@@ -103,7 +107,7 @@ export function ChatPane({
   }
 
   return (
-    <main className="chatpane">
+    <main className={`chatpane ${showTree ? 'has-tree' : ''}`}>
       <header className="chat-head">
         <button className="backbtn" onClick={onBack} aria-label="Back to sessions">
           ‹
@@ -112,9 +116,26 @@ export function ChatPane({
           {title ?? 'Session'}
         </span>
         <ConnDot status={connStatus} />
+        <button
+          className={`ftree-toggle ${showTree ? 'is-active' : ''}`}
+          onClick={() => setShowTree((v) => !v)}
+          title="Toggle file tree"
+          aria-label="Toggle file tree"
+          aria-pressed={showTree}
+        >
+          📁
+        </button>
       </header>
 
-      <Transcript onRetry={onRetry} />
+      <div className="chat-body">
+        <Transcript onRetry={onRetry} />
+
+        {showTree && activeId && (
+          <aside className="ftree-aside">
+            <FileTree sessionId={activeId} />
+          </aside>
+        )}
+      </div>
 
       {/* Prompt, then a single bar: config on the left, live stats on the right. */}
       <div className="composer-wrap">

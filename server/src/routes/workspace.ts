@@ -1,0 +1,207 @@
+import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import path from 'node:path';
+import type { FastifyInstance } from 'fastify';
+import type { FileEntry, TreeResponse } from '@casper/shared';
+import type { SessionManager } from '../session/SessionManager.js';
+
+/** Directories to exclude from tree listings. */
+const EXCLUDED_DIRS = new Set([
+  'node_modules',
+  '.git',
+  '.hg',
+  '.svn',
+  'dist',
+  'build',
+  'out',
+  '.cache',
+  'target',
+  '.next',
+  '.nuxt',
+  '__pycache__',
+  '.venv',
+  'venv',
+]);
+
+/** Maximum file size for downloads (100 MB). */
+const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+
+/**
+ * Resolves a relative path within a root directory and validates it doesn't
+ * escape. Returns the absolute resolved path or null if traversal detected.
+ */
+function safePath(root: string, relative: string): string | null {
+  const resolved = path.resolve(root, relative);
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    return null;
+  }
+  return resolved;
+}
+
+/** Infer a MIME type from a file extension. */
+function mimeType(ext: string): string {
+  const map: Record<string, string> = {
+    '.html': 'text/html',
+    '.css': 'text/css',
+    '.js': 'application/javascript',
+    '.mjs': 'application/javascript',
+    '.ts': 'text/typescript',
+    '.tsx': 'text/typescript',
+    '.json': 'application/json',
+    '.md': 'text/markdown',
+    '.txt': 'text/plain',
+    '.csv': 'text/csv',
+    '.xml': 'application/xml',
+    '.yaml': 'text/yaml',
+    '.yml': 'text/yaml',
+    '.toml': 'text/plain',
+    '.svg': 'image/svg+xml',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.ico': 'image/x-icon',
+    '.pdf': 'application/pdf',
+    '.zip': 'application/zip',
+    '.tar': 'application/x-tar',
+    '.gz': 'application/gzip',
+    '.wasm': 'application/wasm',
+  };
+  return map[ext.toLowerCase()] ?? 'application/octet-stream';
+}
+
+export function registerWorkspaceRoutes(
+  app: FastifyInstance,
+  manager: SessionManager,
+): void {
+  /**
+   * GET /api/sessions/:id/tree?path=<relative>&depth=1
+   *
+   * Lists files and directories in the session's workspace.
+   * The `path` parameter is relative to the session's cwd.
+   * Returns immediate children only (lazy loading; expand on demand).
+   */
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
+    '/api/sessions/:id/tree',
+    async (req, reply) => {
+      let cwd: string;
+      try {
+        cwd = await manager.getSessionCwd(req.params.id);
+      } catch {
+        reply.code(404);
+        return { error: 'Session not found' };
+      }
+
+      const relative = (req.query.path ?? '').replace(/^\/+/, '');
+      const target = safePath(cwd, relative);
+      if (!target) {
+        reply.code(400);
+        return { error: 'Invalid path' };
+      }
+
+      let dirents: import('node:fs').Dirent<string>[];
+      try {
+        dirents = await fs.readdir(target, { withFileTypes: true, encoding: 'utf8' });
+      } catch {
+        reply.code(404);
+        return { error: 'Directory not found' };
+      }
+
+      const entries: FileEntry[] = [];
+      for (const d of dirents) {
+        const name = d.name as string;
+        // Skip hidden files and excluded directories.
+        if (name.startsWith('.') && d.isDirectory()) continue;
+        if (d.isDirectory() && EXCLUDED_DIRS.has(name)) continue;
+
+        const entryRelative = relative ? `${relative}/${name}` : name;
+        const entryAbsolute = path.join(target, name);
+
+        if (d.isDirectory()) {
+          entries.push({ name, path: entryRelative, type: 'directory' });
+        } else if (d.isFile()) {
+          try {
+            const stat = await fs.stat(entryAbsolute);
+            entries.push({
+              name,
+              path: entryRelative,
+              type: 'file',
+              size: stat.size,
+              modifiedAt: stat.mtime.toISOString(),
+            });
+          } catch {
+            // Skip files we can't stat (e.g. broken symlinks).
+          }
+        }
+      }
+
+      // Sort: directories first, then alphabetical within each group.
+      entries.sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      const response: TreeResponse = { cwd, relativeTo: relative, entries };
+      return response;
+    },
+  );
+
+  /**
+   * GET /api/sessions/:id/download?path=<relative>
+   *
+   * Downloads a file from the session's workspace.
+   * The `path` parameter is relative to the session's cwd.
+   */
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
+    '/api/sessions/:id/download',
+    async (req, reply) => {
+      let cwd: string;
+      try {
+        cwd = await manager.getSessionCwd(req.params.id);
+      } catch {
+        reply.code(404);
+        return { error: 'Session not found' };
+      }
+
+      const relative = (req.query.path ?? '').replace(/^\/+/, '');
+      if (!relative) {
+        reply.code(400);
+        return { error: 'path parameter is required' };
+      }
+
+      const target = safePath(cwd, relative);
+      if (!target) {
+        reply.code(400);
+        return { error: 'Invalid path' };
+      }
+
+      let stat: Awaited<ReturnType<typeof fs.stat>>;
+      try {
+        stat = await fs.stat(target);
+      } catch {
+        reply.code(404);
+        return { error: 'File not found' };
+      }
+
+      if (!stat.isFile()) {
+        reply.code(400);
+        return { error: 'Path is not a file' };
+      }
+
+      if (stat.size > MAX_DOWNLOAD_BYTES) {
+        reply.code(413);
+        return { error: `File too large (${(stat.size / 1024 / 1024).toFixed(1)} MB, max 100 MB)` };
+      }
+
+      const ext = path.extname(target);
+      const filename = path.basename(target);
+
+      reply.header('Content-Type', mimeType(ext));
+      reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+      reply.header('Content-Length', stat.size);
+
+      return reply.send(createReadStream(target));
+    },
+  );
+}
