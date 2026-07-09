@@ -2,8 +2,6 @@
   <img src="/assets/banner.svg" alt="Casper banner" width="100%" />
 </p>
 
-# casper
-
 A web client for `kiro-cli`, over its Agent Client Protocol (ACP).
 Start a long Kiro task and it keeps running server-side.
 On reconnect the client replays exactly what it missed.

@@ -14,7 +14,14 @@
    xmlns="http://www.w3.org/2000/svg"
    xmlns:svg="http://www.w3.org/2000/svg">
   <defs
-     id="defs203" />
+     id="defs203">
+    <rect
+       x="534.68365"
+       y="139.36388"
+       width="110.21588"
+       height="99.28538"
+       id="rect428" />
+  </defs>
   <sodipodi:namedview
      id="namedview201"
      pagecolor="#ffffff"
@@ -25,9 +32,9 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      showgrid="false"
-     inkscape:zoom="1.0978454"
-     inkscape:cx="354.78583"
-     inkscape:cy="124.33444"
+     inkscape:zoom="0.9200599"
+     inkscape:cx="311.39277"
+     inkscape:cy="132.05662"
      inkscape:window-width="1440"
      inkscape:window-height="841"
      inkscape:window-x="0"
@@ -43,7 +50,7 @@
      y="0"
      style="stroke-width:0.615835" />
   <g
-     transform="matrix(1.5541754,0,0,1.5541754,311.03984,7.8348563)"
+     transform="matrix(1.5541754,0,0,1.5541754,153.91994,10.336742)"
      id="g198">
     <g
        id="layer1">
@@ -69,4 +76,19 @@
          transform="matrix(1.7739126,-0.08992771,0.08626856,1.8491545,-161.56827,-155.56198)" />
     </g>
   </g>
+  <text
+     xml:space="preserve"
+     style="font-size:80px;line-height:1.25;font-family:sans-serif;fill:#ffffff;fill-opacity:1"
+     x="277.21002"
+     y="80.443443"
+     id="text374"><tspan
+       sodipodi:role="line"
+       id="tspan372"
+       x="277.21002"
+       y="80.443443"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:80px;font-family:Courier;-inkscape-font-specification:Courier">Casper</tspan></text>
+  <text
+     xml:space="preserve"
+     id="text426"
+     style="line-height:1.25;font-family:sans-serif;font-size:16px;white-space:pre;shape-inside:url(#rect428)" />
 </svg>
