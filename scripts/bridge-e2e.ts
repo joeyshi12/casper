@@ -23,14 +23,32 @@ function assert(cond: unknown, msg: string): asserts cond {
   console.log(`✅ ${msg}`);
 }
 
-const headers = config.token
-  ? { 'content-type': 'application/json', authorization: `Bearer ${config.token}` }
-  : { 'content-type': 'application/json' };
+// Captured from POST /api/login and replayed on REST + WS as the session cookie.
+let cookie = '';
+
+function headers(): Record<string, string> {
+  const h: Record<string, string> = { 'content-type': 'application/json' };
+  if (cookie) h.cookie = cookie;
+  return h;
+}
+
+/** Log in with the shared secret and capture the session cookie. */
+async function login(): Promise<void> {
+  if (!config.token) return; // auth disabled
+  const res = await fetch(`${BASE}/api/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: config.token }),
+  });
+  if (!res.ok) throw new Error(`login -> ${res.status} ${await res.text()}`);
+  const setCookie = res.headers.get('set-cookie');
+  if (setCookie) cookie = setCookie.split(';')[0]!; // "casper.sid=<value>"
+}
 
 async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers,
+    headers: headers(),
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw new Error(`${method} ${path} -> ${res.status} ${await res.text()}`);
@@ -45,8 +63,9 @@ function collect(
   timeoutMs = 60_000,
 ): Promise<{ events: CasperEvent[]; sawResync: boolean; ws: WebSocket }> {
   return new Promise((resolve, reject) => {
-    const tokenQ = config.token ? `&token=${config.token}` : '';
-    const ws = new WebSocket(`${WSBASE}/ws?sessionId=${sessionId}&cursor=${cursor}${tokenQ}`);
+    const ws = new WebSocket(`${WSBASE}/ws?sessionId=${sessionId}&cursor=${cursor}`, {
+      headers: cookie ? { cookie } : {},
+    });
     const events: CasperEvent[] = [];
     let sawResync = false;
     const timer = setTimeout(() => {
@@ -78,6 +97,8 @@ async function main() {
   console.log(`server up on ${BASE}\n`);
 
   try {
+    await login();
+
     // 1. Models
     const { models } = await api<ModelsResponse>('GET', '/api/models');
     assert(models.length > 0, `GET /api/models returned ${models.length} models`);
@@ -94,8 +115,9 @@ async function main() {
     // 3. Prompt over WS, collect to turn_ended
     const hasTurnEnd = (evs: CasperEvent[]) =>
       evs.some((e) => e.payload.kind === 'turn_ended');
-    const tokenQ = config.token ? `&token=${config.token}` : '';
-    const ws1 = new WebSocket(`${WSBASE}/ws?sessionId=${sid}&cursor=0${tokenQ}`);
+    const ws1 = new WebSocket(`${WSBASE}/ws?sessionId=${sid}&cursor=0`, {
+      headers: cookie ? { cookie } : {},
+    });
     await new Promise<void>((r, j) => {
       ws1.on('open', () => r());
       ws1.on('error', j);
@@ -111,7 +133,7 @@ async function main() {
         if (msg.type === 'event') {
           midCursor = msg.event.seq;
           if (++count >= 1) {
-            ws1.terminate(); // simulate phone lock / network drop
+            ws1.terminate(); // simulate a network drop
             resolve();
           }
         }

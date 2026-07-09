@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, setToken } from '../../api/rest.js';
+import { login } from '../../api/rest.js';
 
 /** First-run token entry. Casper needs the shared secret to reach the server. */
 export function TokenGate({ onReady }: { onReady: () => void }) {
@@ -10,9 +10,9 @@ export function TokenGate({ onReady }: { onReady: () => void }) {
   const submit = async () => {
     setChecking(true);
     setError(null);
-    setToken(token.trim());
     try {
-      await api.listSessions();
+      // Exchange the shared secret for an httpOnly session cookie.
+      await login(token.trim());
       onReady();
     } catch (e) {
       setError((e as Error).message);

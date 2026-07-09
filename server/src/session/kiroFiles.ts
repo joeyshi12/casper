@@ -1,6 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { SessionSummary, TranscriptMessage } from '@casper/shared';
+import type {
+  SessionSummary,
+  TranscriptItem,
+  TranscriptMessage,
+  TranscriptToolCall,
+} from '@casper/shared';
 import { config } from '../config.js';
 import type { Logger } from '../util/logger.js';
 
@@ -39,13 +44,40 @@ interface KiroSessionJson {
   };
 }
 
+// A content block's `data` is a string for `text`, but an object for structured
+// kinds: `thinking` ({text, signature}), `toolUse` ({toolUseId, name, input}),
+// and `toolResult` ({toolUseId, status, content}).
+interface KiroToolUseData {
+  toolUseId: string;
+  name?: string;
+  input?: unknown;
+}
+interface KiroToolResultData {
+  toolUseId: string;
+  status?: string;
+  content?: unknown[];
+}
+type KiroContentBlock =
+  | { kind: 'text'; data: string }
+  | { kind: 'thinking'; data: { text?: string } }
+  | { kind: 'toolUse'; data: KiroToolUseData }
+  | { kind: 'toolResult'; data: KiroToolResultData }
+  | { kind: string; data: unknown };
+
 interface KiroJsonlEntry {
   kind: string;
   data: {
     message_id?: string;
-    content?: Array<{ kind: string; data: string }>;
+    content?: KiroContentBlock[];
     meta?: { timestamp?: number };
   };
+}
+
+// Extract plain text from a text/thinking content block.
+function blockText(c: KiroContentBlock): string {
+  if (typeof c.data === 'string') return c.data;
+  const d = c.data as { text?: string } | null;
+  return d?.text ?? '';
 }
 
 function summarize(j: KiroSessionJson): SessionSummary {
@@ -98,6 +130,17 @@ export async function listPersistedSessions(log: Logger): Promise<SessionSummary
   return summaries;
 }
 
+// Delete a session's on-disk files: kiro's <id>.{json,jsonl} and Casper's
+// event mirror. Missing files are ignored.
+export async function deletePersistedSession(sessionId: string): Promise<void> {
+  const targets = [
+    path.join(config.kiroSessionsDir, `${sessionId}.json`),
+    path.join(config.kiroSessionsDir, `${sessionId}.jsonl`),
+    path.join(config.casperDataDir, `${sessionId}.events.jsonl`),
+  ];
+  await Promise.all(targets.map((f) => fs.rm(f, { force: true })));
+}
+
 /** Read one session's metadata summary, or null if it doesn't exist. */
 export async function readPersistedSession(
   sessionId: string,
@@ -113,8 +156,14 @@ export async function readPersistedSession(
   }
 }
 
-/** Hydrate the conversation transcript from kiro's <id>.jsonl event log. */
-export async function hydrateTranscript(sessionId: string): Promise<TranscriptMessage[]> {
+/**
+ * Hydrate the conversation transcript from kiro's <id>.jsonl event log, matching
+ * the shape the live stream produces: user/thinking/assistant messages plus
+ * reconstructed tool calls. Tool uses live in AssistantMessage content
+ * (`toolUse`) and their results arrive in later `ToolResults` entries
+ * (`toolResult`), matched back by toolUseId.
+ */
+export async function hydrateTranscript(sessionId: string): Promise<TranscriptItem[]> {
   let raw: string;
   try {
     raw = await fs.readFile(
@@ -124,7 +173,11 @@ export async function hydrateTranscript(sessionId: string): Promise<TranscriptMe
   } catch {
     return [];
   }
-  const messages: TranscriptMessage[] = [];
+
+  const items: TranscriptItem[] = [];
+  // Tool-call items awaiting their result, keyed by toolUseId.
+  const toolsById = new Map<string, TranscriptToolCall>();
+
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -134,23 +187,49 @@ export async function hydrateTranscript(sessionId: string): Promise<TranscriptMe
     } catch {
       continue;
     }
-    const role =
-      entry.kind === 'Prompt'
-        ? 'user'
-        : entry.kind === 'AssistantMessage'
-          ? 'assistant'
-          : null;
-    if (!role) continue;
-    const text = (entry.data.content ?? [])
-      .filter((c) => c.kind === 'text')
-      .map((c) => c.data)
-      .join('');
-    messages.push({
-      id: entry.data.message_id ?? `${role}-${messages.length}`,
-      role,
-      text,
-      timestamp: entry.data.meta?.timestamp,
-    });
+    const content = entry.data.content ?? [];
+    const textOf = (kind: string) =>
+      content.filter((c) => c.kind === kind).map(blockText).join('');
+    const baseId = entry.data.message_id ?? `${items.length}`;
+    const ts = entry.data.meta?.timestamp;
+    const pushMsg = (msg: TranscriptMessage) => items.push({ type: 'message', message: msg });
+
+    if (entry.kind === 'Prompt') {
+      const text = textOf('text');
+      if (text.trim()) pushMsg({ id: `u-${baseId}`, role: 'user', text, timestamp: ts });
+    } else if (entry.kind === 'AssistantMessage') {
+      // Order within an assistant turn: reasoning, spoken text, then tool uses.
+      const thinking = textOf('thinking');
+      if (thinking.trim())
+        pushMsg({ id: `t-${baseId}`, role: 'thinking', text: thinking, timestamp: ts });
+      const text = textOf('text');
+      if (text.trim())
+        pushMsg({ id: `a-${baseId}`, role: 'assistant', text, timestamp: ts });
+
+      for (const c of content) {
+        if (c.kind !== 'toolUse') continue;
+        const d = c.data as KiroToolUseData;
+        // Completed by default; a later ToolResults entry may override the status.
+        const tool: TranscriptToolCall = {
+          id: d.toolUseId,
+          title: d.name ?? d.toolUseId,
+          status: 'completed',
+          input: d.input,
+          content: [],
+        };
+        toolsById.set(d.toolUseId, tool);
+        items.push({ type: 'tool_call', tool });
+      }
+    } else if (entry.kind === 'ToolResults') {
+      for (const c of content) {
+        if (c.kind !== 'toolResult') continue;
+        const d = c.data as KiroToolResultData;
+        const tool = toolsById.get(d.toolUseId);
+        if (!tool) continue;
+        tool.status = d.status === 'error' ? 'failed' : 'completed';
+        tool.content = d.content ?? [];
+      }
+    }
   }
-  return messages;
+  return items;
 }

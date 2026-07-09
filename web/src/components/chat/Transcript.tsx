@@ -1,15 +1,21 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../state/store.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { ToolCallCard } from './ToolCallCard.js';
+
+interface Props {
+  onRetry: (id: string, text: string) => void;
+}
 
 /**
  * The conversation transcript. Auto-scrolls to the bottom as new content
  * arrives (unless the user has scrolled up to read history).
  */
-export function Transcript() {
+export function Transcript({ onRetry }: Props) {
   const items = useStore((s) => s.items);
   const streamingText = useStore((s) => s.streamingText);
+  const streamingThought = useStore((s) => s.streamingThought);
+  const pending = useStore((s) => s.pending);
   const turnStatus = useStore((s) => s.observability.turnStatus);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -19,7 +25,7 @@ export function Transcript() {
     if (stickToBottom.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
-  }, [items, streamingText]);
+  }, [items, streamingText, streamingThought, pending]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -27,7 +33,8 @@ export function Transcript() {
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
   };
 
-  const empty = items.length === 0 && !streamingText;
+  const empty =
+    items.length === 0 && !streamingText && !streamingThought && pending.length === 0;
 
   return (
     <div className="transcript" ref={scrollRef} onScroll={onScroll}>
@@ -35,28 +42,49 @@ export function Transcript() {
         <div className="transcript-empty">
           <p className="empty-title">Casper is here.</p>
           <p className="empty-sub">
-            Hand off a task and put your phone down. Casper keeps working in the
-            dark and has it ready when you get back.
+            Hand off a task. Casper keeps working server-side and has it ready
+            when you get back.
           </p>
         </div>
       )}
 
-      {items.map((item, i) =>
+      {items.map((item) =>
         item.type === 'message' ? (
-          <div
-            key={item.message.id + i}
-            className={`msg msg-${item.message.role}`}
-          >
-            {item.message.role === 'assistant' ? (
-              <MarkdownRenderer text={item.message.text} />
-            ) : (
-              <div className="msg-user-text">{item.message.text}</div>
-            )}
-          </div>
+          item.message.role === 'thinking' ? (
+            <ThoughtBlock key={item.message.id} text={item.message.text} />
+          ) : (
+            <div key={item.message.id} className={`msg msg-${item.message.role}`}>
+              {item.message.role === 'assistant' ? (
+                <MarkdownRenderer text={item.message.text} />
+              ) : (
+                <div className="msg-user-text">{item.message.text}</div>
+              )}
+            </div>
+          )
         ) : (
-          <ToolCallCard key={item.tool.id + i} tool={item.tool} />
+          <ToolCallCard key={item.tool.id} tool={item.tool} />
         ),
       )}
+
+      {pending.map((pm) => (
+        <div
+          key={pm.id}
+          className={`msg msg-user msg-pending ${pm.status === 'failed' ? 'is-failed' : ''}`}
+        >
+          <div className="msg-user-text">{pm.text}</div>
+          {pm.status === 'failed' && (
+            <button
+              className="msg-retry"
+              onClick={() => onRetry(pm.id, pm.text)}
+              title="Failed to send. Click to retry."
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      ))}
+
+      {streamingThought && <ThoughtBlock text={streamingThought} live />}
 
       {streamingText && (
         <div className="msg msg-assistant">
@@ -64,7 +92,7 @@ export function Transcript() {
         </div>
       )}
 
-      {turnStatus === 'running' && !streamingText && (
+      {turnStatus === 'running' && !streamingText && !streamingThought && (
         <div className="thinking">
           <span className="thinking-dot" />
           <span className="thinking-dot" />
@@ -73,6 +101,28 @@ export function Transcript() {
       )}
 
       <div ref={bottomRef} />
+    </div>
+  );
+}
+
+/**
+ * A collapsible reasoning block. Kiro's "thinking" content is the model's
+ * private reasoning; we render it dimmed and distinct from spoken output.
+ * Collapsed by default for committed thoughts; expanded while streaming live.
+ */
+function ThoughtBlock({ text, live = false }: { text: string; live?: boolean }) {
+  const [open, setOpen] = useState(live);
+  return (
+    <div className={`thought ${live ? 'is-live' : ''}`}>
+      <button className="thought-head" onClick={() => setOpen((o) => !o)}>
+        <span className="thought-chevron">{open ? '▾' : '▸'}</span>
+        <span className="thought-label">Thinking</span>
+      </button>
+      {open && (
+        <div className="thought-body">
+          <MarkdownRenderer text={text} />
+        </div>
+      )}
     </div>
   );
 }

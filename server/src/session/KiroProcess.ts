@@ -75,10 +75,19 @@ export class KiroProcess extends EventEmitter {
       this.emit('exit', code, signal);
     });
 
+    // A spawn failure (e.g. bad cwd or missing binary) emits 'error'. Fail the
+    // ACP client so any in-flight request (like initialize) rejects, then log
+    // it. We do NOT re-emit 'error': an EventEmitter with no 'error' listener
+    // throws and would crash the server.
     this.child.on('error', (err) => {
       this.log.error({ err }, 'kiro-cli acp spawn error');
-      this.emit('error', err);
+      this.client.fail(err.message);
     });
+
+    // Swallow stdin errors (e.g. EPIPE when writing to a process that failed to
+    // spawn) so they don't surface as unhandled stream errors.
+    this.child.stdin.on('error', () => {});
+    this.child.stdout.on('error', () => {});
   }
 
   /** Perform the ACP initialize handshake. Idempotent. */

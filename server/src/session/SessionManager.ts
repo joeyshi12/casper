@@ -15,17 +15,42 @@ import {
   type SessionSummary,
   type SessionUpdateParams,
 } from '@casper/shared';
+import fs from 'node:fs';
+import path from 'node:path';
 import { config } from '../config.js';
 import type { Logger } from '../util/logger.js';
 import { KiroProcess } from './KiroProcess.js';
 import { EventStore } from './EventStore.js';
 import { TurnState } from './TurnState.js';
 import {
+  deletePersistedSession,
   hydrateTranscript,
   listPersistedSessions,
   readPersistedSession,
 } from './kiroFiles.js';
 import { TitleStore } from './titles.js';
+
+// Resolve a working directory for a new session, normalized to an absolute path
+// (relative input is resolved against DEFAULT_CWD). If the directory doesn't
+// exist it's created; a path that exists but is a file is rejected.
+function resolveCwd(input?: string): string {
+  const raw = input?.trim();
+  if (!raw) return config.defaultCwd;
+  const abs = path.resolve(config.defaultCwd, raw);
+  let stat: fs.Stats | undefined;
+  try {
+    stat = fs.statSync(abs);
+  } catch {
+    stat = undefined;
+  }
+  if (stat && !stat.isDirectory()) {
+    throw new Error(`Working directory path is a file, not a directory: ${abs}`);
+  }
+  if (!stat) {
+    fs.mkdirSync(abs, { recursive: true });
+  }
+  return abs;
+}
 
 // A session's server-side state. The store, turn state, and metadata exist as
 // soon as it's opened; the kiro-cli child (`proc`) is spawned lazily, only when
@@ -244,7 +269,7 @@ export class SessionManager {
     agentId?: string;
     modelId?: string;
   }): Promise<SessionDetail> {
-    const cwd = opts.cwd ?? config.defaultCwd;
+    const cwd = resolveCwd(opts.cwd);
     // Temporary local id until kiro assigns the real one during ensureProc.
     const tempId = `pending-${Date.now()}-${Math.floor(this.sessions.size)}`;
     const store = new EventStore(tempId, this.log);
@@ -254,7 +279,14 @@ export class SessionManager {
     s.modelId = opts.modelId;
     this.sessions.set(tempId, s);
 
-    await this.ensureProc(s); // adopts kiro's real sessionId
+    try {
+      await this.ensureProc(s); // adopts kiro's real sessionId
+    } catch (err) {
+      // Spawn or handshake failed: drop the orphan so it can't leak or show up
+      // as a dead, unopenable row in the session list.
+      this.evict(s.sessionId);
+      throw err;
+    }
     return this.buildDetail(s, []);
   }
 
@@ -369,10 +401,13 @@ export class SessionManager {
     transcript: SessionDetail['transcript'],
   ): SessionDetail {
     const snap = s.turnState.get();
+    const firstMessage = transcript.find((it) => it.type === 'message');
+    const firstText =
+      firstMessage?.type === 'message' ? firstMessage.message.text : undefined;
     return {
       summary: {
         sessionId: s.sessionId,
-        title: this.titles.get(s.sessionId) ?? (transcript[0]?.text.slice(0, 60) || s.title),
+        title: this.titles.get(s.sessionId) ?? (firstText?.slice(0, 60) || s.title),
         cwd: s.cwd,
         createdAt: s.createdAt,
         updatedAt: s.updatedAt,
@@ -401,6 +436,14 @@ export class SessionManager {
     this.sessions.delete(sessionId);
     s.proc?.dispose();
     s.store.dispose();
+  }
+
+  // Permanently delete a session: evict it from memory, remove its on-disk
+  // files, and drop any title override.
+  async deleteSession(sessionId: string): Promise<void> {
+    this.evict(sessionId);
+    this.titles.remove(sessionId);
+    await deletePersistedSession(sessionId);
   }
 
   disposeAll(): void {

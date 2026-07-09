@@ -48,8 +48,10 @@ const home = os.homedir();
 export const config = {
   host: env('HOST', '0.0.0.0'),
   port: envInt('PORT', 4319),
-  /** Shared-secret token required on REST + WS. Empty string disables auth (dev only). */
+  /** Shared-secret token required to log in. Empty string disables auth (dev only). */
   token: env('CASPER_TOKEN', ''),
+  /** Device-login lifetime in seconds; slid forward on activity. Default 7 days. */
+  sessionTtlSeconds: envInt('CASPER_SESSION_TTL_SECONDS', 60 * 60 * 24 * 7),
   kiroBin: resolveKiroBin(env('KIRO_BIN', 'kiro-cli'), home),
   defaultCwd: env('DEFAULT_CWD', process.cwd()),
   maxLiveSessions: envInt('MAX_LIVE_SESSIONS', 6),

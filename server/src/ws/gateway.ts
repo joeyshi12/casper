@@ -6,14 +6,15 @@ import type {
   ServerMessage,
 } from '@casper/shared';
 import type { SessionManager } from '../session/SessionManager.js';
-import { extractToken, tokenIsValid } from '../routes/auth.js';
+import { authDisabled, hasValidSession } from '../routes/auth.js';
 import { handleClientMessage } from './dispatch.js';
 
 const HEARTBEAT_MS = 20_000;
 
-// WebSocket gateway at /ws?sessionId=&cursor=&token=. On connect it replays
-// buffered events after the client's cursor, then streams live ones. Socket
-// loss never touches the child process, so the turn keeps running.
+// WebSocket gateway at /ws?sessionId=&cursor=. Auth is the same-origin session
+// cookie sent on the upgrade request. On connect it replays buffered events
+// after the client's cursor, then streams live ones. Socket loss never touches
+// the child process, so the turn keeps running.
 export function registerWsGateway(
   app: FastifyInstance,
   manager: SessionManager,
@@ -22,10 +23,9 @@ export function registerWsGateway(
     const query = req.query as {
       sessionId?: string;
       cursor?: string;
-      token?: string;
     };
 
-    if (!tokenIsValid(extractToken({ headers: req.headers as never, query }))) {
+    if (!authDisabled() && !hasValidSession(req)) {
       send(socket, { type: 'error', message: 'Unauthorized' });
       socket.close(1008, 'Unauthorized');
       return;

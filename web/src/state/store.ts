@@ -9,25 +9,22 @@ import {
   type SessionSummary,
   type ToolCallProgressUpdate,
   type ToolCallUpdate,
-  type TranscriptMessage,
+  type TranscriptItem,
+  type TranscriptToolCall,
 } from '@casper/shared';
 import type { ConnStatus } from '../api/SessionSocket.js';
 
-/** A rendered tool call in the transcript. */
-export interface ToolCallView {
-  id: string;
-  title: string;
-  kind?: string;
-  status: string;
-  input?: unknown;
-  output?: unknown;
-  content: unknown[];
-}
+/** A rendered tool call in the transcript (shared shape). */
+export type ToolCallView = TranscriptToolCall;
 
-/** A transcript entry: a message or an inline tool call. */
-export type TranscriptItem =
-  | { type: 'message'; message: TranscriptMessage }
-  | { type: 'tool_call'; tool: ToolCallView };
+export type { TranscriptItem };
+
+/** A locally-sent user message awaiting server acknowledgement. */
+export interface PendingMessage {
+  id: string;
+  text: string;
+  status: 'sending' | 'failed';
+}
 
 interface CasperState {
   // Session list
@@ -44,6 +41,8 @@ interface CasperState {
   items: TranscriptItem[];
   observability: ObservabilitySnapshot;
   streamingText: string; // in-flight assistant chunk not yet committed
+  streamingThought: string; // in-flight reasoning chunk not yet committed
+  pending: PendingMessage[]; // user messages sent locally, awaiting server echo
 
   // actions
   setSessions: (s: SessionSummary[]) => void;
@@ -53,6 +52,9 @@ interface CasperState {
   loadDetail: (d: SessionDetail) => void;
   clearActive: () => void;
   applyEvent: (e: CasperEvent) => void;
+  addPending: (id: string, text: string) => void;
+  markPendingFailed: (id: string) => void;
+  removePending: (id: string) => void;
 }
 
 export const useStore = create<CasperState>((set, get) => ({
@@ -65,6 +67,8 @@ export const useStore = create<CasperState>((set, get) => ({
   items: [],
   observability: emptyObservabilitySnapshot(),
   streamingText: '',
+  streamingThought: '',
+  pending: [],
 
   setSessions: (sessions) => set({ sessions }),
   setModels: (models) => set({ models }),
@@ -78,8 +82,10 @@ export const useStore = create<CasperState>((set, get) => ({
       currentModeId: d.currentModeId,
       currentModelId: d.summary.modelId,
       observability: d.observability,
-      items: d.transcript.map((message) => ({ type: 'message', message })),
+      items: d.transcript,
       streamingText: '',
+      streamingThought: '',
+      pending: [],
     }),
 
   clearActive: () =>
@@ -89,7 +95,20 @@ export const useStore = create<CasperState>((set, get) => ({
       items: [],
       observability: emptyObservabilitySnapshot(),
       streamingText: '',
+      streamingThought: '',
+      pending: [],
     }),
+
+  addPending: (id, text) =>
+    set((s) => ({ pending: [...s.pending, { id, text, status: 'sending' }] })),
+  markPendingFailed: (id) =>
+    set((s) => ({
+      pending: s.pending.map((p) =>
+        p.id === id ? { ...p, status: 'failed' as const } : p,
+      ),
+    })),
+  removePending: (id) =>
+    set((s) => ({ pending: s.pending.filter((p) => p.id !== id) })),
 
   applyEvent: (e) => {
     const state = get();
@@ -109,6 +128,10 @@ export const useStore = create<CasperState>((set, get) => ({
               message: { id: `u-${e.seq}`, role: 'user', text, timestamp: e.ts },
             },
           ],
+          // The server confirmed the prompt; drop its optimistic pending copy.
+          pending: state.pending.filter(
+            (pm) => !(pm.status === 'sending' && pm.text === text),
+          ),
           streamingText: '',
           observability: { ...state.observability, turnStatus: 'running' },
         });
@@ -120,11 +143,14 @@ export const useStore = create<CasperState>((set, get) => ({
         if (u.sessionUpdate === 'agent_message_chunk') {
           const chunk = (u as { content?: { text?: string } }).content?.text ?? '';
           set({ streamingText: state.streamingText + chunk });
+        } else if (u.sessionUpdate === 'agent_thought_chunk') {
+          const chunk = (u as { content?: { text?: string } }).content?.text ?? '';
+          set({ streamingThought: state.streamingThought + chunk });
         } else if (u.sessionUpdate === 'tool_call') {
           const tc = u as ToolCallUpdate;
           set({
             items: [
-              ...commitStreaming(state),
+              ...commitStreaming(state, `s-${e.seq}`, e.ts),
               {
                 type: 'tool_call',
                 tool: {
@@ -138,6 +164,7 @@ export const useStore = create<CasperState>((set, get) => ({
               },
             ],
             streamingText: '',
+            streamingThought: '',
           });
         } else if (u.sessionUpdate === 'tool_call_update') {
           const tu = u as ToolCallProgressUpdate;
@@ -162,8 +189,9 @@ export const useStore = create<CasperState>((set, get) => ({
 
       case 'turn_ended': {
         set({
-          items: commitStreaming(state, `a-${e.seq}`, e.ts),
+          items: commitStreaming(state, `s-${e.seq}`, e.ts),
           streamingText: '',
+          streamingThought: '',
           observability: { ...state.observability, turnStatus: 'idle' },
         });
         break;
@@ -172,7 +200,7 @@ export const useStore = create<CasperState>((set, get) => ({
       case 'turn_error': {
         set({
           items: [
-            ...commitStreaming(state, `a-${e.seq}`, e.ts),
+            ...commitStreaming(state, `s-${e.seq}`, e.ts),
             {
               type: 'message',
               message: {
@@ -184,6 +212,7 @@ export const useStore = create<CasperState>((set, get) => ({
             },
           ],
           streamingText: '',
+          streamingThought: '',
           observability: { ...state.observability, turnStatus: 'idle' },
         });
         break;
@@ -267,18 +296,28 @@ export const useStore = create<CasperState>((set, get) => ({
   },
 }));
 
-/** Commit any in-flight streaming text as an assistant message. */
+/**
+ * Commit any in-flight streaming reasoning + assistant text as transcript
+ * entries. `baseId` must be unique per commit (seq-derived) so React keys stay
+ * stable and it never reuses a DOM node from a prior commit.
+ */
 function commitStreaming(
   state: CasperState,
-  id = `a-stream`,
+  baseId: string,
   ts = Date.now(),
 ): TranscriptItem[] {
-  if (!state.streamingText.trim()) return state.items;
-  return [
-    ...state.items,
-    {
+  const next = [...state.items];
+  if (state.streamingThought.trim()) {
+    next.push({
       type: 'message',
-      message: { id, role: 'assistant', text: state.streamingText, timestamp: ts },
-    },
-  ];
+      message: { id: `t-${baseId}`, role: 'thinking', text: state.streamingThought, timestamp: ts },
+    });
+  }
+  if (state.streamingText.trim()) {
+    next.push({
+      type: 'message',
+      message: { id: `a-${baseId}`, role: 'assistant', text: state.streamingText, timestamp: ts },
+    });
+  }
+  return next;
 }

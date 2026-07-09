@@ -63,20 +63,36 @@ export interface CreateSessionRequest {
   modelId?: string;
 }
 
-/** A single rendered entry in a session transcript. */
+/** A message entry in a session transcript. */
 export interface TranscriptMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'thinking';
   /** Concatenated text content. */
   text: string;
   timestamp?: number;
 }
 
+/** A tool-call entry in a session transcript (matches the live tool_call view). */
+export interface TranscriptToolCall {
+  id: string;
+  title: string;
+  kind?: string;
+  status: string;
+  input?: unknown;
+  output?: unknown;
+  content: unknown[];
+}
+
+/** A transcript entry: a message or an inline tool call. */
+export type TranscriptItem =
+  | { type: 'message'; message: TranscriptMessage }
+  | { type: 'tool_call'; tool: TranscriptToolCall };
+
 export interface SessionDetail {
   summary: SessionSummary;
   modes: AgentMode[];
   currentModeId?: string;
-  transcript: TranscriptMessage[];
+  transcript: TranscriptItem[];
   observability: ObservabilitySnapshot;
   /** Highest event seq currently in the server buffer (client's replay cursor start). */
   head: number;
@@ -94,12 +110,32 @@ export interface SetModeRequest {
   modeId: string;
 }
 
-// ---------------------------------------------------------------------------
 // Prompt (also available over WS; REST variant for fire-and-forget)
-// ---------------------------------------------------------------------------
 
 export interface PromptRequest {
   prompt: PromptContentBlock[];
+}
+
+// Directory suggestions for the working-directory input.
+export interface DirListing {
+  /** Absolute directory that was listed. */
+  dir: string;
+  /** Absolute paths of matching subdirectories. */
+  entries: string[];
+}
+
+// A logged-in device (from GET /api/devices).
+export interface DeviceInfo {
+  id: string;
+  createdAt: string;
+  lastSeenAt: string;
+  userAgent?: string;
+  /** True for the device making the request. */
+  current: boolean;
+}
+
+export interface DevicesResponse {
+  devices: DeviceInfo[];
 }
 
 export interface HealthResponse {

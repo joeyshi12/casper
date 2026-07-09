@@ -18,13 +18,18 @@ export function registerSessionRoutes(
   });
 
   // Create a new session.
-  app.post('/api/sessions', async (req) => {
+  app.post('/api/sessions', async (req, reply) => {
     const body = (req.body ?? {}) as CreateSessionRequest;
-    return manager.createSession({
-      cwd: body.cwd,
-      agentId: body.agentId,
-      modelId: body.modelId,
-    });
+    try {
+      return await manager.createSession({
+        cwd: body.cwd,
+        agentId: body.agentId,
+        modelId: body.modelId,
+      });
+    } catch (err) {
+      reply.code(400);
+      return { error: (err as Error).message };
+    }
   });
 
   // Get session detail (hydrated transcript + observability + replay head).
@@ -82,9 +87,9 @@ export function registerSessionRoutes(
     },
   );
 
-  // Evict a LIVE session's process (does not delete kiro's persisted history).
+  // Permanently delete a session (memory + on-disk files).
   app.delete<{ Params: { id: string } }>('/api/sessions/:id', async (req) => {
-    manager.evict(req.params.id);
+    await manager.deleteSession(req.params.id);
     return { ok: true };
   });
 }

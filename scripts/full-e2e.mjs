@@ -20,9 +20,24 @@ function ok(cond, msg) {
   }
 }
 
+// Captured from POST /api/login and replayed as the session cookie.
+let cookie = '';
+
+async function login() {
+  const r = await fetch(`${BASE}/api/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: TOKEN }),
+  });
+  const setCookie = r.headers.get('set-cookie');
+  if (setCookie) cookie = setCookie.split(';')[0];
+  return r.status;
+}
+
 async function api(method, path, body) {
   // Mirror the web client: only send content-type when there's a body.
-  const headers = { authorization: `Bearer ${TOKEN}` };
+  const headers = {};
+  if (cookie) headers.cookie = cookie;
   if (body !== undefined) headers['content-type'] = 'application/json';
   const r = await fetch(BASE + path, {
     method,
@@ -43,7 +58,8 @@ async function api(method, path, body) {
 function runTurn(sessionId, text, cursor = 0, timeoutMs = 60000) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(
-      `${WSB}/ws?sessionId=${sessionId}&cursor=${cursor}&token=${TOKEN}`,
+      `${WSB}/ws?sessionId=${sessionId}&cursor=${cursor}`,
+      { headers: cookie ? { cookie } : {} },
     );
     const events = [];
     let assistantText = '';
@@ -75,6 +91,9 @@ function runTurn(sessionId, text, cursor = 0, timeoutMs = 60000) {
 }
 
 async function main() {
+  const loginStatus = await login();
+  ok(loginStatus === 200, `login with shared secret ok (${loginStatus})`);
+
   console.log('\n═══ 1. Reference data ═══');
   const health = await api('GET', '/api/health');
   ok(health.status === 200 && health.json.status === 'ok', 'health ok');
@@ -91,6 +110,36 @@ async function main() {
   console.log('\n═══ 2. Auth enforcement ═══');
   const noauth = await fetch(`${BASE}/api/models`);
   ok(noauth.status === 401, 'unauthenticated request rejected (401)');
+  const badLogin = await fetch(`${BASE}/api/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: 'wrong-secret' }),
+  });
+  ok(badLogin.status === 401, 'login with wrong secret rejected (401)');
+
+  console.log('\n═══ 2b. Device sessions ═══');
+  const devices0 = await api('GET', '/api/devices');
+  ok(
+    devices0.json.devices?.some((d) => d.current),
+    'this device appears in the device list',
+  );
+  // A second login = a second device.
+  const login2 = await fetch(`${BASE}/api/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: TOKEN }),
+  });
+  const cookie2 = login2.headers.get('set-cookie')?.split(';')[0];
+  const devices1 = await api('GET', '/api/devices');
+  ok(devices1.json.devices?.length >= 2, `second login adds a device (${devices1.json.devices?.length})`);
+  // Revoke the second device; its cookie should stop working, ours keeps working.
+  const other = devices1.json.devices.find((d) => !d.current);
+  const rev = await api('DELETE', `/api/devices/${other.id}`);
+  ok(rev.json.ok, 'revoked the other device');
+  const revokedTry = await fetch(`${BASE}/api/models`, { headers: { cookie: cookie2 } });
+  ok(revokedTry.status === 401, 'revoked device cookie is rejected (401)');
+  const stillOk = await api('GET', '/api/models');
+  ok(stillOk.status === 200, 'current device still authenticated after revoking the other');
 
   console.log('\n═══ 3. Session lifecycle ═══');
   const created = await api('POST', '/api/sessions', {
@@ -136,7 +185,9 @@ async function main() {
 
   console.log('\n═══ 5. Reconnect / replay ═══');
   // Start a turn, drop the socket after first event, reconnect with stale cursor.
-  const ws1 = new WebSocket(`${WSB}/ws?sessionId=${sid}&cursor=0&token=${TOKEN}`);
+  const ws1 = new WebSocket(`${WSB}/ws?sessionId=${sid}&cursor=0`, {
+    headers: cookie ? { cookie } : {},
+  });
   await new Promise((r, j) => {
     ws1.on('open', r);
     ws1.on('error', j);

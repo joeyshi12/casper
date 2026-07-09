@@ -1,7 +1,7 @@
 # casper
 
 A web client for `kiro-cli`, over its Agent Client Protocol (ACP).
-Start a long Kiro task and it keeps running server-side tab.
+Start a long Kiro task and it keeps running server-side.
 On reconnect the client replays exactly what it missed.
 
 ## Features
@@ -12,7 +12,14 @@ On reconnect the client replays exactly what it missed.
 - **Rich rendering** - Markdown, Mermaid diagrams, syntax-highlighted code, and
   MCP tool calls with status/input/output.
 - **Observability** - credits spent, context-window usage, and turn duration.
-- **PWA** - installable, responsive, auto-reconnects on unlock/network return.
+- **PWA** - installable, responsive, auto-reconnects when the network returns.
+
+## Layout
+
+- `shared/` - `@casper/shared`: the TypeScript contract (ACP, WS, REST types).
+- `server/` - Fastify HTTP + WebSocket gateway that owns the `kiro-cli acp`
+  child processes and a per-session replay buffer.
+- `web/` - React + Vite PWA.
 
 ## Develop
 
@@ -32,97 +39,40 @@ Open the printed URL and paste your `CASPER_TOKEN`.
 |-----|---------|---------|
 | `HOST` | `0.0.0.0` | Bind address |
 | `PORT` | `4319` | Server port |
-| `CASPER_TOKEN` | _(empty)_ | Shared secret required on REST + WS. **Set before exposing.** |
+| `CASPER_TOKEN` | _(empty)_ | Shared secret entered once at login; server exchanges it for a per-device session cookie. **Set before exposing.** |
+| `CASPER_SESSION_TTL_SECONDS` | `604800` | Device-login lifetime (slid forward on activity). |
 | `KIRO_BIN` | `kiro-cli` | Path to the kiro-cli binary |
 | `DEFAULT_CWD` | cwd | Default working directory for new sessions |
 | `MAX_LIVE_SESSIONS` | `6` | Max concurrent live kiro processes |
 | `DEFAULT_AGENT` | `kiro_default` | Default agent for new sessions |
 | `CASPER_WEB_DIST` | `../web/dist` | Built web app to serve (set to an absolute path in prod) |
 
-## Deploy on a Linux server
+## Install
 
-The server serves the built web app and the API/WebSocket on a single port, so
-there's one process to run.
-
-**1. Prerequisites.** Install Node 18.20+, then install and authenticate
-`kiro-cli` **as the user the service will run as** (Casper spawns it and inherits
-that login):
+On the Linux machine you want to run Casper on, make sure `kiro-cli` is installed
+and logged in (`kiro-cli login`), then run:
 
 ```bash
-kiro-cli login       # or: kiro-cli whoami  to confirm you're already logged in
+curl -fsSL https://raw.githubusercontent.com/YOUR_ORG/casper/main/scripts/install.sh | bash
 ```
 
-**2. Get the code and build:**
+That's it. The installer builds Casper, starts it in the background (and keeps it
+running across reboots), and prints the URL and access token to open in your
+browser. Re-run the same command any time to update to the latest version. Your
+access token is preserved.
+
+**Uninstall:**
 
 ```bash
-git clone <your-fork-url> /opt/casper && cd /opt/casper
-npm ci
-npm run build        # builds shared, server, and web
+~/.local/share/casper/scripts/uninstall.sh
 ```
 
-**3. Configure.** Create `/opt/casper/.env`:
+Add `--purge` to also delete your saved sessions and logins.
 
-```ini
-HOST=0.0.0.0
-PORT=4319
-CASPER_TOKEN=<paste a long random secret>
-CASPER_WEB_DIST=/opt/casper/web/dist
-DEFAULT_CWD=/home/casper/workspace
-NODE_ENV=production
-```
-
-Generate the token with `node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"`.
-
-**4. Run it under systemd** - `/etc/systemd/system/casper.service`:
-
-```ini
-[Unit]
-Description=Casper (kiro-cli web client)
-After=network.target
-
-[Service]
-Type=simple
-User=casper
-WorkingDirectory=/opt/casper/server
-EnvironmentFile=/opt/casper/.env
-ExecStart=/usr/bin/node dist/index.js
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`WorkingDirectory` must be the `server/` dir (that's where `node dist/index.js`
-lives). Then:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now casper
-sudo systemctl status casper        # or: journalctl -u casper -f
-```
-
-**5. HTTPS (recommended).** Terminate TLS with a reverse proxy - required for PWA
-install and for reconnect-on-unlock to work over cellular. Nginx example:
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name casper.example.com;
-    # ssl_certificate / ssl_certificate_key from certbot, etc.
-
-    location / {
-        proxy_pass http://127.0.0.1:4319;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;      # WebSocket
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 3600s;                    # long agent turns
-    }
-}
-```
-
-To update: `git pull && npm ci && npm run build && sudo systemctl restart casper`.
+**HTTPS (recommended when exposing beyond your LAN).** Put a TLS-terminating
+reverse proxy in front. It's required for PWA install and reliable reconnects.
+Point it at `http://127.0.0.1:4319`, forwarding WebSocket upgrades and using a
+long read timeout for lengthy agent turns.
 
 ## Verify
 

@@ -9,6 +9,7 @@ import { SessionManager } from './session/SessionManager.js';
 import { registerAuth } from './routes/auth.js';
 import { registerModelRoutes } from './routes/models.js';
 import { registerAgentRoutes } from './routes/agents.js';
+import { registerFsRoutes } from './routes/fs.js';
 import { registerSessionRoutes } from './routes/sessions.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerWsGateway } from './ws/gateway.js';
@@ -19,13 +20,19 @@ export interface CasperApp {
 }
 
 export async function buildApp(): Promise<CasperApp> {
+  const isProd = process.env.NODE_ENV === 'production';
   const app = Fastify({
+    // Honor X-Forwarded-Proto so `secure: 'auto'` cookies detect HTTPS when the
+    // server sits behind a TLS-terminating tunnel or reverse proxy.
+    trustProxy: true,
+    // In production, skip the two-lines-per-request access log; our own
+    // logger.info/warn/error calls still fire. Dev keeps it for debugging.
+    disableRequestLogging: isProd,
     logger: {
       level: process.env.LOG_LEVEL ?? 'info',
-      transport:
-        process.env.NODE_ENV === 'production'
-          ? undefined
-          : { target: 'pino/file', options: { destination: 2 } },
+      transport: isProd
+        ? undefined
+        : { target: 'pino/file', options: { destination: 2 } },
     },
   });
   const manager = new SessionManager(logger);
@@ -36,10 +43,11 @@ export async function buildApp(): Promise<CasperApp> {
     options: { maxPayload: 16 * 1024 * 1024 },
   });
 
-  registerAuth(app);
+  await registerAuth(app);
   registerHealthRoute(app, manager, startedAt);
   registerModelRoutes(app);
   registerAgentRoutes(app);
+  registerFsRoutes(app);
   registerSessionRoutes(app, manager);
   registerWsGateway(app, manager);
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { SessionSummary } from '@casper/shared';
-import { SearchIcon } from '../common/icons.js';
+import { LockIcon, PlusIcon, SearchIcon } from '../common/icons.js';
 import { SearchModal } from '../sessions/SearchModal.js';
+import { DevicesModal } from '../sessions/DevicesModal.js';
 
 interface Props {
   sessions: SessionSummary[];
@@ -10,6 +11,14 @@ interface Props {
   onNew: () => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
+  onLock: () => void;
+}
+
+// Show the last one or two path segments so the directory reads at a glance.
+function shortCwd(cwd: string): string {
+  const parts = cwd.split('/').filter(Boolean);
+  if (parts.length <= 2) return cwd;
+  return `…/${parts.slice(-2).join('/')}`;
 }
 
 function relTime(iso: string): string {
@@ -34,8 +43,11 @@ export function Sidebar({
   onNew,
   onDelete,
   onRename,
+  onLock,
 }: Props) {
   const [searchOpen, setSearchOpen] = useState(false);
+  const [devicesOpen, setDevicesOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [menuId, setMenuId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -47,6 +59,14 @@ export function Sidebar({
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [menuId]);
+
+  // Close the account menu on an outside click.
+  useEffect(() => {
+    if (!accountOpen) return;
+    const close = () => setAccountOpen(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [accountOpen]);
 
   const commitRename = (id: string) => {
     const t = draft.trim();
@@ -62,6 +82,41 @@ export function Sidebar({
           <span className="wordmark">Casper</span>
         </span>
         <div className="sidebar-actions">
+          <div className="account-menu">
+            <button
+              className="iconbtn iconbtn-lg"
+              aria-label="Account"
+              title="Account"
+              onClick={(e) => {
+                e.stopPropagation();
+                setAccountOpen((v) => !v);
+              }}
+            >
+              <LockIcon size={18} />
+            </button>
+            {accountOpen && (
+              <div className="menu-list" onClick={(e) => e.stopPropagation()}>
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    setDevicesOpen(true);
+                  }}
+                >
+                  Devices
+                </button>
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    onLock();
+                  }}
+                >
+                  Lock app
+                </button>
+              </div>
+            )}
+          </div>
           <button
             className="iconbtn iconbtn-lg"
             aria-label="Search sessions"
@@ -69,8 +124,13 @@ export function Sidebar({
           >
             <SearchIcon size={20} />
           </button>
-          <button className="btn-accent" onClick={onNew}>
-            New
+          <button
+            className="iconbtn iconbtn-lg"
+            aria-label="New session"
+            title="New session"
+            onClick={onNew}
+          >
+            <PlusIcon size={20} />
           </button>
         </div>
       </header>
@@ -110,6 +170,11 @@ export function Sidebar({
                       <span className="srow-dot">·</span>
                       <span>{relTime(s.updatedAt)}</span>
                     </span>
+                    {s.cwd && (
+                      <span className="srow-cwd" title={s.cwd}>
+                        {shortCwd(s.cwd)}
+                      </span>
+                    )}
                   </span>
                 </button>
               )}
@@ -159,6 +224,16 @@ export function Sidebar({
           sessions={sessions}
           onOpen={onOpen}
           onClose={() => setSearchOpen(false)}
+        />
+      )}
+
+      {devicesOpen && (
+        <DevicesModal
+          onClose={() => setDevicesOpen(false)}
+          onSelfRevoked={() => {
+            setDevicesOpen(false);
+            onLock();
+          }}
         />
       )}
     </aside>

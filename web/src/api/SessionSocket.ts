@@ -4,7 +4,6 @@ import type {
   PromptContentBlock,
   ServerMessage,
 } from '@casper/shared';
-import { getToken } from './rest.js';
 
 export type ConnStatus =
   | 'connecting'
@@ -20,7 +19,13 @@ export interface SessionSocketHandlers {
   /** Cursor is stale - caller should refetch the full session, then call reset(head). */
   onResync: () => void;
   onAck?: (action: string, ok: boolean, error?: string) => void;
+  /** The server rejected the connection as unauthorized (expired/absent session). */
+  onUnauthorized?: () => void;
 }
+
+// WebSocket close code the server uses for an unauthorized upgrade (policy
+// violation). Reconnecting can't fix this, so we stop and surface it instead.
+const WS_UNAUTHORIZED = 1008;
 
 // Resumable WebSocket client. Tracks the highest applied seq as its cursor; on
 // disconnect it reconnects with backoff and the server replays the gap. Also
@@ -62,12 +67,12 @@ export class SessionSocket {
     }
     this.handlers.onStatus(this.cursor > 0 ? 'reconnecting' : 'connecting');
 
+    // No token in the URL: the same-origin session cookie authenticates the
+    // WS upgrade request automatically.
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const token = getToken();
     const url =
       `${proto}://${location.host}/ws?sessionId=${encodeURIComponent(this.sessionId)}` +
-      `&cursor=${this.cursor}` +
-      (token ? `&token=${encodeURIComponent(token)}` : '');
+      `&cursor=${this.cursor}`;
 
     const ws = new WebSocket(url);
     this.ws = ws;
@@ -105,9 +110,17 @@ export class SessionSocket {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (this.closedByUser) {
         this.handlers.onStatus('closed');
+        return;
+      }
+      // An auth rejection won't heal by retrying - stop the loop and tell the
+      // app so it can send the user back to the login screen.
+      if (ev.code === WS_UNAUTHORIZED) {
+        this.closedByUser = true;
+        this.handlers.onStatus('closed');
+        this.handlers.onUnauthorized?.();
         return;
       }
       this.handlers.onStatus('reconnecting');
@@ -118,12 +131,17 @@ export class SessionSocket {
     ws.onerror = () => ws.close();
   }
 
-  private send(msg: ClientMessage): void {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
+  private send(msg: ClientMessage): boolean {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg));
+      return true;
+    }
+    return false;
   }
 
-  prompt(content: PromptContentBlock[]): void {
-    this.send({ type: 'prompt', content });
+  /** Returns false if the socket wasn't open, so the caller can flag failure. */
+  prompt(content: PromptContentBlock[]): boolean {
+    return this.send({ type: 'prompt', content });
   }
   cancel(): void {
     this.send({ type: 'cancel' });

@@ -5,12 +5,18 @@ import { Composer } from '../chat/Composer.js';
 import { ObservabilityPanel } from '../observability/ObservabilityPanel.js';
 import { ModelPicker, AgentPicker } from '../controls/Pickers.js';
 import { ConnDot } from '../common/ConnBanner.js';
+import { Spinner } from '../common/icons.js';
 
 interface Props {
   hasActive: boolean;
   connStatus: ConnStatus;
+  creating: boolean;
+  createError: string | null;
+  onRetryCreate: () => void;
+  onDismissError: () => void;
   onBack: () => void;
   onSend: (text: string) => void;
+  onRetry: (id: string, text: string) => void;
   onCancel: () => void;
   onNew: () => void;
   onChangeModel: (modelId: string) => void;
@@ -21,8 +27,13 @@ interface Props {
 export function ChatPane({
   hasActive,
   connStatus,
+  creating,
+  createError,
+  onRetryCreate,
+  onDismissError,
   onBack,
   onSend,
+  onRetry,
   onCancel,
   onNew,
   onChangeModel,
@@ -49,6 +60,48 @@ export function ChatPane({
     );
   }
 
+  if (creating) {
+    return (
+      <main className="chatpane">
+        <header className="chat-head">
+          <span className="chat-title">New session</span>
+        </header>
+        <div className="chat-blank">
+          <Spinner size={32} className="chat-spinner" />
+          <p className="chat-blank-title">Starting session</p>
+          <p className="chat-blank-sub">
+            Spinning up Kiro and connecting. This can take a few seconds.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  if (createError) {
+    return (
+      <main className="chatpane">
+        <header className="chat-head">
+          <button className="backbtn" onClick={onBack} aria-label="Back to sessions">
+            ‹
+          </button>
+          <span className="chat-title">New session</span>
+        </header>
+        <div className="chat-blank">
+          <p className="chat-blank-title">Couldn't start the session</p>
+          <p className="chat-blank-sub">{createError}</p>
+          <div className="chat-error-actions">
+            <button className="btn-primary" onClick={onRetryCreate}>
+              Try again
+            </button>
+            <button className="btn-ghost" onClick={onDismissError}>
+              Back to sessions
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="chatpane">
       <header className="chat-head">
@@ -61,11 +114,11 @@ export function ChatPane({
         <ConnDot status={connStatus} />
       </header>
 
-      <Transcript />
+      <Transcript onRetry={onRetry} />
 
       {/* Prompt, then a single bar: config on the left, live stats on the right. */}
       <div className="composer-wrap">
-        <Composer onSend={onSend} onCancel={onCancel} />
+        <Composer onSend={onSend} onCancel={onCancel} live={connStatus === 'connected'} />
         <div className="composer-bar">
           <div className="composer-tools">
             <AgentPicker value={currentModeId} onChange={onChangeAgent} />

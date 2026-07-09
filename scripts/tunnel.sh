@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Casper access helper - print the LAN URL, or open a public HTTPS tunnel.
 #
-#   scripts/tunnel.sh          # print the LAN address to open on your phone
+#   scripts/tunnel.sh          # print the LAN address to open in a browser
 #   scripts/tunnel.sh --public # start a cloudflared/ngrok HTTPS tunnel
 set -euo pipefail
 
@@ -34,6 +34,6 @@ echo "Casper is reachable on your LAN at:"
 echo
 echo "    http://${IP:-<your-lan-ip>}:${PORT}"
 echo
-echo "Open that on your phone (same WiFi) and paste your CASPER_TOKEN."
-echo "For access off-WiFi (cellular) or to install as a PWA over HTTPS, run:"
+echo "Open that on any device on the same network and paste your CASPER_TOKEN."
+echo "For access from outside the network or to install as a PWA over HTTPS, run:"
 echo "    scripts/tunnel.sh --public"

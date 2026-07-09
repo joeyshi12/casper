@@ -19,7 +19,7 @@ export default defineConfig({
       manifest: {
         name: 'Casper',
         short_name: 'Casper',
-        description: 'Run long Kiro tasks from your phone',
+        description: 'Web client for kiro-cli over ACP',
         theme_color: '#21262f',
         background_color: '#21262f',
         display: 'standalone',
@@ -31,7 +31,7 @@ export default defineConfig({
         clientsClaim: true,
         skipWaiting: true,
         cleanupOutdatedCaches: true,
-        // The SPA fallback is for client-side routes only — never for real
+        // The SPA fallback is for client-side routes only, never for real
         // files (hashed JS/CSS live under /assets) or the API/WS endpoints.
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/assets\//, /^\/api\//, /^\/ws/, /\.[a-zA-Z0-9]+$/],
@@ -42,7 +42,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 1600, // mermaid + shiki are lazy-loaded, not in the initial bundle
   },
   server: {
-    host: true, // bind 0.0.0.0 so a phone on the LAN can reach the dev server
+    host: true, // bind 0.0.0.0 so other devices on the LAN can reach the dev server
     port: 5173,
     proxy: {
       '/api': { target: SERVER_TARGET, changeOrigin: true },

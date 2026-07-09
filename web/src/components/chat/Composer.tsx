@@ -4,16 +4,18 @@ import { useStore } from '../../state/store.js';
 interface Props {
   onSend: (text: string) => void;
   onCancel: () => void;
+  /** True once the session's socket is connected and ready to accept prompts. */
+  live: boolean;
 }
 
 /** Mobile-first message input. Shows Send when idle, Stop while a turn runs. */
-export function Composer({ onSend, onCancel }: Props) {
+export function Composer({ onSend, onCancel, live }: Props) {
   const [text, setText] = useState('');
   const running = useStore((s) => s.observability.turnStatus === 'running');
 
   const submit = () => {
     const trimmed = text.trim();
-    if (!trimmed || running) return;
+    if (!trimmed || running || !live) return;
     onSend(trimmed);
     setText('');
   };
@@ -26,6 +28,12 @@ export function Composer({ onSend, onCancel }: Props) {
     }
   };
 
+  const placeholder = !live
+    ? 'Connecting…'
+    : running
+      ? 'Casper is working…'
+      : 'Ask Casper to build something…';
+
   return (
     <div className="composer">
       <textarea
@@ -33,7 +41,7 @@ export function Composer({ onSend, onCancel }: Props) {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
-        placeholder={running ? 'Casper is working…' : 'Ask Casper to build something…'}
+        placeholder={placeholder}
         rows={1}
       />
       {running ? (
@@ -44,7 +52,7 @@ export function Composer({ onSend, onCancel }: Props) {
         <button
           className="composer-btn composer-send"
           onClick={submit}
-          disabled={!text.trim()}
+          disabled={!text.trim() || !live}
         >
           Send
         </button>

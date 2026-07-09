@@ -2,7 +2,7 @@
   "name": "casper",
   "version": "0.1.0",
   "private": true,
-  "description": "Casper — mobile-first AI chat over kiro-cli ACP",
+  "description": "Casper: web client for kiro-cli over ACP",
   "workspaces": [
     "shared",
     "server",
