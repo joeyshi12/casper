@@ -55,7 +55,7 @@ On the Linux machine you want to run Casper on, make sure `kiro-cli` is installe
 and logged in (`kiro-cli login`), then run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_ORG/casper/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/joeyshi12/casper/main/scripts/install.sh | bash
 ```
 
 That's it. The installer builds Casper, starts it in the background (and keeps it
