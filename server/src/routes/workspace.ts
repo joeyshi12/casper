@@ -6,6 +6,7 @@ import type { FileEntry, TreeResponse } from '@casper/shared';
 import type { SessionManager } from '../session/SessionManager.js';
 import { config } from '../config.js';
 import { confineToRoot, realConfineToRoot } from '../util/paths.js';
+import { classifyKind } from '../util/filekind.js';
 
 /** Directories to exclude from tree listings. */
 const EXCLUDED_DIRS = new Set([
@@ -27,6 +28,31 @@ const EXCLUDED_DIRS = new Set([
 
 /** Maximum file size for downloads (100 MB). */
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+
+/** Max bytes to hexdump for a binary preview. */
+const HEXDUMP_BYTES = 4096;
+
+/** Render a canonical `hexdump -C` style view of a buffer. */
+function hexdump(buf: Buffer): string {
+  const lines: string[] = [];
+  for (let off = 0; off < buf.length; off += 16) {
+    const slice = buf.subarray(off, off + 16);
+    const hex: string[] = [];
+    let ascii = '';
+    for (let i = 0; i < 16; i++) {
+      if (i < slice.length) {
+        const b = slice[i]!;
+        hex.push(b.toString(16).padStart(2, '0'));
+        ascii += b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : '.';
+      } else {
+        hex.push('  ');
+      }
+      if (i === 7) hex.push('');
+    }
+    lines.push(`${off.toString(16).padStart(8, '0')}  ${hex.join(' ')}  |${ascii}|`);
+  }
+  return lines.join('\n');
+}
 
 /** Infer a MIME type from a file extension. */
 function mimeType(ext: string): string {
@@ -108,8 +134,9 @@ export function registerWorkspaceRoutes(
       const entries: FileEntry[] = [];
       for (const d of dirents) {
         const name = d.name as string;
-        // Skip hidden files and excluded directories.
-        if (name.startsWith('.') && d.isDirectory()) continue;
+        // Skip hidden directories, except .casper so users can see and download
+        // their uploaded files (stored under .casper/uploads/).
+        if (name.startsWith('.') && name !== '.casper' && d.isDirectory()) continue;
         if (d.isDirectory() && EXCLUDED_DIRS.has(name)) continue;
 
         const entryRelative = relative ? `${relative}/${name}` : name;
@@ -268,13 +295,18 @@ export function registerWorkspaceRoutes(
       const ext = path.extname(realTarget).toLowerCase();
       const mime = mimeType(ext);
       const isImage = mime.startsWith('image/');
-      const maxSize = isImage ? 20 * 1024 * 1024 : 1024 * 1024;
+      const kind = classifyKind(realTarget);
 
-      if (stat.size > maxSize) {
-        reply.code(413);
-        return {
-          error: `File too large for preview (${(stat.size / 1024 / 1024).toFixed(1)} MB, max ${isImage ? '20' : '1'} MB)`,
-        };
+      // Binaries are only hexdumped (fixed head), so no size gate for them.
+      // Images cap at 20 MB, text at 1 MB.
+      if (kind !== 'binary') {
+        const maxSize = isImage ? 20 * 1024 * 1024 : 1024 * 1024;
+        if (stat.size > maxSize) {
+          reply.code(413);
+          return {
+            error: `File too large for preview (${(stat.size / 1024 / 1024).toFixed(1)} MB, max ${isImage ? '20' : '1'} MB)`,
+          };
+        }
       }
 
       // For images, stream the binary with Content-Disposition: inline.
@@ -283,6 +315,27 @@ export function registerWorkspaceRoutes(
         reply.header('Content-Disposition', 'inline');
         reply.header('Content-Length', stat.size);
         return reply.send(createReadStream(realTarget));
+      }
+
+      // For binary files, previewing raw bytes as text is useless - return a
+      // hexdump of the first chunk instead so the panel shows something sane.
+      if (kind === 'binary') {
+        let fh: Awaited<ReturnType<typeof fs.open>> | undefined;
+        try {
+          fh = await fs.open(realTarget, 'r');
+          const buf = Buffer.alloc(Math.min(HEXDUMP_BYTES, stat.size));
+          const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+          const dump = hexdump(buf.subarray(0, bytesRead));
+          const header =
+            `Binary file - ${stat.size} bytes\n` +
+            `Showing first ${bytesRead} bytes as hexdump:\n\n`;
+          const body = header + dump + (stat.size > bytesRead ? '\n\n… (truncated)' : '');
+          reply.header('Content-Type', 'text/plain; charset=utf-8');
+          reply.header('Content-Disposition', 'inline');
+          return reply.send(body);
+        } finally {
+          await fh?.close();
+        }
       }
 
       // For text/code files, return as UTF-8 text.

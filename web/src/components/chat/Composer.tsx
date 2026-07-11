@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PromptContentBlock } from '@casper/shared';
+import type { PromptContentBlock, UploadedFile } from '@casper/shared';
 import { useStore } from '../../state/store.js';
+import { api } from '../../api/rest.js';
 
-/** Image MIME types that can be sent as ImageContentBlock. */
+/** Image MIME types that can be inlined as ACP image content blocks. */
 const IMAGE_TYPES = new Set([
   'image/png',
   'image/jpeg',
@@ -11,51 +12,42 @@ const IMAGE_TYPES = new Set([
   'image/svg+xml',
 ]);
 
-/** Max attachment size (10 MB). */
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-
 export interface Attachment {
   id: string;
   file: File;
-  /** Base64-encoded data for images. */
-  data?: string;
-  /** Text content for non-image files. */
-  textContent?: string;
-  /** Whether this is an image attachment. */
+  /** True for images (shown as a thumbnail, inlined as an image block). */
   isImage: boolean;
-  /** Preview URL for image display. */
+  /** Object URL for the thumbnail (images only). */
   previewUrl?: string;
 }
 
 interface Props {
+  /** Active session id - required to upload attachments. */
+  sessionId: string | null;
   onSend: (content: PromptContentBlock[]) => void;
   onCancel: () => void;
   /** True once the session's socket is connected and ready to accept prompts. */
   live: boolean;
 }
 
-/** ChatGPT-style message input with + attach inside, paste support, auto-grow. */
-export function Composer({ onSend, onCancel, live }: Props) {
+/** ChatGPT-style input: + attach inside, paste, auto-grow, upload-on-send. */
+export function Composer({ sessionId, onSend, onCancel, live }: Props) {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const running = useStore((s) => s.observability.turnStatus === 'running');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const readFileAsBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
+  const readFileAsBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        const base64 = result.split(',')[1] ?? '';
-        resolve(base64);
-      };
+      reader.onload = () => resolve((reader.result as string).split(',')[1] ?? '');
       reader.onerror = () => reject(new Error('Failed to read file'));
       reader.readAsDataURL(file);
     });
-  };
 
-  // Auto-resize textarea to fit content.
   const autoResize = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -67,60 +59,114 @@ export function Composer({ onSend, onCancel, live }: Props) {
     autoResize();
   }, [text, autoResize]);
 
-  const addFiles = useCallback(async (files: File[]) => {
-    const newAttachments: Attachment[] = [];
-    for (const file of files) {
-      if (file.size > MAX_ATTACHMENT_BYTES) continue;
-
-      const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const addFiles = useCallback((files: File[]) => {
+    const next: Attachment[] = files.map((file) => {
       const isImage = IMAGE_TYPES.has(file.type);
+      return {
+        id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        file,
+        isImage,
+        previewUrl: isImage ? URL.createObjectURL(file) : undefined,
+      };
+    });
+    setAttachments((prev) => [...prev, ...next]);
+  }, []);
 
-      if (isImage) {
-        const previewUrl = URL.createObjectURL(file);
-        const data = await readFileAsBase64(file);
-        newAttachments.push({ id, file, data, isImage: true, previewUrl });
-      } else {
+  /** Turn upload metadata + local files into ACP content blocks. */
+  const buildContent = async (
+    uploaded: UploadedFile[],
+    atts: Attachment[],
+    typed: string,
+  ): Promise<PromptContentBlock[]> => {
+    const content: PromptContentBlock[] = [];
+
+    // 1. Preamble listing every saved path, with triage for binaries.
+    if (uploaded.length > 0) {
+      const lines = uploaded.map((u) => {
+        if (u.kind === 'binary') {
+          const t = u.triage;
+          const bits = [
+            `- ${u.path} (${u.size} bytes${t?.fileType ? `; ${t.fileType}` : ''})`,
+          ];
+          if (t?.sha256) bits.push(`    sha256: ${t.sha256}`);
+          if (t?.strings?.length) {
+            bits.push(`    strings (sample): ${t.strings.slice(0, 12).join(' | ')}`);
+          }
+          return bits.join('\n');
+        }
+        return `- ${u.path}`;
+      });
+      content.push({
+        type: 'text',
+        text:
+          `I've uploaded ${uploaded.length} file(s) to the workspace. They are saved at:\n` +
+          `${lines.join('\n')}\n\n` +
+          `Text files and images are included below. For other files, read them ` +
+          `from the paths above using your tools.`,
+      });
+    }
+
+    // 2. Inline images (base64) and text-file contents.
+    for (let i = 0; i < uploaded.length; i++) {
+      const u = uploaded[i];
+      const att = atts[i];
+      if (!u) continue;
+      if (u.kind === 'image' && att) {
         try {
-          const textContent = await file.text();
-          newAttachments.push({ id, file, textContent, isImage: false });
+          const data = await readFileAsBase64(att.file);
+          content.push({ type: 'image', data, mimeType: att.file.type });
         } catch {
-          // Skip files that can't be read as text.
+          /* skip unreadable image */
+        }
+      } else if (u.kind === 'text' && att) {
+        try {
+          const body = await att.file.text();
+          content.push({ type: 'text', text: `[File: ${u.path}]\n\`\`\`\n${body}\n\`\`\`` });
+        } catch {
+          /* skip unreadable text */
         }
       }
     }
-    setAttachments((prev) => [...prev, ...newAttachments]);
-  }, []);
+
+    // 3. The user's typed message last.
+    if (typed) content.push({ type: 'text', text: typed });
+    return content;
+  };
 
   const submit = async () => {
     const trimmed = text.trim();
-    if ((!trimmed && attachments.length === 0) || running || !live) return;
+    if ((!trimmed && attachments.length === 0) || running || !live || uploading) return;
 
-    const content: PromptContentBlock[] = [];
+    let uploaded: UploadedFile[] = [];
+    const atts = attachments;
 
-    for (const att of attachments) {
-      if (att.isImage) {
-        const data = att.data ?? (await readFileAsBase64(att.file));
-        content.push({ type: 'image', data, mimeType: att.file.type });
-      } else if (att.textContent != null) {
-        content.push({
-          type: 'text',
-          text: `[File: ${att.file.name}]\n\`\`\`\n${att.textContent}\n\`\`\``,
-        });
+    if (atts.length > 0) {
+      if (!sessionId) {
+        setError('No active session to upload to.');
+        return;
       }
+      setUploading(true);
+      setError(null);
+      try {
+        const res = await api.uploadFiles(sessionId, atts.map((a) => a.file));
+        uploaded = res.files;
+      } catch (err) {
+        setError((err as Error).message);
+        setUploading(false);
+        return;
+      }
+      setUploading(false);
     }
 
-    if (trimmed) {
-      content.push({ type: 'text', text: trimmed });
-    }
+    const content = await buildContent(uploaded, atts, trimmed);
+    if (content.length === 0) return;
 
     onSend(content);
     setText('');
+    atts.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
     setAttachments([]);
-    // Reset height after clearing.
     requestAnimationFrame(() => {
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
     });
   };
 
@@ -131,20 +177,17 @@ export function Composer({ onSend, onCancel, live }: Props) {
     }
   };
 
-  // Handle paste: detect images from clipboard.
   const onPaste = useCallback(
     (e: React.ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items) return;
-
       const imageFiles: File[] = [];
       for (const item of Array.from(items)) {
         if (item.kind === 'file' && IMAGE_TYPES.has(item.type)) {
-          const file = item.getAsFile();
-          if (file) imageFiles.push(file);
+          const f = item.getAsFile();
+          if (f) imageFiles.push(f);
         }
       }
-
       if (imageFiles.length > 0) {
         e.preventDefault();
         addFiles(imageFiles);
@@ -153,14 +196,8 @@ export function Composer({ onSend, onCancel, live }: Props) {
     [addFiles],
   );
 
-  const onAttach = () => {
-    fileInputRef.current?.click();
-  };
-
-  const onFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    await addFiles(Array.from(files));
+  const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) addFiles(Array.from(e.target.files));
     e.target.value = '';
   };
 
@@ -172,16 +209,30 @@ export function Composer({ onSend, onCancel, live }: Props) {
     });
   };
 
+  // Revoke any outstanding object URLs on unmount.
+  useEffect(() => {
+    return () => {
+      setAttachments((prev) => {
+        prev.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+        return prev;
+      });
+    };
+  }, []);
+
   const placeholder = !live
     ? 'Connecting…'
-    : running
-      ? 'Casper is working…'
-      : 'Ask Casper to build something…';
+    : uploading
+      ? 'Uploading…'
+      : running
+        ? 'Casper is working…'
+        : 'Ask Casper to build something…';
 
-  const canSend = (text.trim() || attachments.length > 0) && !running && live;
+  const canSend =
+    (text.trim() || attachments.length > 0) && !running && !uploading && live;
 
   return (
     <div className="composer">
+      {error && <div className="composer-error">{error}</div>}
       {attachments.length > 0 && (
         <div className="composer-attachments">
           {attachments.map((att) => (
@@ -208,8 +259,8 @@ export function Composer({ onSend, onCancel, live }: Props) {
       <div className="composer-input-box">
         <button
           className="composer-plus"
-          onClick={onAttach}
-          disabled={running || !live}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={running || !live || uploading}
           title="Attach file"
           aria-label="Attach file"
         >
@@ -243,12 +294,8 @@ export function Composer({ onSend, onCancel, live }: Props) {
             Stop
           </button>
         ) : (
-          <button
-            className="composer-btn composer-send"
-            onClick={submit}
-            disabled={!canSend}
-          >
-            Send
+          <button className="composer-btn composer-send" onClick={submit} disabled={!canSend}>
+            {uploading ? '…' : 'Send'}
           </button>
         )}
       </div>

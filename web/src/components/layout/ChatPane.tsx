@@ -140,7 +140,12 @@ export function ChatPane({
 
       {/* Prompt, then a single bar: config on the left, live stats on the right. */}
       <div className="composer-wrap">
-        <Composer onSend={onSend} onCancel={onCancel} live={connStatus === 'connected'} />
+        <Composer
+          sessionId={activeId}
+          onSend={onSend}
+          onCancel={onCancel}
+          live={connStatus === 'connected'}
+        />
         <div className="composer-bar">
           <div className="composer-tools">
             <AgentPicker value={currentModeId} onChange={onChangeAgent} />

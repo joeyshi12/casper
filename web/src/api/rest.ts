@@ -8,6 +8,7 @@ import type {
   SessionDetail,
   SessionListResponse,
   TreeResponse,
+  UploadResponse,
 } from '@casper/shared';
 
 // Auth is a server-set httpOnly session cookie, established via POST /api/login
@@ -77,4 +78,20 @@ export const api = {
   /** Get a preview URL for a file (inline display). */
   previewUrl: (id: string, relativePath: string) =>
     `/api/sessions/${id}/preview?path=${encodeURIComponent(relativePath)}`,
+  /** Upload files to a session's workspace (.casper/uploads). */
+  uploadFiles: async (id: string, files: File[]): Promise<UploadResponse> => {
+    const form = new FormData();
+    for (const f of files) form.append('files', f, f.name);
+    const res = await fetch(`/api/sessions/${id}/uploads`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: form,
+    });
+    if (res.status === 401) throw new Error('Unauthorized');
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Upload failed (${res.status}): ${text}`);
+    }
+    return (await res.json()) as UploadResponse;
+  },
 };

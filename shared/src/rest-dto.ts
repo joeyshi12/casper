@@ -170,3 +170,33 @@ export interface TreeResponse {
   relativeTo: string;
   entries: FileEntry[];
 }
+
+// ---------------------------------------------------------------------------
+// File uploads
+// ---------------------------------------------------------------------------
+
+/** How an uploaded file should be surfaced to the agent. */
+export type UploadKind = 'image' | 'text' | 'binary';
+
+/** Metadata for one stored upload (from POST /api/sessions/:id/uploads). */
+export interface UploadedFile {
+  /** Original (sanitized) filename. */
+  name: string;
+  /** Path relative to the session cwd, e.g. .casper/uploads/report.pdf */
+  path: string;
+  /** Size in bytes. */
+  size: number;
+  /** Detected MIME type (best effort). */
+  mimeType: string;
+  kind: UploadKind;
+  /** Best-effort triage for binaries: `file` output, sha256, sample strings. */
+  triage?: {
+    fileType?: string;
+    sha256?: string;
+    strings?: string[];
+  };
+}
+
+export interface UploadResponse {
+  files: UploadedFile[];
+}
