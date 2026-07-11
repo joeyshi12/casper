@@ -20,6 +20,7 @@ export function Transcript({ onRetry }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
 
   useEffect(() => {
     if (stickToBottom.current) {
@@ -30,13 +31,22 @@ export function Transcript({ onRetry }: Props) {
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottom.current = distanceFromBottom < 120;
+    // Show the jump-to-bottom button once the user scrolls up meaningfully.
+    setShowScrollBtn(distanceFromBottom > 240);
+  };
+
+  const scrollToBottom = () => {
+    stickToBottom.current = true;
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   };
 
   const empty =
     items.length === 0 && !streamingText && !streamingThought && pending.length === 0;
 
   return (
+    <div className="transcript-wrap">
     <div className="transcript" ref={scrollRef} onScroll={onScroll}>
       {empty && (
         <div className="transcript-empty">
@@ -101,6 +111,29 @@ export function Transcript({ onRetry }: Props) {
       )}
 
       <div ref={bottomRef} />
+    </div>
+      {showScrollBtn && (
+        <button
+          className="scroll-to-bottom"
+          onClick={scrollToBottom}
+          aria-label="Scroll to latest"
+          title="Scroll to latest"
+        >
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
