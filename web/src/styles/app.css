@@ -1276,32 +1276,85 @@
 .composer {
   padding: 12px var(--gutter) 8px;
 }
-.composer-row {
+.composer-input-box {
   display: flex;
-  gap: 10px;
   align-items: flex-end;
+  gap: 0;
+  background: var(--n1);
+  border: 1px solid var(--n2);
+  border-radius: var(--r-md);
+  padding: 6px 6px 6px 4px;
+  transition: border-color 0.12s;
 }
-.composer-attach {
+.composer-input-box:focus-within {
+  border-color: var(--frost-deep);
+}
+.composer-plus {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 42px;
+  width: 34px;
+  height: 34px;
   flex-shrink: 0;
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
   border: none;
   background: none;
   color: var(--n4);
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
-.composer-attach:hover:not(:disabled) {
-  background: var(--n1);
+.composer-plus:hover:not(:disabled) {
+  background: var(--n2);
   color: var(--n6);
 }
-.composer-attach:disabled {
+.composer-plus:disabled {
   color: var(--n3);
   cursor: not-allowed;
+}
+.composer-input {
+  flex: 1;
+  resize: none;
+  min-height: 34px;
+  max-height: 200px;
+  background: transparent;
+  border: none;
+  padding: 6px 8px;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--n6);
+  outline: none;
+}
+.composer-input::placeholder {
+  color: var(--n3);
+}
+.composer-btn {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 14px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--r-sm);
+  flex-shrink: 0;
+  transition: filter 0.12s;
+}
+.composer-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.composer-btn:active:not(:disabled) {
+  filter: brightness(0.95);
+}
+.composer-send {
+  background: var(--frost);
+  color: var(--n-abyss);
+}
+.composer-send:disabled {
+  background: var(--n2);
+  color: var(--n3);
+  filter: none;
+}
+.composer-stop {
+  background: var(--aurora-red);
+  color: var(--n6);
 }
 .composer-file-input {
   display: none;
@@ -1332,7 +1385,7 @@
   padding: 0 10px;
   border-radius: var(--r-sm);
   border: 1px solid var(--n2);
-  background: var(--n1);
+  background: var(--n0);
   max-width: 140px;
 }
 .composer-att-file-icon {
@@ -1367,49 +1420,6 @@
 }
 .composer-att-remove:hover {
   background: var(--aurora-red);
-}
-.composer-input {
-  flex: 1;
-  resize: none;
-  max-height: 148px;
-  background: var(--n1);
-  border: 1px solid var(--n2);
-  border-radius: var(--r-md);
-  padding: 11px 13px;
-  font-size: 15px;
-  line-height: 1.45;
-}
-.composer-input::placeholder {
-  color: var(--n3);
-}
-.composer-btn {
-  font-family: var(--font-body);
-  font-weight: 600;
-  font-size: 14px;
-  height: 42px;
-  padding: 0 18px;
-  border-radius: var(--r-md);
-  flex-shrink: 0;
-  transition: filter 0.12s;
-}
-.composer-btn:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-.composer-btn:active:not(:disabled) {
-  filter: brightness(0.95);
-}
-.composer-send {
-  background: var(--frost);
-  color: var(--n-abyss);
-}
-.composer-send:disabled {
-  background: var(--n1);
-  color: var(--n3);
-  filter: none;
-}
-.composer-stop {
-  background: var(--aurora-red);
-  color: var(--n6);
 }
 
 /* Gate */

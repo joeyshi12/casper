@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PromptContentBlock } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 
@@ -34,19 +34,19 @@ interface Props {
   live: boolean;
 }
 
-/** Mobile-first message input with image attachment support. */
+/** ChatGPT-style message input with + attach inside, paste support, auto-grow. */
 export function Composer({ onSend, onCancel, live }: Props) {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const running = useStore((s) => s.observability.turnStatus === 'running');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const readFileAsBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
         const result = reader.result as string;
-        // Strip the data:...;base64, prefix
         const base64 = result.split(',')[1] ?? '';
         resolve(base64);
       };
@@ -55,14 +55,48 @@ export function Composer({ onSend, onCancel, live }: Props) {
     });
   };
 
+  // Auto-resize textarea to fit content.
+  const autoResize = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, []);
+
+  useEffect(() => {
+    autoResize();
+  }, [text, autoResize]);
+
+  const addFiles = useCallback(async (files: File[]) => {
+    const newAttachments: Attachment[] = [];
+    for (const file of files) {
+      if (file.size > MAX_ATTACHMENT_BYTES) continue;
+
+      const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const isImage = IMAGE_TYPES.has(file.type);
+
+      if (isImage) {
+        const previewUrl = URL.createObjectURL(file);
+        const data = await readFileAsBase64(file);
+        newAttachments.push({ id, file, data, isImage: true, previewUrl });
+      } else {
+        try {
+          const textContent = await file.text();
+          newAttachments.push({ id, file, textContent, isImage: false });
+        } catch {
+          // Skip files that can't be read as text.
+        }
+      }
+    }
+    setAttachments((prev) => [...prev, ...newAttachments]);
+  }, []);
+
   const submit = async () => {
     const trimmed = text.trim();
     if ((!trimmed && attachments.length === 0) || running || !live) return;
 
-    // Build content blocks.
     const content: PromptContentBlock[] = [];
 
-    // Process attachments.
     for (const att of attachments) {
       if (att.isImage) {
         const data = att.data ?? (await readFileAsBase64(att.file));
@@ -75,7 +109,6 @@ export function Composer({ onSend, onCancel, live }: Props) {
       }
     }
 
-    // Add text block if present.
     if (trimmed) {
       content.push({ type: 'text', text: trimmed });
     }
@@ -83,6 +116,12 @@ export function Composer({ onSend, onCancel, live }: Props) {
     onSend(content);
     setText('');
     setAttachments([]);
+    // Reset height after clearing.
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+    });
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -92,6 +131,28 @@ export function Composer({ onSend, onCancel, live }: Props) {
     }
   };
 
+  // Handle paste: detect images from clipboard.
+  const onPaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const imageFiles: File[] = [];
+      for (const item of Array.from(items)) {
+        if (item.kind === 'file' && IMAGE_TYPES.has(item.type)) {
+          const file = item.getAsFile();
+          if (file) imageFiles.push(file);
+        }
+      }
+
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        addFiles(imageFiles);
+      }
+    },
+    [addFiles],
+  );
+
   const onAttach = () => {
     fileInputRef.current?.click();
   };
@@ -99,30 +160,7 @@ export function Composer({ onSend, onCancel, live }: Props) {
   const onFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-
-    const newAttachments: Attachment[] = [];
-    for (const file of Array.from(files)) {
-      if (file.size > MAX_ATTACHMENT_BYTES) continue;
-
-      const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const isImage = IMAGE_TYPES.has(file.type);
-
-      if (isImage) {
-        const previewUrl = URL.createObjectURL(file);
-        const data = await readFileAsBase64(file);
-        newAttachments.push({ id, file, data, isImage: true, previewUrl });
-      } else {
-        // Read as text.
-        try {
-          const textContent = await file.text();
-          newAttachments.push({ id, file, textContent, isImage: false });
-        } catch {
-          // Skip files that can't be read as text.
-        }
-      }
-    }
-
-    setAttachments((prev) => [...prev, ...newAttachments]);
+    await addFiles(Array.from(files));
     e.target.value = '';
   };
 
@@ -167,9 +205,9 @@ export function Composer({ onSend, onCancel, live }: Props) {
           ))}
         </div>
       )}
-      <div className="composer-row">
+      <div className="composer-input-box">
         <button
-          className="composer-attach"
+          className="composer-plus"
           onClick={onAttach}
           disabled={running || !live}
           title="Attach file"
@@ -181,19 +219,22 @@ export function Composer({ onSend, onCancel, live }: Props) {
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="2.2"
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden
           >
-            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
         </button>
         <textarea
+          ref={textareaRef}
           className="composer-input"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           placeholder={placeholder}
           rows={1}
         />
