@@ -12,6 +12,15 @@ interface FolderState {
   loading: boolean;
 }
 
+interface PreviewState {
+  path: string;
+  name: string;
+  content: string | null;
+  isImage: boolean;
+  loading: boolean;
+  error: string | null;
+}
+
 /** Format bytes into human-readable size. */
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -60,14 +69,23 @@ function fileIcon(name: string): string {
   }
 }
 
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif']);
+
+function isImageFile(name: string): boolean {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  return IMAGE_EXTS.has(ext);
+}
+
 function TreeEntry({
   entry,
   sessionId,
   depth,
+  onPreview,
 }: {
   entry: FileEntry;
   sessionId: string;
   depth: number;
+  onPreview: (entry: FileEntry) => void;
 }) {
   const [folder, setFolder] = useState<FolderState>({
     expanded: false,
@@ -101,11 +119,16 @@ function TreeEntry({
     (e: React.MouseEvent) => {
       e.stopPropagation();
       const url = api.downloadUrl(sessionId, entry.path);
-      // Open in a new tab to trigger the browser download.
       window.open(url, '_blank');
     },
     [sessionId, entry.path],
   );
+
+  const handleClick = useCallback(() => {
+    if (entry.type === 'file') {
+      onPreview(entry);
+    }
+  }, [entry, onPreview]);
 
   const indent = depth * 16;
 
@@ -131,6 +154,7 @@ function TreeEntry({
                 entry={child}
                 sessionId={sessionId}
                 depth={depth + 1}
+                onPreview={onPreview}
               />
             ))}
             {folder.children.length === 0 && (
@@ -151,6 +175,7 @@ function TreeEntry({
     <div
       className="ftree-row ftree-file"
       style={{ paddingLeft: `${indent + 8}px` }}
+      onClick={handleClick}
     >
       <span className="ftree-icon">{fileIcon(entry.name)}</span>
       <span className="ftree-name">{entry.name}</span>
@@ -169,12 +194,63 @@ function TreeEntry({
   );
 }
 
-/** Workspace file tree panel with lazy folder expansion and download buttons. */
+/** File preview panel - shows text content or image inline. */
+function FilePreview({
+  preview,
+  sessionId,
+  onClose,
+}: {
+  preview: PreviewState;
+  sessionId: string;
+  onClose: () => void;
+}) {
+  const download = () => {
+    window.open(api.downloadUrl(sessionId, preview.path), '_blank');
+  };
+
+  return (
+    <div className="ftree-preview">
+      <div className="ftree-preview-header">
+        <button className="ftree-preview-back" onClick={onClose} aria-label="Back to file tree">
+          ‹
+        </button>
+        <span className="ftree-preview-name" title={preview.path}>
+          {preview.name}
+        </span>
+        <button
+          className="ftree-preview-dl"
+          onClick={download}
+          title="Download file"
+          aria-label="Download file"
+        >
+          ⬇
+        </button>
+      </div>
+      <div className="ftree-preview-body">
+        {preview.loading && <div className="ftree-loading">Loading…</div>}
+        {preview.error && <div className="ftree-error">{preview.error}</div>}
+        {!preview.loading && !preview.error && preview.isImage && (
+          <img
+            src={api.previewUrl(sessionId, preview.path)}
+            alt={preview.name}
+            className="ftree-preview-image"
+          />
+        )}
+        {!preview.loading && !preview.error && !preview.isImage && preview.content !== null && (
+          <pre className="ftree-preview-code">{preview.content}</pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Workspace file tree panel with lazy folder expansion, preview, and download. */
 export function FileTree({ sessionId }: FileTreeProps) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [cwd, setCwd] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PreviewState | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -193,6 +269,54 @@ export function FileTree({ sessionId }: FileTreeProps) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const openPreview = useCallback(
+    async (entry: FileEntry) => {
+      const image = isImageFile(entry.name);
+      setPreview({
+        path: entry.path,
+        name: entry.name,
+        content: null,
+        isImage: image,
+        loading: !image, // Images load via <img> src, no fetch needed
+        error: null,
+      });
+
+      // For text files, fetch the content.
+      if (!image) {
+        try {
+          const url = api.previewUrl(sessionId, entry.path);
+          const res = await fetch(url, { credentials: 'same-origin' });
+          if (!res.ok) {
+            const body = await res.text();
+            throw new Error(body || `HTTP ${res.status}`);
+          }
+          const text = await res.text();
+          setPreview((p) =>
+            p && p.path === entry.path ? { ...p, content: text, loading: false } : p,
+          );
+        } catch (err) {
+          setPreview((p) =>
+            p && p.path === entry.path
+              ? { ...p, error: (err as Error).message, loading: false }
+              : p,
+          );
+        }
+      }
+    },
+    [sessionId],
+  );
+
+  const closePreview = useCallback(() => setPreview(null), []);
+
+  // When preview is active, show the preview panel instead of the tree.
+  if (preview) {
+    return (
+      <div className="ftree-panel">
+        <FilePreview preview={preview} sessionId={sessionId} onClose={closePreview} />
+      </div>
+    );
+  }
 
   return (
     <div className="ftree-panel">
@@ -224,6 +348,7 @@ export function FileTree({ sessionId }: FileTreeProps) {
               entry={entry}
               sessionId={sessionId}
               depth={0}
+              onPreview={openPreview}
             />
           ))}
       </div>

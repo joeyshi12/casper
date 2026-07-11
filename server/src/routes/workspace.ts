@@ -204,4 +204,75 @@ export function registerWorkspaceRoutes(
       return reply.send(createReadStream(target));
     },
   );
+
+  /**
+   * GET /api/sessions/:id/preview?path=<relative>
+   *
+   * Returns the file content for inline preview. Text files are returned as
+   * UTF-8 text; images are returned with their MIME type for inline display.
+   * Large files (>1 MB for text, >20 MB for images) are rejected.
+   */
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
+    '/api/sessions/:id/preview',
+    async (req, reply) => {
+      let cwd: string;
+      try {
+        cwd = await manager.getSessionCwd(req.params.id);
+      } catch {
+        reply.code(404);
+        return { error: 'Session not found' };
+      }
+
+      const relative = (req.query.path ?? '').replace(/^\/+/, '');
+      if (!relative) {
+        reply.code(400);
+        return { error: 'path parameter is required' };
+      }
+
+      const target = safePath(cwd, relative);
+      if (!target) {
+        reply.code(400);
+        return { error: 'Invalid path' };
+      }
+
+      let stat: Awaited<ReturnType<typeof fs.stat>>;
+      try {
+        stat = await fs.stat(target);
+      } catch {
+        reply.code(404);
+        return { error: 'File not found' };
+      }
+
+      if (!stat.isFile()) {
+        reply.code(400);
+        return { error: 'Path is not a file' };
+      }
+
+      const ext = path.extname(target).toLowerCase();
+      const mime = mimeType(ext);
+      const isImage = mime.startsWith('image/');
+      const maxSize = isImage ? 20 * 1024 * 1024 : 1024 * 1024;
+
+      if (stat.size > maxSize) {
+        reply.code(413);
+        return {
+          error: `File too large for preview (${(stat.size / 1024 / 1024).toFixed(1)} MB, max ${isImage ? '20' : '1'} MB)`,
+        };
+      }
+
+      // For images, stream the binary with Content-Disposition: inline.
+      if (isImage) {
+        reply.header('Content-Type', mime);
+        reply.header('Content-Disposition', 'inline');
+        reply.header('Content-Length', stat.size);
+        return reply.send(createReadStream(target));
+      }
+
+      // For text/code files, return as UTF-8 text.
+      reply.header('Content-Type', 'text/plain; charset=utf-8');
+      reply.header('Content-Disposition', 'inline');
+      reply.header('Content-Length', stat.size);
+      return reply.send(createReadStream(target));
+    },
+  );
 }

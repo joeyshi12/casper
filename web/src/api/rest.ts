@@ -74,4 +74,7 @@ export const api = {
   /** Trigger a file download from a session's workspace. */
   downloadUrl: (id: string, relativePath: string) =>
     `/api/sessions/${id}/download?path=${encodeURIComponent(relativePath)}`,
+  /** Get a preview URL for a file (inline display). */
+  previewUrl: (id: string, relativePath: string) =>
+    `/api/sessions/${id}/preview?path=${encodeURIComponent(relativePath)}`,
 };
