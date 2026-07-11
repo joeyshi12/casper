@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { PromptContentBlock } from '@casper/shared';
 import { useStore } from './state/store.js';
 import { api, logout } from './api/rest.js';
 import { SessionSocket, type ConnStatus } from './api/SessionSocket.js';
@@ -173,17 +174,24 @@ function Shell({ onLock }: { onLock: () => void }) {
 
   // Send a prompt. The user bubble shows immediately as "sending"; the server's
   // turn_started echo clears it, and a delivery failure flags it for retry.
-  const sendMessage = useCallback((id: string, text: string) => {
+  const sendMessage = useCallback((id: string, content: PromptContentBlock[]) => {
     lastSentRef.current = id;
-    const delivered = socketRef.current?.prompt([{ type: 'text', text }]) ?? false;
+    const delivered = socketRef.current?.prompt(content) ?? false;
     if (!delivered) useStore.getState().markPendingFailed(id);
   }, []);
 
   const send = useCallback(
-    (text: string) => {
+    (content: PromptContentBlock[]) => {
       const id = `pending-${msgSeqRef.current++}`;
-      useStore.getState().addPending(id, text);
-      sendMessage(id, text);
+      // Extract text for the pending message display.
+      const text = content
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n');
+      const hasImages = content.some((b) => b.type === 'image');
+      const displayText = hasImages && !text ? '[image]' : text || '[attachment]';
+      useStore.getState().addPending(id, displayText);
+      sendMessage(id, content);
     },
     [sendMessage],
   );
@@ -195,7 +203,7 @@ function Shell({ onLock }: { onLock: () => void }) {
           p.id === id ? { ...p, status: 'sending' as const } : p,
         ),
       }));
-      sendMessage(id, text);
+      sendMessage(id, [{ type: 'text', text }]);
     },
     [sendMessage],
   );

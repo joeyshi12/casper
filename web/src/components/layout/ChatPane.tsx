@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { PromptContentBlock } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 import type { ConnStatus } from '../../api/SessionSocket.js';
 import { Transcript } from '../chat/Transcript.js';
@@ -17,7 +18,7 @@ interface Props {
   onRetryCreate: () => void;
   onDismissError: () => void;
   onBack: () => void;
-  onSend: (text: string) => void;
+  onSend: (content: PromptContentBlock[]) => void;
   onRetry: (id: string, text: string) => void;
   onCancel: () => void;
   onNew: () => void;
