@@ -11,6 +11,7 @@ import { registerModelRoutes } from './routes/models.js';
 import { registerAgentRoutes } from './routes/agents.js';
 import { registerFsRoutes } from './routes/fs.js';
 import { registerSessionRoutes } from './routes/sessions.js';
+import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerWsGateway } from './ws/gateway.js';
 
@@ -49,6 +50,7 @@ export async function buildApp(): Promise<CasperApp> {
   registerAgentRoutes(app);
   registerFsRoutes(app);
   registerSessionRoutes(app, manager);
+  registerWorkspaceRoutes(app, manager);
   registerWsGateway(app, manager);
 
   // Serve the built web app in production (single origin, no CORS needed).

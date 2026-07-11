@@ -144,3 +144,29 @@ export interface HealthResponse {
   liveSessions: number;
   uptimeMs: number;
 }
+
+// ---------------------------------------------------------------------------
+// Workspace file tree
+// ---------------------------------------------------------------------------
+
+/** A single entry (file or directory) in the workspace tree listing. */
+export interface FileEntry {
+  /** File or directory name. */
+  name: string;
+  /** Path relative to the session's cwd. */
+  path: string;
+  type: 'file' | 'directory';
+  /** Size in bytes (files only). */
+  size?: number;
+  /** ISO timestamp of last modification. */
+  modifiedAt?: string;
+}
+
+/** Response from GET /api/sessions/:id/tree */
+export interface TreeResponse {
+  /** Absolute working directory of the session (for display). */
+  cwd: string;
+  /** The subdirectory that was listed (relative to cwd, empty string = root). */
+  relativeTo: string;
+  entries: FileEntry[];
+}
