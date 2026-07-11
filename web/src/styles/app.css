@@ -1309,6 +1309,11 @@
 .composer {
   padding: 12px var(--gutter) 8px;
 }
+.composer-error {
+  font-size: 12px;
+  color: var(--aurora-red);
+  padding: 0 2px 6px;
+}
 .composer-input-box {
   display: flex;
   align-items: flex-end;

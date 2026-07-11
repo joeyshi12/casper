@@ -72,6 +72,8 @@ export const config = {
   webDist: env('CASPER_WEB_DIST', path.resolve(process.cwd(), '../web/dist')),
   /** Per-session in-memory event ring buffer size. */
   eventBufferSize: envInt('EVENT_BUFFER_SIZE', 5000),
+  /** Max size (bytes) for a single uploaded file. Default 100 MB. */
+  maxUploadBytes: envInt('CASPER_MAX_UPLOAD_BYTES', 100 * 1024 * 1024),
 } as const;
 
 export type Config = typeof config;

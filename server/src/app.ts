@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
+import multipart from '@fastify/multipart';
 import { config } from './config.js';
 import { logger } from './util/logger.js';
 import { SessionManager } from './session/SessionManager.js';
@@ -12,6 +13,7 @@ import { registerAgentRoutes } from './routes/agents.js';
 import { registerFsRoutes } from './routes/fs.js';
 import { registerSessionRoutes } from './routes/sessions.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
+import { registerUploadRoutes } from './routes/uploads.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerWsGateway } from './ws/gateway.js';
 
@@ -43,6 +45,9 @@ export async function buildApp(): Promise<CasperApp> {
   await app.register(websocket, {
     options: { maxPayload: 16 * 1024 * 1024 },
   });
+  await app.register(multipart, {
+    limits: { fileSize: config.maxUploadBytes, files: 20 },
+  });
 
   await registerAuth(app);
   registerHealthRoute(app, manager, startedAt);
@@ -51,6 +56,7 @@ export async function buildApp(): Promise<CasperApp> {
   registerFsRoutes(app);
   registerSessionRoutes(app, manager);
   registerWorkspaceRoutes(app, manager);
+  registerUploadRoutes(app, manager);
   registerWsGateway(app, manager);
 
   // Serve the built web app in production (single origin, no CORS needed).
