@@ -8,6 +8,7 @@ import type {
 } from '@casper/shared';
 import { config } from '../config.js';
 import type { Logger } from '../util/logger.js';
+import { isValidSessionId } from '../util/paths.js';
 
 /**
  * Reads kiro-cli's own on-disk session persistence
@@ -133,6 +134,7 @@ export async function listPersistedSessions(log: Logger): Promise<SessionSummary
 // Delete a session's on-disk files: kiro's <id>.{json,jsonl} and Casper's
 // event mirror. Missing files are ignored.
 export async function deletePersistedSession(sessionId: string): Promise<void> {
+  if (!isValidSessionId(sessionId)) return;
   const targets = [
     path.join(config.kiroSessionsDir, `${sessionId}.json`),
     path.join(config.kiroSessionsDir, `${sessionId}.jsonl`),
@@ -145,6 +147,7 @@ export async function deletePersistedSession(sessionId: string): Promise<void> {
 export async function readPersistedSession(
   sessionId: string,
 ): Promise<SessionSummary | null> {
+  if (!isValidSessionId(sessionId)) return null;
   try {
     const raw = await fs.readFile(
       path.join(config.kiroSessionsDir, `${sessionId}.json`),
@@ -164,6 +167,7 @@ export async function readPersistedSession(
  * (`toolResult`), matched back by toolUseId.
  */
 export async function hydrateTranscript(sessionId: string): Promise<TranscriptItem[]> {
+  if (!isValidSessionId(sessionId)) return [];
   let raw: string;
   try {
     raw = await fs.readFile(

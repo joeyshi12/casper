@@ -1,8 +1,20 @@
 import { buildApp } from './app.js';
 import { config } from './config.js';
 import { logger } from './util/logger.js';
+import { isWithinRoot } from './util/paths.js';
 
 async function main() {
+  // Fail fast on a misconfiguration where the default working directory sits
+  // outside the file-access boundary - otherwise the directory picker and
+  // session creation silently break (403 / throw) for every request.
+  if (!isWithinRoot(config.fileRoot, config.defaultCwd)) {
+    logger.warn(
+      { fileRoot: config.fileRoot, defaultCwd: config.defaultCwd },
+      'DEFAULT_CWD is outside CASPER_FILE_ROOT; new sessions and the directory ' +
+        'picker will be rejected. Set CASPER_FILE_ROOT to an ancestor of DEFAULT_CWD.',
+    );
+  }
+
   const { app, manager } = await buildApp();
 
   await app.listen({ host: config.host, port: config.port });

@@ -56,6 +56,14 @@ export const config = {
   defaultCwd: env('DEFAULT_CWD', process.cwd()),
   maxLiveSessions: envInt('MAX_LIVE_SESSIONS', 6),
   defaultAgent: env('DEFAULT_AGENT', 'kiro_default'),
+  /**
+   * Filesystem root that file-serving endpoints (/api/fs/dirs, /api/fs/image)
+   * are confined to. Requests resolving outside this root are rejected, so an
+   * authenticated user can't read arbitrary system files (e.g. /etc, SSH keys).
+   * Defaults to the user's home directory. Set CASPER_FILE_ROOT to widen or
+   * narrow the boundary.
+   */
+  fileRoot: path.resolve(env('CASPER_FILE_ROOT', home)),
   /** Directory where kiro-cli persists its own session files. */
   kiroSessionsDir: path.join(home, '.kiro', 'sessions', 'cli'),
   /** Casper's own event-buffer mirror directory. */

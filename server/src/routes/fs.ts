@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { DirListing } from '@casper/shared';
 import { config } from '../config.js';
+import { confineToRoot, realConfineToRoot } from '../util/paths.js';
 
 /** Allowed image MIME types for the file serving endpoint. */
 const IMAGE_MIMES: Record<string, string> = {
@@ -21,13 +22,18 @@ const IMAGE_MIMES: Record<string, string> = {
 /** Max image file size (20 MB). */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
+/** Confine a path to the configured file root. */
+function confinedPath(input: string): string | null {
+  return confineToRoot(config.fileRoot, input);
+}
+
 // Suggests directory paths for the New Session working-directory input. Given a
 // partial path, it lists directories in the parent that match the last segment.
-// Relative input is resolved against DEFAULT_CWD.
+// Relative input is resolved against DEFAULT_CWD, and confined to fileRoot.
 export function registerFsRoutes(app: FastifyInstance): void {
   app.get<{ Querystring: { path?: string } }>(
     '/api/fs/dirs',
-    async (req): Promise<DirListing> => {
+    async (req, reply): Promise<DirListing | { error: string }> => {
       const input = (req.query.path ?? '').trim();
       const base = config.defaultCwd;
 
@@ -38,9 +44,23 @@ export function registerFsRoutes(app: FastifyInstance): void {
       const dir = endsWithSep || !input ? resolved : path.dirname(resolved);
       const prefix = endsWithSep || !input ? '' : path.basename(resolved);
 
+      // Confine the directory being listed to fileRoot so this can't be used to
+      // enumerate arbitrary filesystem locations.
+      if (confinedPath(dir) === null) {
+        reply.code(403);
+        return { error: 'Path outside allowed root' };
+      }
+
+      // Symlink-safe: if the dir resolves (through symlinks) outside fileRoot,
+      // or doesn't exist, return no suggestions rather than leaking anything.
+      const realDir = await realConfineToRoot(config.fileRoot, dir);
+      if (!realDir) {
+        return { dir, entries: [] };
+      }
+
       let entries: string[] = [];
       try {
-        const dirents = await fs.readdir(dir, { withFileTypes: true });
+        const dirents = await fs.readdir(realDir, { withFileTypes: true });
         entries = dirents
           .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
           .map((d) => d.name)
@@ -78,8 +98,13 @@ export function registerFsRoutes(app: FastifyInstance): void {
         return { error: 'path must be absolute' };
       }
 
-      // Resolve to prevent traversal tricks (/../).
-      const resolved = path.resolve(filePath);
+      // Resolve and confine to fileRoot so this can't read arbitrary files
+      // (e.g. system files or SSH keys) outside the allowed boundary.
+      const resolved = confinedPath(filePath);
+      if (resolved === null) {
+        reply.code(403);
+        return { error: 'Path outside allowed root' };
+      }
 
       // Validate extension is an image type.
       const ext = path.extname(resolved).toLowerCase();
@@ -89,10 +114,17 @@ export function registerFsRoutes(app: FastifyInstance): void {
         return { error: `Not a supported image type: ${ext}` };
       }
 
+      // Symlink-safe: reject if the real path escapes fileRoot.
+      const real = await realConfineToRoot(config.fileRoot, resolved);
+      if (!real) {
+        reply.code(404);
+        return { error: 'File not found' };
+      }
+
       // Stat the file.
       let stat: Awaited<ReturnType<typeof fs.stat>>;
       try {
-        stat = await fs.stat(resolved);
+        stat = await fs.stat(real);
       } catch {
         reply.code(404);
         return { error: 'File not found' };
@@ -111,7 +143,7 @@ export function registerFsRoutes(app: FastifyInstance): void {
       reply.header('Content-Type', mime);
       reply.header('Content-Length', stat.size);
       reply.header('Cache-Control', 'private, max-age=3600');
-      return reply.send(createReadStream(resolved));
+      return reply.send(createReadStream(real));
     },
   );
 }

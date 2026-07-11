@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import type { Logger } from '../util/logger.js';
+import { isWithinRoot } from '../util/paths.js';
 import { KiroProcess } from './KiroProcess.js';
 import { EventStore } from './EventStore.js';
 import { TurnState } from './TurnState.js';
@@ -32,11 +33,19 @@ import { TitleStore } from './titles.js';
 
 // Resolve a working directory for a new session, normalized to an absolute path
 // (relative input is resolved against DEFAULT_CWD). If the directory doesn't
-// exist it's created; a path that exists but is a file is rejected.
+// exist it's created; a path that exists but is a file is rejected. The result
+// is confined to config.fileRoot so a session's working directory - and thus
+// the workspace file-serving endpoints scoped to it - can't reach arbitrary
+// filesystem locations (e.g. /etc, SSH keys).
 function resolveCwd(input?: string): string {
   const raw = input?.trim();
-  if (!raw) return config.defaultCwd;
-  const abs = path.resolve(config.defaultCwd, raw);
+  const abs = raw ? path.resolve(config.defaultCwd, raw) : config.defaultCwd;
+
+  // Confine to fileRoot. Blocks ../ traversal and out-of-root absolute paths.
+  if (!isWithinRoot(config.fileRoot, abs)) {
+    throw new Error(`Working directory is outside the allowed root: ${abs}`);
+  }
+
   let stat: fs.Stats | undefined;
   try {
     stat = fs.statSync(abs);
@@ -167,6 +176,16 @@ export class SessionManager {
 
     const persisted = await readPersistedSession(sessionId);
     if (!persisted) throw new Error(`Unknown session: ${sessionId}`);
+
+    // Confine the persisted cwd to fileRoot. A session created before this
+    // boundary existed - or one created directly by kiro-cli - could carry an
+    // out-of-root cwd; the workspace endpoints scope file access to it, so an
+    // unbounded cwd would re-open the arbitrary-read hole. Fail closed.
+    if (!isWithinRoot(config.fileRoot, persisted.cwd)) {
+      throw new Error(
+        `Session working directory is outside the allowed root: ${persisted.cwd}`,
+      );
+    }
 
     const store = new EventStore(sessionId, this.log);
     const s = new Session(sessionId, store, persisted.cwd);
