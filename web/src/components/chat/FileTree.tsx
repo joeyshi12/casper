@@ -238,7 +238,7 @@ function TreeEntry({
   );
 }
 
-/** File preview panel - shows text content or image inline. */
+/** File preview modal - shows text content or image in a centered overlay. */
 function FilePreview({
   preview,
   sessionId,
@@ -252,37 +252,57 @@ function FilePreview({
     window.open(api.downloadUrl(sessionId, preview.path), '_blank');
   };
 
+  // Close on backdrop click.
+  const onBackdropClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) onClose();
+  };
+
+  // Close on Escape.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
-    <div className="ftree-preview">
-      <div className="ftree-preview-header">
-        <button className="ftree-preview-back" onClick={onClose} aria-label="Back to file tree">
-          ‹
-        </button>
-        <span className="ftree-preview-name" title={preview.path}>
-          {preview.name}
-        </span>
-        <button
-          className="ftree-preview-dl"
-          onClick={download}
-          title="Download file"
-          aria-label="Download file"
-        >
-          <DownloadIcon size={14} />
-        </button>
-      </div>
-      <div className="ftree-preview-body">
-        {preview.loading && <div className="ftree-loading">Loading…</div>}
-        {preview.error && <div className="ftree-error">{preview.error}</div>}
-        {!preview.loading && !preview.error && preview.isImage && (
-          <img
-            src={api.previewUrl(sessionId, preview.path)}
-            alt={preview.name}
-            className="ftree-preview-image"
-          />
-        )}
-        {!preview.loading && !preview.error && !preview.isImage && preview.content !== null && (
-          <pre className="ftree-preview-code">{preview.content}</pre>
-        )}
+    <div className="fpreview-backdrop" onClick={onBackdropClick}>
+      <div className="fpreview-modal">
+        <div className="fpreview-header">
+          <span className="fpreview-name" title={preview.path}>
+            {preview.name}
+          </span>
+          <button
+            className="fpreview-dl"
+            onClick={download}
+            title="Download file"
+            aria-label="Download file"
+          >
+            <DownloadIcon size={14} />
+          </button>
+          <button
+            className="fpreview-close"
+            onClick={onClose}
+            aria-label="Close preview"
+          >
+            ×
+          </button>
+        </div>
+        <div className="fpreview-body">
+          {preview.loading && <div className="ftree-loading">Loading…</div>}
+          {preview.error && <div className="ftree-error">{preview.error}</div>}
+          {!preview.loading && !preview.error && preview.isImage && (
+            <img
+              src={api.previewUrl(sessionId, preview.path)}
+              alt={preview.name}
+              className="fpreview-image"
+            />
+          )}
+          {!preview.loading && !preview.error && !preview.isImage && preview.content !== null && (
+            <pre className="fpreview-code">{preview.content}</pre>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -353,15 +373,6 @@ export function FileTree({ sessionId }: FileTreeProps) {
 
   const closePreview = useCallback(() => setPreview(null), []);
 
-  // When preview is active, show the preview panel instead of the tree.
-  if (preview) {
-    return (
-      <div className="ftree-panel">
-        <FilePreview preview={preview} sessionId={sessionId} onClose={closePreview} />
-      </div>
-    );
-  }
-
   return (
     <div className="ftree-panel">
       <div className="ftree-header">
@@ -396,6 +407,10 @@ export function FileTree({ sessionId }: FileTreeProps) {
             />
           ))}
       </div>
+
+      {preview && (
+        <FilePreview preview={preview} sessionId={sessionId} onClose={closePreview} />
+      )}
     </div>
   );
 }
