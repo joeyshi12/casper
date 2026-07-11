@@ -11,6 +11,7 @@ import {
   isWithinRoot,
   realConfineToRoot,
 } from '../server/src/util/paths.js';
+import { classifyKind } from '../server/src/util/filekind.js';
 
 let failures = 0;
 function check(cond: unknown, msg: string): void {
@@ -69,6 +70,14 @@ check(isValidSessionId('ec0afd54-d34c-4da8-ac92-051841321930'), 'isValidSessionI
 check(!isValidSessionId('../../etc/passwd'), 'isValidSessionId: traversal rejected');
 check(!isValidSessionId('a/b'), 'isValidSessionId: separator rejected');
 check(!isValidSessionId('.'), 'isValidSessionId: dot rejected');
+
+// Upload classification decides how a file is surfaced to the agent.
+check(classifyKind('photo.PNG') === 'image', 'classifyKind: image by extension (case-insensitive)');
+check(classifyKind('notes.md') === 'text', 'classifyKind: markdown is text');
+check(classifyKind('main.rs') === 'text', 'classifyKind: source code is text');
+check(classifyKind('sample.exe') === 'binary', 'classifyKind: exe is binary');
+check(classifyKind('archive.tar.gz') === 'binary', 'classifyKind: gzip is binary');
+check(classifyKind('noext') === 'binary', 'classifyKind: no extension defaults to binary');
 
 // realConfineToRoot resolves symlinks: a link inside the root pointing out is rejected.
 async function realpathTests(): Promise<void> {

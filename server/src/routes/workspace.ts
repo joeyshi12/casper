@@ -6,7 +6,7 @@ import type { FileEntry, TreeResponse } from '@casper/shared';
 import type { SessionManager } from '../session/SessionManager.js';
 import { config } from '../config.js';
 import { confineToRoot, realConfineToRoot } from '../util/paths.js';
-import { classifyKind } from '../util/filekind.js';
+import { classifyKind, mimeForExt } from '../util/filekind.js';
 
 /** Directories to exclude from tree listings. */
 const EXCLUDED_DIRS = new Set([
@@ -52,39 +52,6 @@ function hexdump(buf: Buffer): string {
     lines.push(`${off.toString(16).padStart(8, '0')}  ${hex.join(' ')}  |${ascii}|`);
   }
   return lines.join('\n');
-}
-
-/** Infer a MIME type from a file extension. */
-function mimeType(ext: string): string {
-  const map: Record<string, string> = {
-    '.html': 'text/html',
-    '.css': 'text/css',
-    '.js': 'application/javascript',
-    '.mjs': 'application/javascript',
-    '.ts': 'text/typescript',
-    '.tsx': 'text/typescript',
-    '.json': 'application/json',
-    '.md': 'text/markdown',
-    '.txt': 'text/plain',
-    '.csv': 'text/csv',
-    '.xml': 'application/xml',
-    '.yaml': 'text/yaml',
-    '.yml': 'text/yaml',
-    '.toml': 'text/plain',
-    '.svg': 'image/svg+xml',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.ico': 'image/x-icon',
-    '.pdf': 'application/pdf',
-    '.zip': 'application/zip',
-    '.tar': 'application/x-tar',
-    '.gz': 'application/gzip',
-    '.wasm': 'application/wasm',
-  };
-  return map[ext.toLowerCase()] ?? 'application/octet-stream';
 }
 
 export function registerWorkspaceRoutes(
@@ -231,7 +198,7 @@ export function registerWorkspaceRoutes(
       // filename; the ASCII fallback strips anything outside a safe set.
       const asciiName = filename.replace(/[^\w.\-]/g, '_');
 
-      reply.header('Content-Type', mimeType(ext));
+      reply.header('Content-Type', mimeForExt(ext));
       reply.header(
         'Content-Disposition',
         `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
@@ -293,7 +260,7 @@ export function registerWorkspaceRoutes(
       }
 
       const ext = path.extname(realTarget).toLowerCase();
-      const mime = mimeType(ext);
+      const mime = mimeForExt(ext);
       const isImage = mime.startsWith('image/');
       const kind = classifyKind(realTarget);
 
