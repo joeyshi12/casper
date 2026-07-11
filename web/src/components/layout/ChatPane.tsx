@@ -131,9 +131,9 @@ export function ChatPane({
       <div className="chat-body">
         <Transcript onRetry={onRetry} />
 
-        {showTree && activeId && (
-          <aside className="ftree-aside">
-            <FileTree sessionId={activeId} />
+        {activeId && (
+          <aside className={`ftree-aside ${showTree ? 'is-open' : ''}`}>
+            {showTree && <FileTree sessionId={activeId} />}
           </aside>
         )}
       </div>

@@ -1541,12 +1541,19 @@
 
 /* File tree side panel (desktop: right column; mobile: overlay). */
 .ftree-aside {
-  width: 280px;
+  width: 0;
   flex-shrink: 0;
-  border-left: 1px solid var(--n1);
-  overflow-y: auto;
+  border-left: 1px solid transparent;
+  overflow: hidden;
   background: var(--n-abyss);
-  animation: ftree-slide-in 0.2s ease;
+  transition: width 0.2s ease, opacity 0.2s ease, border-color 0.2s ease;
+  opacity: 0;
+}
+.ftree-aside.is-open {
+  width: 280px;
+  opacity: 1;
+  border-left-color: var(--n1);
+  overflow-y: auto;
 }
 @media (max-width: 768px) {
   .ftree-aside {
@@ -1554,12 +1561,17 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: 85%;
+    width: 0;
     max-width: 320px;
     z-index: 30;
-    border-left: 1px solid var(--n2);
+    border-left: 1px solid transparent;
+    box-shadow: none;
+    transition: width 0.25s ease, opacity 0.2s ease, box-shadow 0.25s ease, border-color 0.2s ease;
+  }
+  .ftree-aside.is-open {
+    width: 85%;
+    border-left-color: var(--n2);
     box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
-    animation: ftree-slide-in-mobile 0.25s ease;
   }
   .chat-body {
     position: relative;
@@ -1875,24 +1887,5 @@
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-@keyframes ftree-slide-in {
-  from {
-    opacity: 0;
-    width: 0;
-    min-width: 0;
-  }
-  to {
-    opacity: 1;
-    width: 280px;
-  }
-}
-@keyframes ftree-slide-in-mobile {
-  from {
-    transform: translateX(100%);
-  }
-  to {
-    transform: translateX(0);
   }
 }
