@@ -828,6 +828,9 @@
   align-self: flex-start;
   max-width: 100%;
   color: var(--n5);
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 .thinking {
@@ -893,6 +896,20 @@
 }
 
 /* Markdown */
+.md {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.md a {
+  color: var(--frost);
+  text-decoration: underline;
+  text-decoration-color: var(--frost-deep);
+  overflow-wrap: break-word;
+  word-break: break-all;
+}
+.md a:hover {
+  text-decoration-color: var(--frost);
+}
 .md > *:first-child {
   margin-top: 0;
 }
@@ -1131,6 +1148,31 @@
   max-height: 260px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+/* Inline images from tool calls (e.g. charts, screenshots). */
+.toolcall-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--n1);
+}
+.toolcall-image-link {
+  display: block;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  border: 1px solid var(--n2);
+  transition: border-color 0.12s;
+}
+.toolcall-image-link:hover {
+  border-color: var(--frost);
+}
+.toolcall-image {
+  display: block;
+  max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+  background: var(--n0);
 }
 
 /* Observability */

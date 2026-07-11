@@ -12,19 +12,22 @@
   "dependencies": {
     "@casper/shared": "*",
     "@tanstack/react-virtual": "^3.11.2",
+    "katex": "^0.16.47",
     "mermaid": "^11.4.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
+    "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.0",
+    "remark-math": "^6.0.0",
     "shiki": "^1.24.2",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
-    "cross-env": "^7.0.3",
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
+    "cross-env": "^7.0.3",
     "vite": "^6.0.5",
     "vite-plugin-pwa": "^0.21.1"
   }
