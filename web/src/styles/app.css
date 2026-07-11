@@ -1516,6 +1516,35 @@
 .ftree-icon {
   font-size: 14px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+.ftree-icon-svg {
+  color: var(--n4);
+}
+.ftree-icon-folder {
+  color: var(--frost-blue);
+}
+.ftree-icon-code {
+  color: var(--frost);
+}
+.ftree-icon-config {
+  color: var(--aurora-yellow);
+}
+.ftree-icon-text {
+  color: var(--n4);
+}
+.ftree-icon-style {
+  color: var(--aurora-purple);
+}
+.ftree-icon-markup {
+  color: var(--aurora-orange);
+}
+.ftree-icon-image {
+  color: var(--aurora-green);
+}
+.ftree-icon-terminal {
+  color: var(--frost-teal);
 }
 .ftree-name {
   flex: 1;

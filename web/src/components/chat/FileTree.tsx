@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FileEntry } from '@casper/shared';
 import { api } from '../../api/rest.js';
+import {
+  FileIcon,
+  FileCodeIcon,
+  FileConfigIcon,
+  FileTextIcon,
+  FileImageIcon,
+  FileStyleIcon,
+  FileTerminalIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  DownloadIcon,
+  RefreshIcon,
+  Spinner,
+} from '../common/icons.js';
 
 interface FileTreeProps {
   sessionId: string;
@@ -28,8 +42,8 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Get a simple icon character for a file based on extension. */
-function fileIcon(name: string): string {
+/** Get the appropriate icon component for a file based on extension. */
+function FileTypeIcon({ name }: { name: string }) {
   const ext = name.split('.').pop()?.toLowerCase();
   switch (ext) {
     case 'ts':
@@ -37,35 +51,59 @@ function fileIcon(name: string): string {
     case 'js':
     case 'jsx':
     case 'mjs':
-      return '📄';
+    case 'py':
+    case 'rb':
+    case 'go':
+    case 'rs':
+    case 'java':
+    case 'c':
+    case 'cpp':
+    case 'h':
+    case 'hpp':
+    case 'vue':
+    case 'svelte':
+      return <FileCodeIcon size={15} className="ftree-icon-svg ftree-icon-code" />;
     case 'json':
     case 'yaml':
     case 'yml':
     case 'toml':
-      return '⚙️';
+    case 'ini':
+    case 'env':
+    case 'lock':
+      return <FileConfigIcon size={15} className="ftree-icon-svg ftree-icon-config" />;
     case 'md':
     case 'txt':
     case 'rst':
-      return '📝';
+    case 'log':
+    case 'csv':
+      return <FileTextIcon size={15} className="ftree-icon-svg ftree-icon-text" />;
     case 'css':
     case 'scss':
     case 'less':
-      return '🎨';
+    case 'sass':
+      return <FileStyleIcon size={15} className="ftree-icon-svg ftree-icon-style" />;
     case 'html':
     case 'svg':
-      return '🌐';
+    case 'xml':
+      return <FileCodeIcon size={15} className="ftree-icon-svg ftree-icon-markup" />;
     case 'png':
     case 'jpg':
     case 'jpeg':
     case 'gif':
     case 'webp':
-      return '🖼️';
+    case 'bmp':
+    case 'ico':
+    case 'avif':
+      return <FileImageIcon size={15} className="ftree-icon-svg ftree-icon-image" />;
     case 'sh':
     case 'bash':
     case 'zsh':
-      return '⚡';
+    case 'fish':
+    case 'bat':
+    case 'ps1':
+      return <FileTerminalIcon size={15} className="ftree-icon-svg ftree-icon-terminal" />;
     default:
-      return '📄';
+      return <FileIcon size={15} className="ftree-icon-svg" />;
   }
 }
 
@@ -141,9 +179,15 @@ function TreeEntry({
           style={{ paddingLeft: `${indent + 8}px` }}
         >
           <span className="ftree-chevron">
-            {folder.loading ? '⏳' : folder.expanded ? '▾' : '▸'}
+            {folder.loading ? <Spinner size={12} /> : folder.expanded ? '▾' : '▸'}
           </span>
-          <span className="ftree-icon">📁</span>
+          <span className="ftree-icon">
+            {folder.expanded ? (
+              <FolderOpenIcon size={15} className="ftree-icon-svg ftree-icon-folder" />
+            ) : (
+              <FolderIcon size={15} className="ftree-icon-svg ftree-icon-folder" />
+            )}
+          </span>
           <span className="ftree-name">{entry.name}</span>
         </button>
         {folder.expanded && folder.children && (
@@ -177,7 +221,7 @@ function TreeEntry({
       style={{ paddingLeft: `${indent + 8}px` }}
       onClick={handleClick}
     >
-      <span className="ftree-icon">{fileIcon(entry.name)}</span>
+      <span className="ftree-icon"><FileTypeIcon name={entry.name} /></span>
       <span className="ftree-name">{entry.name}</span>
       {entry.size != null && (
         <span className="ftree-size">{formatSize(entry.size)}</span>
@@ -188,7 +232,7 @@ function TreeEntry({
         title={`Download ${entry.name}`}
         aria-label={`Download ${entry.name}`}
       >
-        ⬇
+        <DownloadIcon size={13} />
       </button>
     </div>
   );
@@ -223,7 +267,7 @@ function FilePreview({
           title="Download file"
           aria-label="Download file"
         >
-          ⬇
+          <DownloadIcon size={14} />
         </button>
       </div>
       <div className="ftree-preview-body">
@@ -330,7 +374,7 @@ export function FileTree({ sessionId }: FileTreeProps) {
           title="Refresh file tree"
           aria-label="Refresh file tree"
         >
-          ↻
+          <RefreshIcon size={14} />
         </button>
       </div>
       {cwd && <div className="ftree-cwd" title={cwd}>{cwd}</div>}

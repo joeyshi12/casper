@@ -7,7 +7,7 @@ import { Composer } from '../chat/Composer.js';
 import { ObservabilityPanel } from '../observability/ObservabilityPanel.js';
 import { ModelPicker, AgentPicker } from '../controls/Pickers.js';
 import { ConnDot } from '../common/ConnBanner.js';
-import { Spinner } from '../common/icons.js';
+import { Spinner, FilesIcon } from '../common/icons.js';
 
 interface Props {
   hasActive: boolean;
@@ -123,7 +123,7 @@ export function ChatPane({
           aria-label="Toggle file tree"
           aria-pressed={showTree}
         >
-          📁
+          <FilesIcon size={18} />
         </button>
       </header>
 
