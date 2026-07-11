@@ -4,7 +4,8 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { FileEntry, TreeResponse } from '@casper/shared';
 import type { SessionManager } from '../session/SessionManager.js';
-import { confineToRoot } from '../util/paths.js';
+import { config } from '../config.js';
+import { confineToRoot, realConfineToRoot } from '../util/paths.js';
 
 /** Directories to exclude from tree listings. */
 const EXCLUDED_DIRS = new Set([
@@ -97,9 +98,16 @@ export function registerWorkspaceRoutes(
         return { error: 'Invalid path' };
       }
 
+      // Symlink-safe: reject if the real target escapes fileRoot.
+      const realTarget = await realConfineToRoot(config.fileRoot, target);
+      if (!realTarget) {
+        reply.code(404);
+        return { error: 'Directory not found' };
+      }
+
       let dirents: import('node:fs').Dirent<string>[];
       try {
-        dirents = await fs.readdir(target, { withFileTypes: true, encoding: 'utf8' });
+        dirents = await fs.readdir(realTarget, { withFileTypes: true, encoding: 'utf8' });
       } catch {
         reply.code(404);
         return { error: 'Directory not found' };
@@ -173,9 +181,16 @@ export function registerWorkspaceRoutes(
         return { error: 'Invalid path' };
       }
 
+      // Symlink-safe: reject if the real target escapes fileRoot.
+      const realTarget = await realConfineToRoot(config.fileRoot, target);
+      if (!realTarget) {
+        reply.code(404);
+        return { error: 'File not found' };
+      }
+
       let stat: Awaited<ReturnType<typeof fs.stat>>;
       try {
-        stat = await fs.stat(target);
+        stat = await fs.stat(realTarget);
       } catch {
         reply.code(404);
         return { error: 'File not found' };
@@ -191,14 +206,20 @@ export function registerWorkspaceRoutes(
         return { error: `File too large (${(stat.size / 1024 / 1024).toFixed(1)} MB, max 100 MB)` };
       }
 
-      const ext = path.extname(target);
-      const filename = path.basename(target);
+      const ext = path.extname(realTarget);
+      const filename = path.basename(realTarget);
+      // RFC 5987 encoding avoids header injection from quotes/specials in the
+      // filename; the ASCII fallback strips anything outside a safe set.
+      const asciiName = filename.replace(/[^\w.\-]/g, '_');
 
       reply.header('Content-Type', mimeType(ext));
-      reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+      reply.header(
+        'Content-Disposition',
+        `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      );
       reply.header('Content-Length', stat.size);
 
-      return reply.send(createReadStream(target));
+      return reply.send(createReadStream(realTarget));
     },
   );
 
@@ -232,9 +253,16 @@ export function registerWorkspaceRoutes(
         return { error: 'Invalid path' };
       }
 
+      // Symlink-safe: reject if the real target escapes fileRoot.
+      const realTarget = await realConfineToRoot(config.fileRoot, target);
+      if (!realTarget) {
+        reply.code(404);
+        return { error: 'File not found' };
+      }
+
       let stat: Awaited<ReturnType<typeof fs.stat>>;
       try {
-        stat = await fs.stat(target);
+        stat = await fs.stat(realTarget);
       } catch {
         reply.code(404);
         return { error: 'File not found' };
@@ -245,7 +273,7 @@ export function registerWorkspaceRoutes(
         return { error: 'Path is not a file' };
       }
 
-      const ext = path.extname(target).toLowerCase();
+      const ext = path.extname(realTarget).toLowerCase();
       const mime = mimeType(ext);
       const isImage = mime.startsWith('image/');
       const maxSize = isImage ? 20 * 1024 * 1024 : 1024 * 1024;
@@ -262,14 +290,14 @@ export function registerWorkspaceRoutes(
         reply.header('Content-Type', mime);
         reply.header('Content-Disposition', 'inline');
         reply.header('Content-Length', stat.size);
-        return reply.send(createReadStream(target));
+        return reply.send(createReadStream(realTarget));
       }
 
       // For text/code files, return as UTF-8 text.
       reply.header('Content-Type', 'text/plain; charset=utf-8');
       reply.header('Content-Disposition', 'inline');
       reply.header('Content-Length', stat.size);
-      return reply.send(createReadStream(target));
+      return reply.send(createReadStream(realTarget));
     },
   );
 }

@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { DirListing } from '@casper/shared';
 import { config } from '../config.js';
-import { confineToRoot } from '../util/paths.js';
+import { confineToRoot, realConfineToRoot } from '../util/paths.js';
 
 /** Allowed image MIME types for the file serving endpoint. */
 const IMAGE_MIMES: Record<string, string> = {
@@ -51,9 +51,16 @@ export function registerFsRoutes(app: FastifyInstance): void {
         return { error: 'Path outside allowed root' };
       }
 
+      // Symlink-safe: if the dir resolves (through symlinks) outside fileRoot,
+      // or doesn't exist, return no suggestions rather than leaking anything.
+      const realDir = await realConfineToRoot(config.fileRoot, dir);
+      if (!realDir) {
+        return { dir, entries: [] };
+      }
+
       let entries: string[] = [];
       try {
-        const dirents = await fs.readdir(dir, { withFileTypes: true });
+        const dirents = await fs.readdir(realDir, { withFileTypes: true });
         entries = dirents
           .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
           .map((d) => d.name)
@@ -107,10 +114,17 @@ export function registerFsRoutes(app: FastifyInstance): void {
         return { error: `Not a supported image type: ${ext}` };
       }
 
+      // Symlink-safe: reject if the real path escapes fileRoot.
+      const real = await realConfineToRoot(config.fileRoot, resolved);
+      if (!real) {
+        reply.code(404);
+        return { error: 'File not found' };
+      }
+
       // Stat the file.
       let stat: Awaited<ReturnType<typeof fs.stat>>;
       try {
-        stat = await fs.stat(resolved);
+        stat = await fs.stat(real);
       } catch {
         reply.code(404);
         return { error: 'File not found' };
@@ -129,7 +143,7 @@ export function registerFsRoutes(app: FastifyInstance): void {
       reply.header('Content-Type', mime);
       reply.header('Content-Length', stat.size);
       reply.header('Cache-Control', 'private, max-age=3600');
-      return reply.send(createReadStream(resolved));
+      return reply.send(createReadStream(real));
     },
   );
 }
