@@ -121,7 +121,7 @@ export function registerWorkspaceRoutes(
         if (d.isDirectory() && EXCLUDED_DIRS.has(name)) continue;
 
         const entryRelative = relative ? `${relative}/${name}` : name;
-        const entryAbsolute = path.join(target, name);
+        const entryAbsolute = path.join(realTarget, name);
 
         if (d.isDirectory()) {
           entries.push({ name, path: entryRelative, type: 'directory' });

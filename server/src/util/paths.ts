@@ -66,5 +66,5 @@ export async function realConfineToRoot(
  * character set so it can never traverse out of the sessions directory.
  */
 export function isValidSessionId(id: string): boolean {
-  return /^[A-Za-z0-9._-]+$/.test(id) && !id.includes('..');
+  return /^[A-Za-z0-9._-]+$/.test(id) && id !== '.' && !id.includes('..');
 }
