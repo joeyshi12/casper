@@ -21,13 +21,27 @@ const IMAGE_MIMES: Record<string, string> = {
 /** Max image file size (20 MB). */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
+/**
+ * Resolve a path and confine it to config.fileRoot. Returns the absolute
+ * resolved path, or null if it escapes the root (blocks ../ traversal and
+ * absolute paths outside the boundary).
+ */
+function confinedPath(input: string): string | null {
+  const root = config.fileRoot;
+  const resolved = path.resolve(root, input);
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    return null;
+  }
+  return resolved;
+}
+
 // Suggests directory paths for the New Session working-directory input. Given a
 // partial path, it lists directories in the parent that match the last segment.
-// Relative input is resolved against DEFAULT_CWD.
+// Relative input is resolved against DEFAULT_CWD, and confined to fileRoot.
 export function registerFsRoutes(app: FastifyInstance): void {
   app.get<{ Querystring: { path?: string } }>(
     '/api/fs/dirs',
-    async (req): Promise<DirListing> => {
+    async (req, reply): Promise<DirListing | { error: string }> => {
       const input = (req.query.path ?? '').trim();
       const base = config.defaultCwd;
 
@@ -37,6 +51,13 @@ export function registerFsRoutes(app: FastifyInstance): void {
       const resolved = input ? path.resolve(base, input) : base;
       const dir = endsWithSep || !input ? resolved : path.dirname(resolved);
       const prefix = endsWithSep || !input ? '' : path.basename(resolved);
+
+      // Confine the directory being listed to fileRoot so this can't be used to
+      // enumerate arbitrary filesystem locations.
+      if (confinedPath(dir) === null) {
+        reply.code(403);
+        return { error: 'Path outside allowed root' };
+      }
 
       let entries: string[] = [];
       try {
@@ -78,8 +99,13 @@ export function registerFsRoutes(app: FastifyInstance): void {
         return { error: 'path must be absolute' };
       }
 
-      // Resolve to prevent traversal tricks (/../).
-      const resolved = path.resolve(filePath);
+      // Resolve and confine to fileRoot so this can't read arbitrary files
+      // (e.g. system files or SSH keys) outside the allowed boundary.
+      const resolved = confinedPath(filePath);
+      if (resolved === null) {
+        reply.code(403);
+        return { error: 'Path outside allowed root' };
+      }
 
       // Validate extension is an image type.
       const ext = path.extname(resolved).toLowerCase();
