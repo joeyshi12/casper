@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { DirListing } from '@casper/shared';
 import { config } from '../config.js';
+import { confineToRoot } from '../util/paths.js';
 
 /** Allowed image MIME types for the file serving endpoint. */
 const IMAGE_MIMES: Record<string, string> = {
@@ -21,18 +22,9 @@ const IMAGE_MIMES: Record<string, string> = {
 /** Max image file size (20 MB). */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
-/**
- * Resolve a path and confine it to config.fileRoot. Returns the absolute
- * resolved path, or null if it escapes the root (blocks ../ traversal and
- * absolute paths outside the boundary).
- */
+/** Confine a path to the configured file root. */
 function confinedPath(input: string): string | null {
-  const root = config.fileRoot;
-  const resolved = path.resolve(root, input);
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
-    return null;
-  }
-  return resolved;
+  return confineToRoot(config.fileRoot, input);
 }
 
 // Suggests directory paths for the New Session working-directory input. Given a

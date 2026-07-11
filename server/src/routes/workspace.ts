@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { FileEntry, TreeResponse } from '@casper/shared';
 import type { SessionManager } from '../session/SessionManager.js';
+import { confineToRoot } from '../util/paths.js';
 
 /** Directories to exclude from tree listings. */
 const EXCLUDED_DIRS = new Set([
@@ -27,15 +28,11 @@ const EXCLUDED_DIRS = new Set([
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 
 /**
- * Resolves a relative path within a root directory and validates it doesn't
+ * Resolves a relative path within the session cwd and validates it doesn't
  * escape. Returns the absolute resolved path or null if traversal detected.
  */
 function safePath(root: string, relative: string): string | null {
-  const resolved = path.resolve(root, relative);
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
-    return null;
-  }
-  return resolved;
+  return confineToRoot(root, relative);
 }
 
 /** Infer a MIME type from a file extension. */

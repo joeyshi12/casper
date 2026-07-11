@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import type { Logger } from '../util/logger.js';
+import { isWithinRoot } from '../util/paths.js';
 import { KiroProcess } from './KiroProcess.js';
 import { EventStore } from './EventStore.js';
 import { TurnState } from './TurnState.js';
@@ -41,8 +42,7 @@ function resolveCwd(input?: string): string {
   const abs = raw ? path.resolve(config.defaultCwd, raw) : config.defaultCwd;
 
   // Confine to fileRoot. Blocks ../ traversal and out-of-root absolute paths.
-  const root = config.fileRoot;
-  if (abs !== root && !abs.startsWith(root + path.sep)) {
+  if (!isWithinRoot(config.fileRoot, abs)) {
     throw new Error(`Working directory is outside the allowed root: ${abs}`);
   }
 
@@ -176,6 +176,16 @@ export class SessionManager {
 
     const persisted = await readPersistedSession(sessionId);
     if (!persisted) throw new Error(`Unknown session: ${sessionId}`);
+
+    // Confine the persisted cwd to fileRoot. A session created before this
+    // boundary existed - or one created directly by kiro-cli - could carry an
+    // out-of-root cwd; the workspace endpoints scope file access to it, so an
+    // unbounded cwd would re-open the arbitrary-read hole. Fail closed.
+    if (!isWithinRoot(config.fileRoot, persisted.cwd)) {
+      throw new Error(
+        `Session working directory is outside the allowed root: ${persisted.cwd}`,
+      );
+    }
 
     const store = new EventStore(sessionId, this.log);
     const s = new Session(sessionId, store, persisted.cwd);
