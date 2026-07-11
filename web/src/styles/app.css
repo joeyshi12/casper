@@ -1324,6 +1324,29 @@
   border-radius: var(--r-sm);
   border: 1px solid var(--n2);
 }
+.composer-att-file {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 56px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--n2);
+  background: var(--n1);
+  max-width: 140px;
+}
+.composer-att-file-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.composer-att-file-name {
+  font-size: 11px;
+  color: var(--n5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
 .composer-att-remove {
   position: absolute;
   top: -4px;
@@ -1523,6 +1546,7 @@
   border-left: 1px solid var(--n1);
   overflow-y: auto;
   background: var(--n-abyss);
+  animation: ftree-slide-in 0.2s ease;
 }
 @media (max-width: 768px) {
   .ftree-aside {
@@ -1535,6 +1559,7 @@
     z-index: 30;
     border-left: 1px solid var(--n2);
     box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
+    animation: ftree-slide-in-mobile 0.25s ease;
   }
   .chat-body {
     position: relative;
@@ -1850,5 +1875,24 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+@keyframes ftree-slide-in {
+  from {
+    opacity: 0;
+    width: 0;
+    min-width: 0;
+  }
+  to {
+    opacity: 1;
+    width: 280px;
+  }
+}
+@keyframes ftree-slide-in-mobile {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
   }
 }

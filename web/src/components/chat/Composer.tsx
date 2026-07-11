@@ -2,8 +2,8 @@ import { useRef, useState } from 'react';
 import type { PromptContentBlock } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 
-/** Allowed image MIME types for attachments. */
-const ALLOWED_IMAGE_TYPES = new Set([
+/** Image MIME types that can be sent as ImageContentBlock. */
+const IMAGE_TYPES = new Set([
   'image/png',
   'image/jpeg',
   'image/gif',
@@ -17,10 +17,14 @@ const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export interface Attachment {
   id: string;
   file: File;
-  /** Base64-encoded data (populated after reading). */
+  /** Base64-encoded data for images. */
   data?: string;
-  /** Preview URL for display. */
-  previewUrl: string;
+  /** Text content for non-image files. */
+  textContent?: string;
+  /** Whether this is an image attachment. */
+  isImage: boolean;
+  /** Preview URL for image display. */
+  previewUrl?: string;
 }
 
 interface Props {
@@ -58,10 +62,17 @@ export function Composer({ onSend, onCancel, live }: Props) {
     // Build content blocks.
     const content: PromptContentBlock[] = [];
 
-    // Read attachments as base64.
+    // Process attachments.
     for (const att of attachments) {
-      const data = att.data ?? (await readFileAsBase64(att.file));
-      content.push({ type: 'image', data, mimeType: att.file.type });
+      if (att.isImage) {
+        const data = att.data ?? (await readFileAsBase64(att.file));
+        content.push({ type: 'image', data, mimeType: att.file.type });
+      } else if (att.textContent != null) {
+        content.push({
+          type: 'text',
+          text: `[File: ${att.file.name}]\n\`\`\`\n${att.textContent}\n\`\`\``,
+        });
+      }
     }
 
     // Add text block if present.
@@ -91,28 +102,34 @@ export function Composer({ onSend, onCancel, live }: Props) {
 
     const newAttachments: Attachment[] = [];
     for (const file of Array.from(files)) {
-      if (!ALLOWED_IMAGE_TYPES.has(file.type)) continue;
       if (file.size > MAX_ATTACHMENT_BYTES) continue;
 
-      const previewUrl = URL.createObjectURL(file);
-      const data = await readFileAsBase64(file);
-      newAttachments.push({
-        id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        file,
-        data,
-        previewUrl,
-      });
+      const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const isImage = IMAGE_TYPES.has(file.type);
+
+      if (isImage) {
+        const previewUrl = URL.createObjectURL(file);
+        const data = await readFileAsBase64(file);
+        newAttachments.push({ id, file, data, isImage: true, previewUrl });
+      } else {
+        // Read as text.
+        try {
+          const textContent = await file.text();
+          newAttachments.push({ id, file, textContent, isImage: false });
+        } catch {
+          // Skip files that can't be read as text.
+        }
+      }
     }
 
     setAttachments((prev) => [...prev, ...newAttachments]);
-    // Reset the input so the same file can be attached again.
     e.target.value = '';
   };
 
   const removeAttachment = (id: string) => {
     setAttachments((prev) => {
       const att = prev.find((a) => a.id === id);
-      if (att) URL.revokeObjectURL(att.previewUrl);
+      if (att?.previewUrl) URL.revokeObjectURL(att.previewUrl);
       return prev.filter((a) => a.id !== id);
     });
   };
@@ -131,7 +148,14 @@ export function Composer({ onSend, onCancel, live }: Props) {
         <div className="composer-attachments">
           {attachments.map((att) => (
             <div key={att.id} className="composer-att">
-              <img src={att.previewUrl} alt={att.file.name} className="composer-att-img" />
+              {att.isImage && att.previewUrl ? (
+                <img src={att.previewUrl} alt={att.file.name} className="composer-att-img" />
+              ) : (
+                <div className="composer-att-file" title={att.file.name}>
+                  <span className="composer-att-file-icon">📄</span>
+                  <span className="composer-att-file-name">{att.file.name}</span>
+                </div>
+              )}
               <button
                 className="composer-att-remove"
                 onClick={() => removeAttachment(att.id)}
@@ -148,8 +172,8 @@ export function Composer({ onSend, onCancel, live }: Props) {
           className="composer-attach"
           onClick={onAttach}
           disabled={running || !live}
-          title="Attach image"
-          aria-label="Attach image"
+          title="Attach file"
+          aria-label="Attach file"
         >
           <svg
             width="18"
@@ -190,7 +214,6 @@ export function Composer({ onSend, onCancel, live }: Props) {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
         multiple
         onChange={onFileSelect}
         className="composer-file-input"
