@@ -32,11 +32,20 @@ import { TitleStore } from './titles.js';
 
 // Resolve a working directory for a new session, normalized to an absolute path
 // (relative input is resolved against DEFAULT_CWD). If the directory doesn't
-// exist it's created; a path that exists but is a file is rejected.
+// exist it's created; a path that exists but is a file is rejected. The result
+// is confined to config.fileRoot so a session's working directory - and thus
+// the workspace file-serving endpoints scoped to it - can't reach arbitrary
+// filesystem locations (e.g. /etc, SSH keys).
 function resolveCwd(input?: string): string {
   const raw = input?.trim();
-  if (!raw) return config.defaultCwd;
-  const abs = path.resolve(config.defaultCwd, raw);
+  const abs = raw ? path.resolve(config.defaultCwd, raw) : config.defaultCwd;
+
+  // Confine to fileRoot. Blocks ../ traversal and out-of-root absolute paths.
+  const root = config.fileRoot;
+  if (abs !== root && !abs.startsWith(root + path.sep)) {
+    throw new Error(`Working directory is outside the allowed root: ${abs}`);
+  }
+
   let stat: fs.Stats | undefined;
   try {
     stat = fs.statSync(abs);
