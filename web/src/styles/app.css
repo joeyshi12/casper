@@ -758,6 +758,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--gutter);
   display: flex;
   flex-direction: column;
@@ -899,6 +900,13 @@
 .md {
   overflow-wrap: break-word;
   word-break: break-word;
+  min-width: 0;
+  max-width: 100%;
+}
+.md .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 0;
 }
 .md a {
   color: var(--frost);
@@ -967,6 +975,8 @@
   width: 100%;
   margin: 12px 0;
   font-size: 13px;
+  display: block;
+  overflow-x: auto;
 }
 .md th,
 .md td {
