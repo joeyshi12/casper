@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FileEntry } from '@casper/shared';
+import type { Highlighter } from 'shiki';
 import { api } from '../../api/rest.js';
 import {
   FileIcon,
@@ -30,6 +31,7 @@ interface PreviewState {
   path: string;
   name: string;
   content: string | null;
+  highlightedHtml: string | null;
   isImage: boolean;
   loading: boolean;
   error: string | null;
@@ -112,6 +114,54 @@ const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', '
 function isImageFile(name: string): boolean {
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
   return IMAGE_EXTS.has(ext);
+}
+
+/** Map file extension to shiki language id. */
+const EXT_TO_LANG: Record<string, string> = {
+  ts: 'typescript',
+  tsx: 'tsx',
+  js: 'javascript',
+  jsx: 'jsx',
+  mjs: 'javascript',
+  json: 'json',
+  yaml: 'yaml',
+  yml: 'yaml',
+  md: 'markdown',
+  html: 'html',
+  css: 'css',
+  scss: 'css',
+  py: 'python',
+  rs: 'rust',
+  go: 'go',
+  java: 'java',
+  sh: 'bash',
+  bash: 'bash',
+  zsh: 'bash',
+  sql: 'sql',
+  diff: 'diff',
+};
+
+function langFromFilename(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  return EXT_TO_LANG[ext] ?? '';
+}
+
+/** Lazy-load a shared Shiki highlighter. */
+let highlighterPromise: Promise<Highlighter> | null = null;
+function getHighlighter(): Promise<Highlighter> {
+  if (!highlighterPromise) {
+    highlighterPromise = import('shiki').then((shiki) =>
+      shiki.createHighlighter({
+        themes: ['aurora-x'],
+        langs: [
+          'typescript', 'javascript', 'tsx', 'jsx', 'json', 'bash',
+          'python', 'rust', 'go', 'java', 'yaml', 'markdown', 'html',
+          'css', 'sql', 'diff',
+        ],
+      }),
+    );
+  }
+  return highlighterPromise;
 }
 
 function TreeEntry({
@@ -299,7 +349,13 @@ function FilePreview({
               className="fpreview-image"
             />
           )}
-          {!preview.loading && !preview.error && !preview.isImage && preview.content !== null && (
+          {!preview.loading && !preview.error && !preview.isImage && preview.highlightedHtml && (
+            <div
+              className="fpreview-highlighted"
+              dangerouslySetInnerHTML={{ __html: preview.highlightedHtml }}
+            />
+          )}
+          {!preview.loading && !preview.error && !preview.isImage && !preview.highlightedHtml && preview.content !== null && (
             <pre className="fpreview-code">{preview.content}</pre>
           )}
         </div>
@@ -341,12 +397,13 @@ export function FileTree({ sessionId }: FileTreeProps) {
         path: entry.path,
         name: entry.name,
         content: null,
+        highlightedHtml: null,
         isImage: image,
         loading: !image, // Images load via <img> src, no fetch needed
         error: null,
       });
 
-      // For text files, fetch the content.
+      // For text files, fetch the content and highlight it.
       if (!image) {
         try {
           const url = api.previewUrl(sessionId, entry.path);
@@ -356,8 +413,26 @@ export function FileTree({ sessionId }: FileTreeProps) {
             throw new Error(body || `HTTP ${res.status}`);
           }
           const text = await res.text();
+
+          // Attempt syntax highlighting.
+          let html: string | null = null;
+          const lang = langFromFilename(entry.name);
+          if (lang) {
+            try {
+              const hl = await getHighlighter();
+              const supported = hl.getLoadedLanguages().includes(lang as never);
+              if (supported) {
+                html = hl.codeToHtml(text, { lang, theme: 'aurora-x' });
+              }
+            } catch {
+              // Fall back to plain text.
+            }
+          }
+
           setPreview((p) =>
-            p && p.path === entry.path ? { ...p, content: text, loading: false } : p,
+            p && p.path === entry.path
+              ? { ...p, content: text, highlightedHtml: html, loading: false }
+              : p,
           );
         } catch (err) {
           setPreview((p) =>

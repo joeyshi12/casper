@@ -1775,6 +1775,18 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+.fpreview-highlighted pre,
+.fpreview-highlighted .shiki {
+  margin: 0;
+  padding: 0;
+  background: transparent !important;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.fpreview-highlighted code {
+  font-family: var(--font-mono);
+}
 @media (max-width: 768px) {
   .fpreview-backdrop {
     padding: 12px;
