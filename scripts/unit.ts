@@ -1,7 +1,16 @@
 // Unit checks for the pure fold logic (no processes or network).
 // Run with: npm test
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { CasperEventPayload } from '@casper/shared';
 import { TurnState } from '../server/src/session/TurnState.js';
+import {
+  confineToRoot,
+  isValidSessionId,
+  isWithinRoot,
+  realConfineToRoot,
+} from '../server/src/util/paths.js';
 
 let failures = 0;
 function check(cond: unknown, msg: string): void {
@@ -48,8 +57,41 @@ ts2.seed(1.5, 40);
 check(ts2.get().creditsSpent === 1.5, 'seed sets cumulative credits on resume');
 check(ts2.get().contextUsagePercentage === 40, 'seed sets context usage on resume');
 
-if (failures > 0) {
-  console.error(`\n❌ ${failures} unit check(s) failed.`);
-  process.exit(1);
+// Path confinement (security-critical: bounds all file-serving endpoints).
+check(isWithinRoot('/home/joey', '/home/joey/a/b'), 'isWithinRoot: nested path allowed');
+check(isWithinRoot('/home/joey', '/home/joey'), 'isWithinRoot: root itself allowed');
+check(!isWithinRoot('/home/joey', '/home/joeyx/x'), 'isWithinRoot: prefix-match blocked');
+check(isWithinRoot('/', '/etc/passwd'), 'isWithinRoot: fs root contains everything');
+check(confineToRoot('/home/joey', 'a/b') === '/home/joey/a/b', 'confineToRoot: relative resolved');
+check(confineToRoot('/home/joey', '../etc') === null, 'confineToRoot: traversal blocked');
+check(confineToRoot('/home/joey', '/etc/passwd') === null, 'confineToRoot: out-of-root absolute blocked');
+check(isValidSessionId('ec0afd54-d34c-4da8-ac92-051841321930'), 'isValidSessionId: uuid accepted');
+check(!isValidSessionId('../../etc/passwd'), 'isValidSessionId: traversal rejected');
+check(!isValidSessionId('a/b'), 'isValidSessionId: separator rejected');
+check(!isValidSessionId('.'), 'isValidSessionId: dot rejected');
+
+// realConfineToRoot resolves symlinks: a link inside the root pointing out is rejected.
+async function realpathTests(): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-root-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-out-'));
+  try {
+    fs.writeFileSync(path.join(outside, 'secret.txt'), 'SECRET');
+    fs.writeFileSync(path.join(root, 'ok.txt'), 'ok');
+    fs.symlinkSync(outside, path.join(root, 'escape'));
+    const escaped = await realConfineToRoot(root, path.join(root, 'escape', 'secret.txt'));
+    check(escaped === null, 'realConfineToRoot: symlink escaping root rejected');
+    const inRoot = await realConfineToRoot(root, path.join(root, 'ok.txt'));
+    check(inRoot !== null, 'realConfineToRoot: in-root file allowed');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
 }
-console.log('\n🎉 Unit checks passed.');
+
+void realpathTests().then(() => {
+  if (failures > 0) {
+    console.error(`\n❌ ${failures} unit check(s) failed.`);
+    process.exit(1);
+  }
+  console.log('\n🎉 Unit checks passed.');
+});

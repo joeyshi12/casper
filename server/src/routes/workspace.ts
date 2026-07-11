@@ -28,14 +28,6 @@ const EXCLUDED_DIRS = new Set([
 /** Maximum file size for downloads (100 MB). */
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 
-/**
- * Resolves a relative path within the session cwd and validates it doesn't
- * escape. Returns the absolute resolved path or null if traversal detected.
- */
-function safePath(root: string, relative: string): string | null {
-  return confineToRoot(root, relative);
-}
-
 /** Infer a MIME type from a file extension. */
 function mimeType(ext: string): string {
   const map: Record<string, string> = {
@@ -92,7 +84,7 @@ export function registerWorkspaceRoutes(
       }
 
       const relative = (req.query.path ?? '').replace(/^\/+/, '');
-      const target = safePath(cwd, relative);
+      const target = confineToRoot(cwd, relative);
       if (!target) {
         reply.code(400);
         return { error: 'Invalid path' };
@@ -175,7 +167,7 @@ export function registerWorkspaceRoutes(
         return { error: 'path parameter is required' };
       }
 
-      const target = safePath(cwd, relative);
+      const target = confineToRoot(cwd, relative);
       if (!target) {
         reply.code(400);
         return { error: 'Invalid path' };
@@ -247,7 +239,7 @@ export function registerWorkspaceRoutes(
         return { error: 'path parameter is required' };
       }
 
-      const target = safePath(cwd, relative);
+      const target = confineToRoot(cwd, relative);
       if (!target) {
         reply.code(400);
         return { error: 'Invalid path' };
