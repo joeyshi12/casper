@@ -6,7 +6,7 @@ import type { FileEntry, TreeResponse } from '@casper/shared';
 import type { SessionManager } from '../session/SessionManager.js';
 import { config } from '../config.js';
 import { confineToRoot, realConfineToRoot } from '../util/paths.js';
-import { classifyKind, mimeForExt } from '../util/filekind.js';
+import { classifyKind, mimeForExt, looksBinary } from '../util/filekind.js';
 
 /** Directories to exclude from tree listings. */
 const EXCLUDED_DIRS = new Set([
@@ -31,6 +31,17 @@ const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 
 /** Max bytes to hexdump for a binary preview. */
 const HEXDUMP_BYTES = 4096;
+
+/** Preview size caps: text/code at 1 MB, images at 20 MB. */
+const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024;
+const MAX_IMAGE_PREVIEW_BYTES = 20 * 1024 * 1024;
+
+/** 413 body for an over-cap preview. */
+function tooLargeForPreview(size: number, maxBytes: number): { error: string } {
+  return {
+    error: `File too large for preview (${(size / 1024 / 1024).toFixed(1)} MB, max ${maxBytes / 1024 / 1024} MB)`,
+  };
+}
 
 /** Render a canonical `hexdump -C` style view of a buffer. */
 function hexdump(buf: Buffer): string {
@@ -267,12 +278,10 @@ export function registerWorkspaceRoutes(
       // Binaries are only hexdumped (fixed head), so no size gate for them.
       // Images cap at 20 MB, text at 1 MB.
       if (kind !== 'binary') {
-        const maxSize = isImage ? 20 * 1024 * 1024 : 1024 * 1024;
+        const maxSize = isImage ? MAX_IMAGE_PREVIEW_BYTES : MAX_TEXT_PREVIEW_BYTES;
         if (stat.size > maxSize) {
           reply.code(413);
-          return {
-            error: `File too large for preview (${(stat.size / 1024 / 1024).toFixed(1)} MB, max ${isImage ? '20' : '1'} MB)`,
-          };
+          return tooLargeForPreview(stat.size, maxSize);
         }
       }
 
@@ -286,13 +295,28 @@ export function registerWorkspaceRoutes(
 
       // For binary files, previewing raw bytes as text is useless - return a
       // hexdump of the first chunk instead so the panel shows something sane.
+      // But the extension allowlist can't recognise dotfiles or extensionless
+      // files, so sniff the sampled bytes first: text is served as text.
       if (kind === 'binary') {
         let fh: Awaited<ReturnType<typeof fs.open>> | undefined;
         try {
           fh = await fs.open(realTarget, 'r');
           const buf = Buffer.alloc(Math.min(HEXDUMP_BYTES, stat.size));
           const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
-          const dump = hexdump(buf.subarray(0, bytesRead));
+          const head = buf.subarray(0, bytesRead);
+
+          if (!looksBinary(head)) {
+            if (stat.size > MAX_TEXT_PREVIEW_BYTES) {
+              reply.code(413);
+              return tooLargeForPreview(stat.size, MAX_TEXT_PREVIEW_BYTES);
+            }
+            reply.header('Content-Type', 'text/plain; charset=utf-8');
+            reply.header('Content-Disposition', 'inline');
+            reply.header('Content-Length', stat.size);
+            return reply.send(createReadStream(realTarget));
+          }
+
+          const dump = hexdump(head);
           const header =
             `Binary file - ${stat.size} bytes\n` +
             `Showing first ${bytesRead} bytes as hexdump:\n\n`;

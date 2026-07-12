@@ -108,52 +108,63 @@ export function ChatPane({
   }
 
   return (
-    <main className={`chatpane ${showTree ? 'has-tree' : ''}`}>
-      <header className="chat-head">
-        <button className="backbtn" onClick={onBack} aria-label="Back to sessions">
-          ‹
-        </button>
-        <span className="chat-title" title={title}>
-          {title ?? 'Session'}
-        </span>
-        <ConnDot status={connStatus} />
-        <button
-          className={`ftree-toggle ${showTree ? 'is-active' : ''}`}
-          onClick={() => setShowTree((v) => !v)}
-          title="Toggle file tree"
-          aria-label="Toggle file tree"
-          aria-pressed={showTree}
-        >
-          <FilesIcon size={18} />
-        </button>
-      </header>
+    <main className={`chatpane chatpane-split ${showTree ? 'has-tree' : ''}`}>
+      <div className="chat-col">
+        <header className="chat-head">
+          <button className="backbtn" onClick={onBack} aria-label="Back to sessions">
+            ‹
+          </button>
+          <span className="chat-title" title={title}>
+            {title ?? 'Session'}
+          </span>
+          <ConnDot status={connStatus} />
+          <button
+            className={`ftree-toggle ${showTree ? 'is-active' : ''}`}
+            onClick={() => setShowTree((v) => !v)}
+            title="Toggle file tree"
+            aria-label="Toggle file tree"
+            aria-pressed={showTree}
+          >
+            <FilesIcon size={18} />
+          </button>
+        </header>
 
-      <div className="chat-body">
-        <Transcript onRetry={onRetry} />
+        <div className="chat-body">
+          <Transcript onRetry={onRetry} />
+        </div>
 
-        {activeId && (
-          <aside className={`ftree-aside ${showTree ? 'is-open' : ''}`}>
-            {showTree && <FileTree sessionId={activeId} />}
-          </aside>
-        )}
-      </div>
-
-      {/* Prompt, then a single bar: config on the left, live stats on the right. */}
-      <div className="composer-wrap">
-        <Composer
-          sessionId={activeId}
-          onSend={onSend}
-          onCancel={onCancel}
-          live={connStatus === 'connected'}
-        />
-        <div className="composer-bar">
-          <div className="composer-tools">
-            <AgentPicker value={currentModeId} onChange={onChangeAgent} />
-            <ModelPicker value={currentModelId} onChange={onChangeModel} />
+        {/* Prompt, then a single bar: config on the left, live stats on the right. */}
+        <div className="composer-wrap">
+          <Composer
+            sessionId={activeId}
+            onSend={onSend}
+            onCancel={onCancel}
+            connStatus={connStatus}
+          />
+          <div className="composer-bar">
+            <div className="composer-tools">
+              <AgentPicker value={currentModeId} onChange={onChangeAgent} />
+              <ModelPicker value={currentModelId} onChange={onChangeModel} />
+            </div>
+            <ObservabilityPanel />
           </div>
-          <ObservabilityPanel />
         </div>
       </div>
+
+      {activeId && (
+        <aside className={`ftree-aside ${showTree ? 'is-open' : ''}`}>
+          {showTree && <FileTree sessionId={activeId} onClose={() => setShowTree(false)} />}
+        </aside>
+      )}
+      {/* Mobile: tapping outside the drawer closes it (the header toggle is
+          covered by the panel on small screens). */}
+      {activeId && showTree && (
+        <div
+          className="ftree-backdrop"
+          onClick={() => setShowTree(false)}
+          aria-hidden
+        />
+      )}
     </main>
   );
 }

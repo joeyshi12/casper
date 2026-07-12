@@ -12,6 +12,7 @@ import {
   type KiroSubagentListParams,
   type PromptContentBlock,
   type SessionDetail,
+  type SessionNewResult,
   type SessionSummary,
   type SessionUpdateParams,
 } from '@casper/shared';
@@ -64,7 +65,7 @@ function resolveCwd(input?: string): string {
 // A session's server-side state. The store, turn state, and metadata exist as
 // soon as it's opened; the kiro-cli child (`proc`) is spawned lazily, only when
 // an action needs it. Viewing a session never spawns a process.
-class Session {
+export class Session {
   readonly sessionId: string;
   readonly store: EventStore;
   readonly turnState = new TurnState();
@@ -84,6 +85,10 @@ class Session {
   proc?: KiroProcess;
   // In-flight spawn, so concurrent actions share one process.
   spawning?: Promise<KiroProcess>;
+  // True while kiro is replaying history during session/load. The transcript is
+  // already hydrated from disk, so replayed notifications must not be appended
+  // to the live store (doing so floods the chat with duplicate tool calls).
+  replaying = false;
 
   constructor(sessionId: string, store: EventStore, cwd: string) {
     this.sessionId = sessionId;
@@ -96,6 +101,17 @@ class Session {
   }
   get hasBeenLive(): boolean {
     return this.everLive;
+  }
+
+  /**
+   * Single append path: fold the event into the live snapshot AND persist/fan
+   * it out. Using this everywhere keeps turnState in sync with the event log,
+   * so a client that refetches mid-turn sees turnStatus 'running' rather than
+   * a stale 'idle'.
+   */
+  record(payload: CasperEventPayload): CasperEvent {
+    this.turnState.apply(payload);
+    return this.store.append(payload);
   }
 }
 
@@ -210,13 +226,20 @@ export class SessionManager {
 
   private wire(s: Session, proc: KiroProcess): void {
     proc.on('notification', (n: JsonRpcNotification) => {
+      // Drop kiro's history replay during session/load: the transcript is
+      // already hydrated from disk, so appending these would duplicate every
+      // past message and tool call into the live chat.
+      if (s.replaying) return;
       const payload = mapNotification(n);
       if (!payload) return;
-      s.turnState.apply(payload);
-      s.store.append(payload);
+      s.record(payload);
     });
     proc.on('exit', (code: number | null, signal: string | null) => {
-      s.store.append({ kind: 'process_exited', code, signal });
+      // Only the session's current process should mutate its state. A process
+      // that failed to initialize (never became s.proc) or was replaced after
+      // eviction must not record a spurious process_exited event.
+      if (s.proc !== proc) return;
+      s.record({ kind: 'process_exited', code, signal });
       s.proc = undefined;
       s.running = false;
     });
@@ -237,9 +260,19 @@ export class SessionManager {
       await proc.initialize();
 
       // Load the existing session if kiro already knows it, else create it.
-      const res = s.hasBeenLive
-        ? await proc.loadSession({ sessionId: s.sessionId, cwd: s.cwd, mcpServers: [] })
-        : await proc.newSession({ cwd: s.cwd, mcpServers: [] });
+      // session/load makes kiro replay the whole conversation as notifications;
+      // gate them out of the store while it runs (see Session.replaying).
+      let res: SessionNewResult;
+      if (s.hasBeenLive) {
+        s.replaying = true;
+        try {
+          res = await proc.loadSession({ sessionId: s.sessionId, cwd: s.cwd, mcpServers: [] });
+        } finally {
+          s.replaying = false;
+        }
+      } else {
+        res = await proc.newSession({ cwd: s.cwd, mcpServers: [] });
+      }
 
       // A brand-new session gets kiro's generated id; adopt it if it differs.
       if (!s.hasBeenLive && res.sessionId !== s.sessionId) {
@@ -312,6 +345,16 @@ export class SessionManager {
       this.evict(s.sessionId);
       throw err;
     }
+
+    // Name a fresh session after its workspace folder, so it reads clearly in
+    // the list right away (kiro's prompt-derived title only appears after the
+    // first turn). Stored as a Casper title override; the user can rename.
+    const folder = path.basename(s.cwd);
+    if (folder) {
+      this.titles.set(s.sessionId, folder);
+      s.title = folder;
+    }
+
     return this.buildDetail(s, []);
   }
 
@@ -325,14 +368,14 @@ export class SessionManager {
     if (s.running) throw new Error('A turn is already running for this session');
     s.running = true;
     s.lastActivity = Date.now();
-    s.store.append({ kind: 'turn_started', prompt: content });
+    s.record({ kind: 'turn_started', prompt: content });
 
     proc
       .prompt({ sessionId: s.sessionId, prompt: content })
-      .then((res) => s.store.append({ kind: 'turn_ended', stopReason: res.stopReason }))
+      .then((res) => s.record({ kind: 'turn_ended', stopReason: res.stopReason }))
       .catch((err: Error) => {
         this.log.error({ err, sessionId: s.sessionId }, 'prompt turn failed');
-        s.store.append({ kind: 'turn_error', message: err.message });
+        s.record({ kind: 'turn_error', message: err.message });
       })
       .finally(() => {
         s.running = false;

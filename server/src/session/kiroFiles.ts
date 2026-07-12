@@ -131,16 +131,19 @@ export async function listPersistedSessions(log: Logger): Promise<SessionSummary
   return summaries;
 }
 
-// Delete a session's on-disk files: kiro's <id>.{json,jsonl} and Casper's
-// event mirror. Missing files are ignored.
+// Delete a session's on-disk files: kiro's <id>.{json,jsonl,history}, kiro's
+// per-session <id>/ directory (tasks, etc.), and Casper's event mirror.
+// Missing paths are ignored.
 export async function deletePersistedSession(sessionId: string): Promise<void> {
   if (!isValidSessionId(sessionId)) return;
   const targets = [
     path.join(config.kiroSessionsDir, `${sessionId}.json`),
     path.join(config.kiroSessionsDir, `${sessionId}.jsonl`),
+    path.join(config.kiroSessionsDir, `${sessionId}.history`),
+    path.join(config.kiroSessionsDir, sessionId),
     path.join(config.casperDataDir, `${sessionId}.events.jsonl`),
   ];
-  await Promise.all(targets.map((f) => fs.rm(f, { force: true })));
+  await Promise.all(targets.map((f) => fs.rm(f, { recursive: true, force: true })));
 }
 
 /** Read one session's metadata summary, or null if it doesn't exist. */

@@ -12,7 +12,6 @@ import {
   type TranscriptItem,
   type TranscriptToolCall,
 } from '@casper/shared';
-import type { ConnStatus } from '../api/SessionSocket.js';
 
 /** A rendered tool call in the transcript (shared shape). */
 export type ToolCallView = TranscriptToolCall;
@@ -26,12 +25,18 @@ export interface PendingMessage {
   status: 'sending' | 'failed';
 }
 
+/** A transient notification shown in the corner (auto-dismissed). */
+export interface Toast {
+  id: string;
+  message: string;
+  kind: 'error' | 'info';
+}
+
 interface CasperState {
   // Session list
   sessions: SessionSummary[];
   models: ModelInfo[];
   agents: AgentMode[]; // global agent list (from /api/agents) - always populated
-  connStatus: ConnStatus;
 
   // Active session
   activeId: string | null;
@@ -43,25 +48,26 @@ interface CasperState {
   streamingText: string; // in-flight assistant chunk not yet committed
   streamingThought: string; // in-flight reasoning chunk not yet committed
   pending: PendingMessage[]; // user messages sent locally, awaiting server echo
+  toasts: Toast[]; // transient corner notifications
 
   // actions
   setSessions: (s: SessionSummary[]) => void;
   setModels: (m: ModelInfo[]) => void;
   setAgents: (a: AgentMode[]) => void;
-  setConnStatus: (s: ConnStatus) => void;
   loadDetail: (d: SessionDetail) => void;
   clearActive: () => void;
   applyEvent: (e: CasperEvent) => void;
   addPending: (id: string, text: string) => void;
   markPendingFailed: (id: string) => void;
   removePending: (id: string) => void;
+  pushToast: (message: string, kind?: Toast['kind']) => void;
+  dismissToast: (id: string) => void;
 }
 
 export const useStore = create<CasperState>((set, get) => ({
   sessions: [],
   models: [],
   agents: [],
-  connStatus: 'closed',
   activeId: null,
   modes: [],
   items: [],
@@ -69,11 +75,11 @@ export const useStore = create<CasperState>((set, get) => ({
   streamingText: '',
   streamingThought: '',
   pending: [],
+  toasts: [],
 
   setSessions: (sessions) => set({ sessions }),
   setModels: (models) => set({ models }),
   setAgents: (agents) => set({ agents }),
-  setConnStatus: (connStatus) => set({ connStatus }),
 
   loadDetail: (d) =>
     set({
@@ -109,6 +115,12 @@ export const useStore = create<CasperState>((set, get) => ({
     })),
   removePending: (id) =>
     set((s) => ({ pending: s.pending.filter((p) => p.id !== id) })),
+
+  pushToast: (message, kind = 'error') =>
+    set((s) => ({
+      toasts: [...s.toasts, { id: `t-${Date.now()}-${s.toasts.length}`, message, kind }],
+    })),
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
   applyEvent: (e) => {
     const state = get();

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PromptContentBlock, UploadedFile } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 import { api } from '../../api/rest.js';
+import type { ConnStatus } from '../../api/SessionSocket.js';
 
 /** Image MIME types that can be inlined as ACP image content blocks. */
 const IMAGE_TYPES = new Set([
@@ -26,17 +27,20 @@ interface Props {
   sessionId: string | null;
   onSend: (content: PromptContentBlock[]) => void;
   onCancel: () => void;
-  /** True once the session's socket is connected and ready to accept prompts. */
-  live: boolean;
+  /** Live socket status - drives the placeholder and whether prompts can send. */
+  connStatus: ConnStatus;
 }
 
 /** ChatGPT-style input: + attach inside, paste, auto-grow, upload-on-send. */
-export function Composer({ sessionId, onSend, onCancel, live }: Props) {
+export function Composer({ sessionId, onSend, onCancel, connStatus }: Props) {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const running = useStore((s) => s.observability.turnStatus === 'running');
+  const turnStatus = useStore((s) => s.observability.turnStatus);
+  const running = turnStatus === 'running';
+  const cancelling = turnStatus === 'cancelling';
+  const live = connStatus === 'connected';
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -135,7 +139,8 @@ export function Composer({ sessionId, onSend, onCancel, live }: Props) {
 
   const submit = async () => {
     const trimmed = text.trim();
-    if ((!trimmed && attachments.length === 0) || running || !live || uploading) return;
+    if ((!trimmed && attachments.length === 0) || running || cancelling || !live || uploading)
+      return;
 
     let uploaded: UploadedFile[] = [];
     const atts = attachments;
@@ -219,16 +224,25 @@ export function Composer({ sessionId, onSend, onCancel, live }: Props) {
     };
   }, []);
 
-  const placeholder = !live
-    ? 'Connecting…'
-    : uploading
-      ? 'Uploading…'
-      : running
-        ? 'Casper is working…'
-        : 'Ask Casper to build something…';
+  const placeholder =
+    connStatus === 'closed'
+      ? 'Offline - reconnecting when possible'
+      : connStatus === 'reconnecting'
+        ? 'Reconnecting…'
+        : connStatus === 'resyncing'
+          ? 'Resyncing…'
+          : !live
+            ? 'Connecting…'
+            : uploading
+              ? 'Uploading…'
+              : cancelling
+                ? 'Stopping…'
+                : running
+                  ? 'Casper is working…'
+                  : 'Ask Casper to build something…';
 
   const canSend =
-    (text.trim() || attachments.length > 0) && !running && !uploading && live;
+    (text.trim() || attachments.length > 0) && !running && !cancelling && !uploading && live;
 
   return (
     <div className="composer">
@@ -260,7 +274,7 @@ export function Composer({ sessionId, onSend, onCancel, live }: Props) {
         <button
           className="composer-plus"
           onClick={() => fileInputRef.current?.click()}
-          disabled={running || !live || uploading}
+          disabled={running || cancelling || !live || uploading}
           title="Attach file"
           aria-label="Attach file"
         >
@@ -292,6 +306,10 @@ export function Composer({ sessionId, onSend, onCancel, live }: Props) {
         {running ? (
           <button className="composer-btn composer-stop" onClick={onCancel}>
             Stop
+          </button>
+        ) : cancelling ? (
+          <button className="composer-btn composer-stop" disabled>
+            Stopping…
           </button>
         ) : (
           <button className="composer-btn composer-send" onClick={submit} disabled={!canSend}>

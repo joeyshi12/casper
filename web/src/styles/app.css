@@ -572,6 +572,63 @@
   background: var(--n1);
   color: var(--n6);
 }
+.btn-danger {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--n6);
+  background: var(--aurora-red);
+  padding: 12px 22px;
+  border-radius: var(--r-md);
+  transition: filter 0.12s, opacity 0.12s;
+}
+.btn-danger:hover {
+  filter: brightness(1.08);
+}
+.btn-danger:active {
+  filter: brightness(0.95);
+}
+
+/* Confirmation modal */
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: fade-in 0.15s ease;
+}
+.confirm-modal {
+  width: 100%;
+  max-width: 400px;
+  background: var(--n0);
+  border: 1px solid var(--n2);
+  border-radius: var(--r-lg);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  padding: 22px;
+  animation: modal-in 0.15s ease;
+}
+.confirm-title {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--n6);
+}
+.confirm-message {
+  margin: 0 0 20px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--n4);
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 
 /* Pickers */
 .picker {
@@ -801,6 +858,16 @@
    column compresses them (tool cards clip and flatten). Pin them all. */
 .transcript > * {
   flex: 0 0 auto;
+}
+/* Skip layout + paint for off-screen transcript items. A long history then
+   stays cheap to reflow - notably while the side panel animates its width,
+   which would otherwise re-wrap every message every frame. contain-intrinsic-
+   size 'auto' remembers each item's real size once it has been rendered. */
+.msg,
+.toolcall,
+.thought {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
 }
 .transcript-empty {
   margin: auto;
@@ -1557,7 +1624,7 @@
   margin-top: 8px;
 }
 
-/* Chat body: transcript + optional file tree side panel. */
+/* Chat body: holds the scrolling transcript. */
 .chat-body {
   flex: 1;
   min-height: 0;
@@ -1566,6 +1633,19 @@
 .chat-body .transcript-wrap {
   flex: 1;
   min-width: 0;
+}
+
+/* Active session with a file panel: chat column beside a full-height panel. */
+.chatpane-split {
+  flex-direction: row;
+  position: relative;
+}
+.chat-col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* File tree toggle button in chat header. */
@@ -1621,8 +1701,12 @@
     border-left-color: var(--n2);
     box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
   }
-  .chat-body {
-    position: relative;
+  .ftree-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 29;
+    background: rgba(10, 12, 16, 0.5);
   }
 }
 
@@ -1643,13 +1727,21 @@
   font-weight: 600;
   font-size: 13px;
   color: var(--n6);
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ftree-refresh {
-  font-size: 16px;
-  padding: 2px 6px;
+/* Header action buttons (refresh, close): identical centered icon-boxes so
+   their glyphs line up vertically regardless of SVG vs text content. */
+.ftree-refresh,
+.ftree-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border-radius: var(--r-sm);
   border: none;
   background: none;
@@ -1657,9 +1749,14 @@
   cursor: pointer;
   transition: background 0.12s;
 }
-.ftree-refresh:hover {
+.ftree-refresh:hover,
+.ftree-close:hover {
   background: var(--n1);
   color: var(--n6);
+}
+/* Dimmed tap-to-close layer behind the mobile file-tree drawer. */
+.ftree-backdrop {
+  display: none;
 }
 .ftree-cwd {
   font-family: var(--font-mono);
@@ -1931,6 +2028,64 @@
   from {
     opacity: 0;
     transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Toasts: transient corner notifications. */
+.toaster {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 40px));
+}
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--n1);
+  border: 1px solid var(--n2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  color: var(--n6);
+  animation: toast-in 0.16s ease-out;
+}
+.toast-error {
+  border-left: 3px solid var(--aurora-red);
+}
+.toast-info {
+  border-left: 3px solid var(--frost);
+}
+.toast-msg {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+}
+.toast-x {
+  border: none;
+  background: none;
+  color: var(--n3);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.toast-x:hover {
+  color: var(--n6);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
   }
   to {
     opacity: 1;

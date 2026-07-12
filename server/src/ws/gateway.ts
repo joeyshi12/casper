@@ -3,11 +3,10 @@ import type { WebSocket } from 'ws';
 import type {
   CasperEvent,
   ClientMessage,
-  ServerMessage,
 } from '@casper/shared';
 import type { SessionManager } from '../session/SessionManager.js';
 import { authDisabled, hasValidSession } from '../routes/auth.js';
-import { handleClientMessage } from './dispatch.js';
+import { handleClientMessage, send } from './dispatch.js';
 
 const HEARTBEAT_MS = 20_000;
 
@@ -41,6 +40,7 @@ export function registerWsGateway(
     let cursor = Number.parseInt(query.cursor ?? '0', 10) || 0;
     let unsubscribe: (() => void) | null = null;
     let alive = true;
+    let ready = false;
 
     const forward = (event: CasperEvent) => {
       if (event.seq <= cursor) return; // dedupe against replay overlap
@@ -81,6 +81,7 @@ export function registerWsGateway(
 
       // Subscribe to live events.
       unsubscribe = manager.onEvent(sessionId, forward);
+      ready = true;
     };
 
     void attach();
@@ -106,6 +107,9 @@ export function registerWsGateway(
 
     socket.on('message', (raw: Buffer) => {
       alive = true;
+      // Ignore anything sent before attach() finished opening the session, so a
+      // prompt can't hit an unopened session and reject unhandled.
+      if (!ready) return;
       let msg: ClientMessage;
       try {
         msg = JSON.parse(raw.toString()) as ClientMessage;
@@ -121,10 +125,4 @@ export function registerWsGateway(
       unsubscribe?.();
     });
   });
-}
-
-function send(socket: WebSocket, msg: ServerMessage): void {
-  if (socket.readyState === socket.OPEN) {
-    socket.send(JSON.stringify(msg));
-  }
 }

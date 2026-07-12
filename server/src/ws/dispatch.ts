@@ -2,7 +2,7 @@ import type { WebSocket } from 'ws';
 import type { ClientMessage, ServerMessage } from '@casper/shared';
 import type { SessionManager } from '../session/SessionManager.js';
 
-function send(socket: WebSocket, msg: ServerMessage): void {
+export function send(socket: WebSocket, msg: ServerMessage): void {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
 }
 

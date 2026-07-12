@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FileEntry } from '@casper/shared';
-import type { Highlighter } from 'shiki';
 import { api } from '../../api/rest.js';
+import { getHighlighter } from '../../util/highlighter.js';
 import {
   FileIcon,
   FileCodeIcon,
@@ -14,11 +14,15 @@ import {
   FolderOpenIcon,
   DownloadIcon,
   RefreshIcon,
+  CloseIcon,
   Spinner,
 } from '../common/icons.js';
 
 interface FileTreeProps {
   sessionId: string;
+  /** Collapse the panel. Used by the mobile close button, where the header
+   *  toggle is covered by the panel overlay. */
+  onClose?: () => void;
 }
 
 interface FolderState {
@@ -146,24 +150,6 @@ function langFromFilename(name: string): string {
   return EXT_TO_LANG[ext] ?? '';
 }
 
-/** Lazy-load a shared Shiki highlighter. */
-let highlighterPromise: Promise<Highlighter> | null = null;
-function getHighlighter(): Promise<Highlighter> {
-  if (!highlighterPromise) {
-    highlighterPromise = import('shiki').then((shiki) =>
-      shiki.createHighlighter({
-        themes: ['aurora-x'],
-        langs: [
-          'typescript', 'javascript', 'tsx', 'jsx', 'json', 'bash',
-          'python', 'rust', 'go', 'java', 'yaml', 'markdown', 'html',
-          'css', 'sql', 'diff',
-        ],
-      }),
-    );
-  }
-  return highlighterPromise;
-}
-
 function TreeEntry({
   entry,
   sessionId,
@@ -183,6 +169,7 @@ function TreeEntry({
 
   const toggle = useCallback(async () => {
     if (entry.type !== 'directory') return;
+    if (folder.loading) return; // a fetch is already in flight
 
     if (folder.expanded) {
       setFolder((f) => ({ ...f, expanded: false }));
@@ -201,7 +188,7 @@ function TreeEntry({
     } else {
       setFolder((f) => ({ ...f, expanded: true }));
     }
-  }, [entry, sessionId, folder.expanded, folder.children]);
+  }, [entry, sessionId, folder.expanded, folder.children, folder.loading]);
 
   const download = useCallback(
     (e: React.MouseEvent) => {
@@ -365,7 +352,7 @@ function FilePreview({
 }
 
 /** Workspace file tree panel with lazy folder expansion, preview, and download. */
-export function FileTree({ sessionId }: FileTreeProps) {
+export function FileTree({ sessionId, onClose }: FileTreeProps) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [cwd, setCwd] = useState('');
   const [loading, setLoading] = useState(true);
@@ -462,6 +449,16 @@ export function FileTree({ sessionId }: FileTreeProps) {
         >
           <RefreshIcon size={14} />
         </button>
+        {onClose && (
+          <button
+            className="ftree-close"
+            onClick={onClose}
+            title="Close file tree"
+            aria-label="Close file tree"
+          >
+            <CloseIcon size={15} />
+          </button>
+        )}
       </div>
       {cwd && <div className="ftree-cwd" title={cwd}>{cwd}</div>}
       <div className="ftree-list">

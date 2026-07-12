@@ -64,7 +64,11 @@ body {
   font-size: 15px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
-  overscroll-behavior: none;
+  /* Allow the browser's vertical pull-to-refresh (overscroll at the top of the
+     transcript chains up to the root). Keep horizontal contained so a sideways
+     swipe never triggers browser back/forward navigation. */
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
 }
 
 button {

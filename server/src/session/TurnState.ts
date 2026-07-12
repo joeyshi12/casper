@@ -35,6 +35,12 @@ export class TurnState {
         this.snapshot = { ...s, turnStatus: 'idle', currentTurnStartedAt: undefined };
         break;
       }
+      case 'process_exited': {
+        // The kiro process died; any in-flight turn is over. Match the client
+        // reducer so a REST refetch after a crash does not report 'running'.
+        this.snapshot = { ...s, turnStatus: 'idle', currentTurnStartedAt: undefined };
+        break;
+      }
       case 'metadata': {
         const p = payload.params;
         const turnCredits = (p.meteringUsage ?? []).reduce((sum, m) => sum + m.value, 0);

@@ -3,6 +3,7 @@ import type { SessionSummary } from '@casper/shared';
 import { LockIcon, PlusIcon, SearchIcon } from '../common/icons.js';
 import { SearchModal } from '../sessions/SearchModal.js';
 import { DevicesModal } from '../sessions/DevicesModal.js';
+import { ConfirmDialog } from '../common/ConfirmDialog.js';
 
 interface Props {
   sessions: SessionSummary[];
@@ -49,6 +50,7 @@ export function Sidebar({
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [menuId, setMenuId] = useState<string | null>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
 
@@ -195,9 +197,9 @@ export function Sidebar({
                     <button
                       className="menu-item"
                       onClick={() => {
-                        setMenuId(null);
                         setDraft(s.title);
                         setRenamingId(s.sessionId);
+                        setMenuId(null);
                       }}
                     >
                       Rename
@@ -206,7 +208,7 @@ export function Sidebar({
                       className="menu-item menu-item-danger"
                       onClick={() => {
                         setMenuId(null);
-                        onDelete(s.sessionId);
+                        setConfirmingId(s.sessionId);
                       }}
                     >
                       Delete
@@ -234,6 +236,21 @@ export function Sidebar({
             setDevicesOpen(false);
             onLock();
           }}
+        />
+      )}
+
+      {confirmingId && (
+        <ConfirmDialog
+          title="Delete session?"
+          message="This session and its history will be permanently deleted. This can't be undone."
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => {
+            const id = confirmingId;
+            setConfirmingId(null);
+            onDelete(id);
+          }}
+          onCancel={() => setConfirmingId(null)}
         />
       )}
     </aside>

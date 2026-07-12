@@ -7,6 +7,7 @@ import { Sidebar } from './components/layout/Sidebar.js';
 import { ChatPane } from './components/layout/ChatPane.js';
 import { NewSessionSheet } from './components/sessions/NewSessionSheet.js';
 import { TokenGate } from './components/common/TokenGate.js';
+import { Toaster } from './components/common/Toaster.js';
 
 type AuthState = 'checking' | 'gate' | 'ready';
 
@@ -50,8 +51,14 @@ function Shell({ onLock }: { onLock: () => void }) {
   }, [store]);
 
   useEffect(() => {
-    api.models().then((r) => store.setModels(r.models)).catch(() => {});
-    api.agents().then((r) => store.setAgents(r.agents)).catch(() => {});
+    api
+      .models()
+      .then((r) => store.setModels(r.models))
+      .catch(() => store.pushToast('Could not load models.'));
+    api
+      .agents()
+      .then((r) => store.setAgents(r.agents))
+      .catch(() => store.pushToast('Could not load agents.'));
     refreshSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -76,7 +83,18 @@ function Shell({ onLock }: { onLock: () => void }) {
       closeSocket();
       setConnStatus('connecting');
 
-      const detail = await api.getSession(id);
+      let detail: Awaited<ReturnType<typeof api.getSession>>;
+      try {
+        detail = await api.getSession(id);
+      } catch (err) {
+        // Fetch failed (network, or the session was deleted): don't strand the
+        // UI in "connecting" - reset and surface the error.
+        setConnStatus('closed');
+        useStore
+          .getState()
+          .pushToast(err instanceof Error ? err.message : 'Could not open session.');
+        return;
+      }
       store.loadDetail(detail);
 
       const socket = new SessionSocket(
@@ -151,7 +169,13 @@ function Shell({ onLock }: { onLock: () => void }) {
 
   const deleteSession = useCallback(
     async (id: string) => {
-      await api.deleteSession(id).catch(() => {});
+      try {
+        await api.deleteSession(id);
+      } catch {
+        useStore.getState().pushToast('Could not delete session. Please try again.');
+        refreshSessions();
+        return;
+      }
       if (store.activeId === id) backToList();
       else refreshSessions();
     },
@@ -166,7 +190,9 @@ function Shell({ onLock }: { onLock: () => void }) {
           s.sessionId === id ? { ...s, title } : s,
         ),
       }));
-      await api.renameSession(id, title).catch(() => {});
+      await api.renameSession(id, title).catch(() => {
+        useStore.getState().pushToast('Could not rename session.');
+      });
       refreshSessions();
     },
     [refreshSessions],
@@ -208,7 +234,16 @@ function Shell({ onLock }: { onLock: () => void }) {
     [sendMessage],
   );
 
-  const cancel = useCallback(() => socketRef.current?.cancel(), []);
+  const cancel = useCallback(() => {
+    socketRef.current?.cancel();
+    // Optimistic feedback: the Stop button flips to "Stopping…" until the
+    // server confirms with turn_ended / turn_error (which reset to idle).
+    useStore.setState((s) =>
+      s.observability.turnStatus === 'running'
+        ? { observability: { ...s.observability, turnStatus: 'cancelling' } }
+        : {},
+    );
+  }, []);
   const changeModel = useCallback((modelId: string) => {
     socketRef.current?.setModel(modelId);
     useStore.setState({ currentModelId: modelId });
@@ -258,6 +293,7 @@ function Shell({ onLock }: { onLock: () => void }) {
       {newOpen && (
         <NewSessionSheet onCreate={createSession} onClose={() => setNewOpen(false)} />
       )}
+      <Toaster />
     </div>
   );
 }
