@@ -37,6 +37,7 @@ interface PreviewState {
   content: string | null;
   highlightedHtml: string | null;
   isImage: boolean;
+  isPdf: boolean;
   loading: boolean;
   error: string | null;
 }
@@ -120,6 +121,10 @@ function isImageFile(name: string): boolean {
   return IMAGE_EXTS.has(ext);
 }
 
+function isPdfFile(name: string): boolean {
+  return name.toLowerCase().endsWith('.pdf');
+}
+
 /** Map file extension to shiki language id. */
 const EXT_TO_LANG: Record<string, string> = {
   ts: 'typescript',
@@ -127,26 +132,58 @@ const EXT_TO_LANG: Record<string, string> = {
   js: 'javascript',
   jsx: 'jsx',
   mjs: 'javascript',
+  cjs: 'javascript',
   json: 'json',
+  jsonl: 'json',
   yaml: 'yaml',
   yml: 'yaml',
   md: 'markdown',
+  markdown: 'markdown',
   html: 'html',
+  htm: 'html',
+  xml: 'xml',
   css: 'css',
   scss: 'css',
+  less: 'css',
   py: 'python',
   rs: 'rust',
   go: 'go',
   java: 'java',
+  c: 'c',
+  h: 'c',
+  cpp: 'cpp',
+  cc: 'cpp',
+  cxx: 'cpp',
+  hpp: 'cpp',
+  cs: 'csharp',
+  rb: 'ruby',
+  php: 'php',
+  kt: 'kotlin',
+  kts: 'kotlin',
+  swift: 'swift',
+  zig: 'zig',
+  lua: 'lua',
+  tex: 'latex',
+  toml: 'toml',
+  ini: 'ini',
+  cfg: 'ini',
+  conf: 'ini',
   sh: 'bash',
   bash: 'bash',
   zsh: 'bash',
+  fish: 'bash',
+  dockerfile: 'dockerfile',
   sql: 'sql',
   diff: 'diff',
+  patch: 'diff',
 };
 
 function langFromFilename(name: string): string {
-  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  const lower = name.toLowerCase();
+  // Extensionless files with well-known names.
+  if (lower === 'dockerfile') return 'dockerfile';
+  if (lower === 'makefile') return 'make';
+  const ext = lower.split('.').pop() ?? '';
   return EXT_TO_LANG[ext] ?? '';
 }
 
@@ -336,13 +373,20 @@ function FilePreview({
               className="fpreview-image"
             />
           )}
-          {!preview.loading && !preview.error && !preview.isImage && preview.highlightedHtml && (
+          {!preview.error && preview.isPdf && (
+            <iframe
+              src={api.previewUrl(sessionId, preview.path)}
+              title={preview.name}
+              className="fpreview-pdf"
+            />
+          )}
+          {!preview.loading && !preview.error && !preview.isImage && !preview.isPdf && preview.highlightedHtml && (
             <div
               className="fpreview-highlighted"
               dangerouslySetInnerHTML={{ __html: preview.highlightedHtml }}
             />
           )}
-          {!preview.loading && !preview.error && !preview.isImage && !preview.highlightedHtml && preview.content !== null && (
+          {!preview.loading && !preview.error && !preview.isImage && !preview.isPdf && !preview.highlightedHtml && preview.content !== null && (
             <pre className="fpreview-code">{preview.content}</pre>
           )}
         </div>
@@ -380,18 +424,20 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
   const openPreview = useCallback(
     async (entry: FileEntry) => {
       const image = isImageFile(entry.name);
+      const pdf = isPdfFile(entry.name);
       setPreview({
         path: entry.path,
         name: entry.name,
         content: null,
         highlightedHtml: null,
         isImage: image,
-        loading: !image, // Images load via <img> src, no fetch needed
+        isPdf: pdf,
+        loading: !image && !pdf, // images/PDFs render via their own element
         error: null,
       });
 
       // For text files, fetch the content and highlight it.
-      if (!image) {
+      if (!image && !pdf) {
         try {
           const url = api.previewUrl(sessionId, entry.path);
           const res = await fetch(url, { credentials: 'same-origin' });

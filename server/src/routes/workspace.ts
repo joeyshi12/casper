@@ -273,20 +273,26 @@ export function registerWorkspaceRoutes(
       const ext = path.extname(realTarget).toLowerCase();
       const mime = mimeForExt(ext);
       const isImage = mime.startsWith('image/');
+      const isPdf = mime === 'application/pdf';
       const kind = classifyKind(realTarget);
 
       // Binaries are only hexdumped (fixed head), so no size gate for them.
-      // Images cap at 20 MB, text at 1 MB.
-      if (kind !== 'binary') {
-        const maxSize = isImage ? MAX_IMAGE_PREVIEW_BYTES : MAX_TEXT_PREVIEW_BYTES;
-        if (stat.size > maxSize) {
+      // Images and PDFs cap at 20 MB, text at 1 MB.
+      if (isImage || isPdf) {
+        if (stat.size > MAX_IMAGE_PREVIEW_BYTES) {
           reply.code(413);
-          return tooLargeForPreview(stat.size, maxSize);
+          return tooLargeForPreview(stat.size, MAX_IMAGE_PREVIEW_BYTES);
+        }
+      } else if (kind !== 'binary') {
+        if (stat.size > MAX_TEXT_PREVIEW_BYTES) {
+          reply.code(413);
+          return tooLargeForPreview(stat.size, MAX_TEXT_PREVIEW_BYTES);
         }
       }
 
-      // For images, stream the binary with Content-Disposition: inline.
-      if (isImage) {
+      // Stream images and PDFs with Content-Disposition: inline so the browser
+      // renders them directly (in an <img> or the built-in PDF viewer).
+      if (isImage || isPdf) {
         reply.header('Content-Type', mime);
         reply.header('Content-Disposition', 'inline');
         reply.header('Content-Length', stat.size);

@@ -15,7 +15,9 @@ export function getHighlighter(): Promise<Highlighter> {
         langs: [
           'typescript', 'javascript', 'tsx', 'jsx', 'json', 'bash',
           'python', 'rust', 'go', 'java', 'yaml', 'markdown', 'html',
-          'css', 'sql', 'diff',
+          'css', 'sql', 'diff', 'latex', 'zig', 'c', 'cpp', 'csharp',
+          'ruby', 'php', 'kotlin', 'swift', 'toml', 'lua', 'dockerfile',
+          'xml', 'ini', 'make',
         ],
       }),
     );
