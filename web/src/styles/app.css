@@ -859,16 +859,6 @@
 .transcript > * {
   flex: 0 0 auto;
 }
-/* Skip layout + paint for off-screen transcript items. A long history then
-   stays cheap to reflow - notably while the side panel animates its width,
-   which would otherwise re-wrap every message every frame. contain-intrinsic-
-   size 'auto' remembers each item's real size once it has been rendered. */
-.msg,
-.toolcall,
-.thought {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 48px;
-}
 .transcript-empty {
   margin: auto;
   text-align: center;

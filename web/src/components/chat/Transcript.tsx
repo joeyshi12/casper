@@ -72,7 +72,11 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
     }
     prevPendingLen.current = pending.length;
     if (followBottom.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      // Instant (not smooth): while a turn streams, chunks arrive many times a
+      // second and stacking smooth-scroll animations makes mobile scroll jitter.
+      // The jump-to-latest button still animates smoothly (one-shot).
+      bottomRef.current?.scrollIntoView({ block: 'end' });
+      lastScrollTop.current = el.scrollTop;
     } else {
       updateScrollBtn(el);
     }
