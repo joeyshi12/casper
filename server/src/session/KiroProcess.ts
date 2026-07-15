@@ -142,29 +142,6 @@ export class KiroProcess extends EventEmitter {
     });
   }
 
-  /**
-   * Ask kiro for the live context-window fill (0-100), matching the TUI. Uses
-   * the adjacently-tagged command shape kiro expects ({ command, args }); the
-   * result carries data.contextUsagePercentage. Read-only; returns undefined on
-   * any failure so callers can no-op.
-   */
-  async queryContextUsage(sessionId: string): Promise<number | undefined> {
-    try {
-      const res = await this.client.request<{
-        success?: boolean;
-        data?: { contextUsagePercentage?: number };
-      }>(
-        ACP_METHODS.commandsExecute,
-        { sessionId, command: { command: 'context', args: {} } },
-        30_000,
-      );
-      const pct = res?.data?.contextUsagePercentage;
-      return typeof pct === 'number' ? pct : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
   get isInitialized(): boolean {
     return this.initialized;
   }
@@ -186,5 +163,28 @@ export class KiroProcess extends EventEmitter {
     setTimeout(() => {
       if (this.child.exitCode === null) this.child.kill('SIGTERM');
     }, 1000).unref();
+  }
+
+  /**
+   * Dispose and resolve once the child has actually exited. kiro writes its
+   * session file on shutdown, so a caller that then deletes those files must
+   * wait for exit first, or kiro's write recreates them.
+   */
+  disposeAndWait(timeoutMs = 4000): Promise<void> {
+    if (this.child.exitCode !== null) {
+      this.dispose();
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      this.child.once('exit', finish);
+      this.dispose();
+      setTimeout(finish, timeoutMs).unref();
+    });
   }
 }

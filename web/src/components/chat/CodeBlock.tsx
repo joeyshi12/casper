@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getHighlighter } from '../../util/highlighter.js';
+import { highlightToHtml } from '../../util/highlighter.js';
 
 interface Props {
   code: string;
@@ -11,13 +11,8 @@ export function CodeBlock({ code, lang }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    getHighlighter()
-      .then((hl) => {
-        const supported = hl.getLoadedLanguages().includes(lang as never);
-        const out = hl.codeToHtml(code, {
-          lang: supported ? lang : 'text',
-          theme: 'aurora-x',
-        });
+    highlightToHtml(code, lang)
+      .then((out) => {
         if (!cancelled) setHtml(out);
       })
       .catch(() => {

@@ -35,13 +35,6 @@ export interface MetadataEvent {
   params: KiroMetadataParams;
 }
 
-/** Accurate context-window fill (0-100) from kiro's `context` command, which
- *  matches the TUI - unlike the metadata notification's contextUsagePercentage. */
-export interface ContextUsageEvent {
-  kind: 'context_usage';
-  percentage: number;
-}
-
 export interface SubagentEvent {
   kind: 'subagent_update';
   params: KiroSubagentListParams;
@@ -89,7 +82,6 @@ export interface ProcessExitedEvent {
 export type CasperEventPayload =
   | SessionUpdateEvent
   | MetadataEvent
-  | ContextUsageEvent
   | SubagentEvent
   | McpHealthEvent
   | CommandsAvailableEvent

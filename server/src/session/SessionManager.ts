@@ -1,6 +1,7 @@
 import {
   emptyObservabilitySnapshot,
   KIRO_NOTIFICATIONS,
+  stripAttachmentsLine,
   type AgentMode,
   type CasperEvent,
   type CasperEventPayload,
@@ -286,9 +287,6 @@ export class SessionManager {
       s.markLive();
       s.proc = proc;
       s.spawning = undefined;
-      // Correct the context meter to kiro's live value as soon as the process
-      // is up (the seeded/persisted percentage uses a different window).
-      await this.refreshContextUsage(s);
       return proc;
     })();
 
@@ -375,14 +373,10 @@ export class SessionManager {
 
     proc
       .prompt({ sessionId: s.sessionId, prompt: content })
-      .then(async (res) => {
-        s.record({ kind: 'turn_ended', stopReason: res.stopReason });
-        await this.refreshContextUsage(s);
-      })
-      .catch(async (err: Error) => {
+      .then((res) => s.record({ kind: 'turn_ended', stopReason: res.stopReason }))
+      .catch((err: Error) => {
         this.log.error({ err, sessionId: s.sessionId }, 'prompt turn failed');
         s.record({ kind: 'turn_error', message: err.message });
-        await this.refreshContextUsage(s);
       })
       .finally(() => {
         s.running = false;
@@ -393,20 +387,6 @@ export class SessionManager {
   cancel(sessionId: string): void {
     const s = this.sessions.get(sessionId);
     s?.proc?.cancel(s.sessionId);
-  }
-
-  /**
-   * Update the session's context-window fill from kiro's `context` command,
-   * which matches the TUI (the metadata notification reports a different
-   * window). No-ops if the process is gone or the command fails.
-   */
-  private async refreshContextUsage(s: Session): Promise<void> {
-    const proc = s.proc;
-    if (!proc) return;
-    const pct = await proc.queryContextUsage(s.sessionId);
-    if (typeof pct === 'number') {
-      s.record({ kind: 'context_usage', percentage: pct });
-    }
   }
 
   async setMode(sessionId: string, modeId: string): Promise<void> {
@@ -511,8 +491,46 @@ export class SessionManager {
       currentModeId: s.currentModeId,
       transcript,
       observability: snap,
-      head: s.store.head(),
+      head: this.replayHead(s, transcript),
     };
+  }
+
+  /**
+   * The cursor a reconnecting client should start from. Normally the store
+   * head, but while a turn is in flight the prompt/response are not yet in
+   * kiro's persisted jsonl (kiro writes a turn only when it completes), so the
+   * hydrated transcript is missing them. Rewind to just before the in-flight
+   * turn_started so the WS replays the whole in-flight turn. Guarded against
+   * duplication in case kiro ever persists the prompt at turn start.
+   */
+  private replayHead(s: Session, transcript: SessionDetail['transcript']): number {
+    const head = s.store.head();
+    if (!s.running) return head;
+    const { events } = s.store.getSince(0);
+    let started: CasperEvent | undefined;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i]!.payload.kind === 'turn_started') {
+        started = events[i];
+        break;
+      }
+    }
+    if (!started || started.payload.kind !== 'turn_started') return head;
+    const promptText = stripAttachmentsLine(
+      started.payload.prompt
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map((b) => b.text)
+        .join(''),
+    ).trim();
+    // If the hydrated transcript already ends with this prompt, it's persisted
+    // - don't replay it (would duplicate the user message).
+    for (let i = transcript.length - 1; i >= 0; i--) {
+      const it = transcript[i]!;
+      if (it.type === 'message' && it.message.role === 'user') {
+        if (promptText && it.message.text.trim() === promptText) return head;
+        break;
+      }
+    }
+    return started.seq - 1;
   }
 
   // -------------------------------------------------------------------------
@@ -530,9 +548,21 @@ export class SessionManager {
   // Permanently delete a session: evict it from memory, remove its on-disk
   // files, and drop any title override.
   async deleteSession(sessionId: string): Promise<void> {
+    const s = this.sessions.get(sessionId);
+    // kiro flushes its session file on shutdown, so wait for the process to
+    // exit before deleting - otherwise its write recreates the files.
+    if (s?.proc) {
+      await s.proc.disposeAndWait().catch(() => {});
+      s.proc = undefined;
+      s.running = false;
+    }
     this.evict(sessionId);
     this.titles.remove(sessionId);
     await deletePersistedSession(sessionId);
+    // kiro-cli spawns a wrapped kiro-cli-chat that flushes the session file on
+    // its own shutdown, which can land just after our delete. Sweep once more
+    // so a deleted session doesn't reappear.
+    setTimeout(() => void deletePersistedSession(sessionId).catch(() => {}), 2500).unref?.();
   }
 
   disposeAll(): void {

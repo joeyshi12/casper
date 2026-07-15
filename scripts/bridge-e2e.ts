@@ -10,6 +10,7 @@ import type {
 } from '@casper/shared';
 import { buildApp } from '../server/src/app.js';
 import { config } from '../server/src/config.js';
+import { deletePersistedSession } from '../server/src/session/kiroFiles.js';
 
 const PORT = 4331;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -96,6 +97,7 @@ async function main() {
   await app.listen({ host: '127.0.0.1', port: PORT });
   console.log(`server up on ${BASE}\n`);
 
+  let createdSid: string | null = null;
   try {
     await login();
 
@@ -109,6 +111,7 @@ async function main() {
       modelId: 'claude-haiku-4.5',
     });
     const sid = detail.summary.sessionId;
+    createdSid = sid;
     assert(typeof sid === 'string', `created session ${sid}`);
     assert(detail.modes.length > 0, `session exposes ${detail.modes.length} agent modes`);
 
@@ -159,6 +162,18 @@ async function main() {
       after.observability.creditsSpent > 0,
       `observability shows credits spent: ${after.observability.creditsSpent.toFixed(4)}`,
     );
+    // 6b. Context usage is a finite, sane percentage (meter source).
+    assert(
+      Number.isFinite(after.observability.contextUsagePercentage) &&
+        after.observability.contextUsagePercentage >= 0 &&
+        after.observability.contextUsagePercentage <= 100,
+      `context usage is a sane percentage: ${after.observability.contextUsagePercentage}`,
+    );
+    // 6c. The user's prompt survived into the transcript (persisted turn).
+    const userMsg = after.transcript.find(
+      (it) => it.type === 'message' && it.message.role === 'user',
+    );
+    assert(userMsg, 'user prompt is present in the re-fetched transcript');
 
     // 7. set_model round-trip
     await api('POST', `/api/sessions/${sid}/model`, { modelId: 'auto' });
@@ -166,8 +181,16 @@ async function main() {
 
     console.log('\n🎉 Bridge E2E passed.');
   } finally {
+    // Clean up the throwaway session (memory + kiro files + event mirror).
+    if (createdSid) await api('DELETE', `/api/sessions/${createdSid}`).catch(() => {});
     manager.disposeAll();
     await app.close();
+    // kiro's wrapped chat process flushes its session file on shutdown, which
+    // can land after the DELETE; wait for it to die, then sweep the files.
+    if (createdSid) {
+      await new Promise((r) => setTimeout(r, 2500));
+      await deletePersistedSession(createdSid).catch(() => {});
+    }
   }
   setTimeout(() => process.exit(0), 300);
 }

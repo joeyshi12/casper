@@ -46,17 +46,12 @@ export class TurnState {
         const turnCredits = (p.meteringUsage ?? []).reduce((sum, m) => sum + m.value, 0);
         this.snapshot = {
           ...s,
+          contextUsagePercentage: p.contextUsagePercentage ?? s.contextUsagePercentage,
           // meteringUsage is emitted per-turn; accumulate into the session total.
           creditsSpent: turnCredits > 0 ? s.creditsSpent + turnCredits : s.creditsSpent,
           lastTurnCredits: turnCredits > 0 ? turnCredits : s.lastTurnCredits,
           lastTurnDurationMs: p.turnDurationMs ?? s.lastTurnDurationMs,
         };
-        break;
-      }
-      case 'context_usage': {
-        // Accurate context fill from the `context` command (matches the TUI);
-        // the metadata notification's own percentage uses a different window.
-        this.snapshot = { ...s, contextUsagePercentage: payload.percentage };
         break;
       }
       case 'subagent_update': {

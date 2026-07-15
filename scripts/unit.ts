@@ -40,13 +40,11 @@ const events: CasperEventPayload[] = [
   { kind: 'mcp_health', params: { sessionId: 's', serverName: 'pippin-mcp', error: 'boom' }, ok: false },
   { kind: 'turn_started', prompt: [{ type: 'text', text: 'hi' }] },
   { kind: 'session_update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'PONG' } } },
-  { kind: 'metadata', params: { sessionId: 's', meteringUsage: [{ value: 0.04, unit: 'credit', unitPlural: 'credits' }], turnDurationMs: 1916 } },
-  { kind: 'context_usage', percentage: 15.9 },
+  { kind: 'metadata', params: { sessionId: 's', contextUsagePercentage: 15.9, meteringUsage: [{ value: 0.04, unit: 'credit', unitPlural: 'credits' }], turnDurationMs: 1916 } },
   { kind: 'turn_ended', stopReason: 'end_turn' },
   // A second turn adds more credits.
   { kind: 'turn_started', prompt: [{ type: 'text', text: 'again' }] },
-  { kind: 'metadata', params: { sessionId: 's', meteringUsage: [{ value: 0.06, unit: 'credit', unitPlural: 'credits' }], turnDurationMs: 3000 } },
-  { kind: 'context_usage', percentage: 22.1 },
+  { kind: 'metadata', params: { sessionId: 's', contextUsagePercentage: 22.1, meteringUsage: [{ value: 0.06, unit: 'credit', unitPlural: 'credits' }], turnDurationMs: 3000 } },
   { kind: 'turn_ended', stopReason: 'end_turn' },
 ];
 
@@ -56,7 +54,7 @@ const snap = ts.get();
 
 check(Math.abs(snap.creditsSpent - 0.1) < 1e-9, `cumulative credits accumulate across turns (${snap.creditsSpent.toFixed(4)})`);
 check(Math.abs(snap.lastTurnCredits - 0.06) < 1e-9, `lastTurnCredits reflects most recent turn (${snap.lastTurnCredits})`);
-check(snap.contextUsagePercentage === 22.1, `context_usage sets latest context fill (${snap.contextUsagePercentage})`);
+check(snap.contextUsagePercentage === 22.1, `contextUsagePercentage takes latest value (${snap.contextUsagePercentage})`);
 check(snap.lastTurnDurationMs === 3000, `lastTurnDurationMs takes latest value (${snap.lastTurnDurationMs})`);
 check(snap.turnStatus === 'idle', 'turnStatus returns to idle after turn_ended');
 check(snap.mcpServers.length === 2, 'both MCP servers tracked');
@@ -190,6 +188,47 @@ check(
     fs.rmSync(path.join(config.casperDataDir, 'replay-regression-test.events.jsonl'), {
       force: true,
     });
+  } catch {
+    /* best effort */
+  }
+}
+
+// Regression: re-opening a session mid-turn must not drop the in-flight user
+// message. kiro persists a turn only at completion, so the hydrated transcript
+// lacks it; replayHead rewinds the cursor to replay the in-flight turn_started.
+{
+  const noopLog = {
+    info() {}, warn() {}, error() {}, debug() {}, trace() {}, fatal() {},
+    child() {
+      return noopLog;
+    },
+  } as unknown as import('../server/src/util/logger.js').Logger;
+  const mgr = new SessionManager(noopLog) as unknown as {
+    replayHead(s: unknown, t: unknown): number;
+  };
+  const store = new EventStore('replayhead-test', noopLog);
+  const session = new Session('replayhead-test', store, '/tmp');
+  session.running = true;
+  const ev = session.record({ kind: 'turn_started', prompt: [{ type: 'text', text: 'hello there' }] });
+
+  check(
+    mgr.replayHead(session, []) === ev.seq - 1,
+    'replayHead: rewinds to replay an in-flight turn missing from hydrate',
+  );
+  const hydrated = [{ type: 'message', message: { id: 'u1', role: 'user', text: 'hello there' } }];
+  check(
+    mgr.replayHead(session, hydrated) === store.head(),
+    'replayHead: no rewind when the prompt is already hydrated',
+  );
+  session.running = false;
+  check(
+    mgr.replayHead(session, []) === store.head(),
+    'replayHead: uses head when no turn is in flight',
+  );
+
+  store.dispose();
+  try {
+    fs.rmSync(path.join(config.casperDataDir, 'replayhead-test.events.jsonl'), { force: true });
   } catch {
     /* best effort */
   }

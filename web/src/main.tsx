@@ -19,6 +19,17 @@ if ('serviceWorker' in navigator) {
     reloading = true;
     window.location.reload();
   });
+  // Proactively check for a new service worker on load and whenever the tab
+  // regains focus. Combined with the worker's skipWaiting + clientsClaim, this
+  // makes a fresh deploy activate and reload without a manual hard refresh.
+  navigator.serviceWorker.ready
+    .then((reg) => {
+      reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    })
+    .catch(() => {});
 }
 
 createRoot(document.getElementById('root')!).render(

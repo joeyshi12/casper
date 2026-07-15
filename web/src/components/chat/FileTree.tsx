@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FileEntry } from '@casper/shared';
 import { api } from '../../api/rest.js';
-import { getHighlighter } from '../../util/highlighter.js';
+import { highlightToHtml } from '../../util/highlighter.js';
 import {
   FileIcon,
   FileCodeIcon,
@@ -447,20 +447,10 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
           }
           const text = await res.text();
 
-          // Attempt syntax highlighting.
+          // Attempt syntax highlighting (grammar loaded lazily on demand).
           let html: string | null = null;
           const lang = langFromFilename(entry.name);
-          if (lang) {
-            try {
-              const hl = await getHighlighter();
-              const supported = hl.getLoadedLanguages().includes(lang as never);
-              if (supported) {
-                html = hl.codeToHtml(text, { lang, theme: 'aurora-x' });
-              }
-            } catch {
-              // Fall back to plain text.
-            }
-          }
+          if (lang) html = await highlightToHtml(text, lang);
 
           setPreview((p) =>
             p && p.path === entry.path
