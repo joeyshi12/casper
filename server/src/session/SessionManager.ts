@@ -286,6 +286,9 @@ export class SessionManager {
       s.markLive();
       s.proc = proc;
       s.spawning = undefined;
+      // Correct the context meter to kiro's live value as soon as the process
+      // is up (the seeded/persisted percentage uses a different window).
+      await this.refreshContextUsage(s);
       return proc;
     })();
 
@@ -372,10 +375,14 @@ export class SessionManager {
 
     proc
       .prompt({ sessionId: s.sessionId, prompt: content })
-      .then((res) => s.record({ kind: 'turn_ended', stopReason: res.stopReason }))
-      .catch((err: Error) => {
+      .then(async (res) => {
+        s.record({ kind: 'turn_ended', stopReason: res.stopReason });
+        await this.refreshContextUsage(s);
+      })
+      .catch(async (err: Error) => {
         this.log.error({ err, sessionId: s.sessionId }, 'prompt turn failed');
         s.record({ kind: 'turn_error', message: err.message });
+        await this.refreshContextUsage(s);
       })
       .finally(() => {
         s.running = false;
@@ -386,6 +393,20 @@ export class SessionManager {
   cancel(sessionId: string): void {
     const s = this.sessions.get(sessionId);
     s?.proc?.cancel(s.sessionId);
+  }
+
+  /**
+   * Update the session's context-window fill from kiro's `context` command,
+   * which matches the TUI (the metadata notification reports a different
+   * window). No-ops if the process is gone or the command fails.
+   */
+  private async refreshContextUsage(s: Session): Promise<void> {
+    const proc = s.proc;
+    if (!proc) return;
+    const pct = await proc.queryContextUsage(s.sessionId);
+    if (typeof pct === 'number') {
+      s.record({ kind: 'context_usage', percentage: pct });
+    }
   }
 
   async setMode(sessionId: string, modeId: string): Promise<void> {

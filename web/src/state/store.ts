@@ -245,9 +245,6 @@ export const useStore = create<CasperState>((set, get) => ({
         set({
           observability: {
             ...state.observability,
-            contextUsagePercentage:
-              p.params.contextUsagePercentage ??
-              state.observability.contextUsagePercentage,
             creditsSpent:
               turnCredits > 0
                 ? state.observability.creditsSpent + turnCredits
@@ -260,6 +257,15 @@ export const useStore = create<CasperState>((set, get) => ({
         });
         break;
       }
+
+      case 'context_usage':
+        set({
+          observability: {
+            ...state.observability,
+            contextUsagePercentage: p.percentage,
+          },
+        });
+        break;
 
       case 'subagent_update':
         set({

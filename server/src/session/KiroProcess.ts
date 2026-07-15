@@ -142,6 +142,29 @@ export class KiroProcess extends EventEmitter {
     });
   }
 
+  /**
+   * Ask kiro for the live context-window fill (0-100), matching the TUI. Uses
+   * the adjacently-tagged command shape kiro expects ({ command, args }); the
+   * result carries data.contextUsagePercentage. Read-only; returns undefined on
+   * any failure so callers can no-op.
+   */
+  async queryContextUsage(sessionId: string): Promise<number | undefined> {
+    try {
+      const res = await this.client.request<{
+        success?: boolean;
+        data?: { contextUsagePercentage?: number };
+      }>(
+        ACP_METHODS.commandsExecute,
+        { sessionId, command: { command: 'context', args: {} } },
+        30_000,
+      );
+      const pct = res?.data?.contextUsagePercentage;
+      return typeof pct === 'number' ? pct : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   get isInitialized(): boolean {
     return this.initialized;
   }

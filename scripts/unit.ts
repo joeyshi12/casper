@@ -40,11 +40,13 @@ const events: CasperEventPayload[] = [
   { kind: 'mcp_health', params: { sessionId: 's', serverName: 'pippin-mcp', error: 'boom' }, ok: false },
   { kind: 'turn_started', prompt: [{ type: 'text', text: 'hi' }] },
   { kind: 'session_update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'PONG' } } },
-  { kind: 'metadata', params: { sessionId: 's', contextUsagePercentage: 15.9, meteringUsage: [{ value: 0.04, unit: 'credit', unitPlural: 'credits' }], turnDurationMs: 1916 } },
+  { kind: 'metadata', params: { sessionId: 's', meteringUsage: [{ value: 0.04, unit: 'credit', unitPlural: 'credits' }], turnDurationMs: 1916 } },
+  { kind: 'context_usage', percentage: 15.9 },
   { kind: 'turn_ended', stopReason: 'end_turn' },
   // A second turn adds more credits.
   { kind: 'turn_started', prompt: [{ type: 'text', text: 'again' }] },
-  { kind: 'metadata', params: { sessionId: 's', contextUsagePercentage: 22.1, meteringUsage: [{ value: 0.06, unit: 'credit', unitPlural: 'credits' }], turnDurationMs: 3000 } },
+  { kind: 'metadata', params: { sessionId: 's', meteringUsage: [{ value: 0.06, unit: 'credit', unitPlural: 'credits' }], turnDurationMs: 3000 } },
+  { kind: 'context_usage', percentage: 22.1 },
   { kind: 'turn_ended', stopReason: 'end_turn' },
 ];
 
@@ -54,7 +56,7 @@ const snap = ts.get();
 
 check(Math.abs(snap.creditsSpent - 0.1) < 1e-9, `cumulative credits accumulate across turns (${snap.creditsSpent.toFixed(4)})`);
 check(Math.abs(snap.lastTurnCredits - 0.06) < 1e-9, `lastTurnCredits reflects most recent turn (${snap.lastTurnCredits})`);
-check(snap.contextUsagePercentage === 22.1, `contextUsagePercentage takes latest value (${snap.contextUsagePercentage})`);
+check(snap.contextUsagePercentage === 22.1, `context_usage sets latest context fill (${snap.contextUsagePercentage})`);
 check(snap.lastTurnDurationMs === 3000, `lastTurnDurationMs takes latest value (${snap.lastTurnDurationMs})`);
 check(snap.turnStatus === 'idle', 'turnStatus returns to idle after turn_ended');
 check(snap.mcpServers.length === 2, 'both MCP servers tracked');
