@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import {
   emptyObservabilitySnapshot,
+  imageAttachmentPaths,
+  stripAttachmentsLine,
   type AgentMode,
   type CasperEvent,
   type ModelInfo,
@@ -128,22 +130,27 @@ export const useStore = create<CasperState>((set, get) => ({
 
     switch (p.kind) {
       case 'turn_started': {
-        const text = p.prompt
+        const rawText = p.prompt
           .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
           .map((b) => b.text)
           .join('');
+        const text = stripAttachmentsLine(rawText);
+        const imagePaths = imageAttachmentPaths(rawText);
+        // Drop the oldest optimistic bubble still marked 'sending' - turns are
+        // serialized server-side, so this turn_started is that send's echo.
+        const sendingIdx = state.pending.findIndex((pm) => pm.status === 'sending');
         set({
           items: [
             ...state.items,
             {
               type: 'message',
-              message: { id: `u-${e.seq}`, role: 'user', text, timestamp: e.ts },
+              message: { id: `u-${e.seq}`, role: 'user', text, timestamp: e.ts, imagePaths },
             },
           ],
-          // The server confirmed the prompt; drop its optimistic pending copy.
-          pending: state.pending.filter(
-            (pm) => !(pm.status === 'sending' && pm.text === text),
-          ),
+          pending:
+            sendingIdx === -1
+              ? state.pending
+              : state.pending.filter((_, i) => i !== sendingIdx),
           streamingText: '',
           observability: { ...state.observability, turnStatus: 'running' },
         });

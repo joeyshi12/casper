@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PromptContentBlock, UploadedFile } from '@casper/shared';
+import { ATTACHMENTS_PREFIX } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 import { api } from '../../api/rest.js';
 import type { ConnStatus } from '../../api/SessionSocket.js';
@@ -84,29 +85,13 @@ export function Composer({ sessionId, onSend, onCancel, connStatus }: Props) {
   ): Promise<PromptContentBlock[]> => {
     const content: PromptContentBlock[] = [];
 
-    // 1. Preamble listing every saved path, with triage for binaries.
+    // 1. One compact line telling the agent where the files landed. The client
+    // strips this from the displayed bubble and renders image thumbnails from
+    // these paths instead (see shared/attachments).
     if (uploaded.length > 0) {
-      const lines = uploaded.map((u) => {
-        if (u.kind === 'binary') {
-          const t = u.triage;
-          const bits = [
-            `- ${u.path} (${u.size} bytes${t?.fileType ? `; ${t.fileType}` : ''})`,
-          ];
-          if (t?.sha256) bits.push(`    sha256: ${t.sha256}`);
-          if (t?.strings?.length) {
-            bits.push(`    strings (sample): ${t.strings.slice(0, 12).join(' | ')}`);
-          }
-          return bits.join('\n');
-        }
-        return `- ${u.path}`;
-      });
       content.push({
         type: 'text',
-        text:
-          `I've uploaded ${uploaded.length} file(s) to the workspace. They are saved at:\n` +
-          `${lines.join('\n')}\n\n` +
-          `Text files and images are included below. For other files, read them ` +
-          `from the paths above using your tools.`,
+        text: ATTACHMENTS_PREFIX + uploaded.map((u) => u.path).join(', '),
       });
     }
 

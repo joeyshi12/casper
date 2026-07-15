@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PromptContentBlock } from '@casper/shared';
+import { stripAttachmentsLine } from '@casper/shared';
 import { useStore } from './state/store.js';
 import { api, logout } from './api/rest.js';
 import { SessionSocket, type ConnStatus } from './api/SessionSocket.js';
@@ -209,13 +210,16 @@ function Shell({ onLock }: { onLock: () => void }) {
   const send = useCallback(
     (content: PromptContentBlock[]) => {
       const id = `pending-${msgSeqRef.current++}`;
-      // Extract text for the pending message display.
-      const text = content
-        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-        .map((b) => b.text)
-        .join('\n');
+      // Extract text for the pending bubble, minus the machine-facing
+      // "Attached files:" line (the transcript renders thumbnails instead).
+      const text = stripAttachmentsLine(
+        content
+          .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+          .map((b) => b.text)
+          .join('\n'),
+      );
       const hasImages = content.some((b) => b.type === 'image');
-      const displayText = hasImages && !text ? '[image]' : text || '[attachment]';
+      const displayText = text || (hasImages ? '[image]' : '[attachment]');
       useStore.getState().addPending(id, displayText);
       sendMessage(id, content);
     },

@@ -905,6 +905,27 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* Attached-image thumbnails in a user message. */
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.msg-images:not(:last-child) {
+  margin-bottom: 8px;
+}
+.msg-image-link {
+  display: block;
+  line-height: 0;
+}
+.msg-image {
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--n2);
+  object-fit: cover;
+  display: block;
+}
 .msg-pending {
   position: relative;
   opacity: 0.6;

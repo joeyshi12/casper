@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { useStore } from '../../state/store.js';
+import { api } from '../../api/rest.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { ToolCallCard } from './ToolCallCard.js';
 
@@ -120,7 +121,31 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
               {item.message.role === 'assistant' ? (
                 <MarkdownRenderer text={item.message.text} />
               ) : (
-                <div className="msg-user-text">{item.message.text}</div>
+                <>
+                  {activeId && item.message.imagePaths && item.message.imagePaths.length > 0 && (
+                    <div className="msg-images">
+                      {item.message.imagePaths.map((p) => (
+                        <a
+                          key={p}
+                          href={api.previewUrl(activeId, p)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="msg-image-link"
+                        >
+                          <img
+                            src={api.previewUrl(activeId, p)}
+                            alt={p.split('/').pop() ?? 'image'}
+                            className="msg-image"
+                            loading="lazy"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  {item.message.text && (
+                    <div className="msg-user-text">{item.message.text}</div>
+                  )}
+                </>
               )}
             </div>
           )

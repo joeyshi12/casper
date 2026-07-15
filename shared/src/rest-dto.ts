@@ -70,6 +70,8 @@ export interface TranscriptMessage {
   /** Concatenated text content. */
   text: string;
   timestamp?: number;
+  /** Relative workspace paths of images attached to a user message. */
+  imagePaths?: string[];
 }
 
 /** A tool-call entry in a session transcript (matches the live tool_call view). */

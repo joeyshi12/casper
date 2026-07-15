@@ -16,6 +16,12 @@ import {
   realConfineToRoot,
 } from '../server/src/util/paths.js';
 import { classifyKind, looksBinary } from '../server/src/util/filekind.js';
+import {
+  ATTACHMENTS_PREFIX,
+  attachmentPaths,
+  imageAttachmentPaths,
+  stripAttachmentsLine,
+} from '@casper/shared';
 
 let failures = 0;
 function check(cond: unknown, msg: string): void {
@@ -114,6 +120,24 @@ check(
   looksBinary(Buffer.from([0x01, 0x01, 0x01, 0x01, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41])),
   'looksBinary: 40% control chars is binary',
 );
+
+// Attachment line: the compact "Attached files:" line drives image thumbnails
+// and is stripped from the displayed bubble.
+{
+  const msg = `${ATTACHMENTS_PREFIX}.casper/uploads/a.png, .casper/uploads/notes.txt\nplease review`;
+  const paths = attachmentPaths(msg);
+  check(paths.length === 2 && paths[0] === '.casper/uploads/a.png', 'attachmentPaths: parses both paths');
+  check(
+    imageAttachmentPaths(msg).join() === '.casper/uploads/a.png',
+    'imageAttachmentPaths: keeps only images',
+  );
+  check(stripAttachmentsLine(msg) === 'please review', 'stripAttachmentsLine: removes the attachments line');
+  check(attachmentPaths('just a message').length === 0, 'attachmentPaths: none when absent');
+  check(
+    stripAttachmentsLine('hello world') === 'hello world',
+    'stripAttachmentsLine: unchanged without the line',
+  );
+}
 
 // Regression: kiro replays the entire conversation as notifications during
 // session/load. The transcript is already hydrated from disk, so those must be

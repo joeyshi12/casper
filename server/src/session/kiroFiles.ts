@@ -6,6 +6,7 @@ import type {
   TranscriptMessage,
   TranscriptToolCall,
 } from '@casper/shared';
+import { imageAttachmentPaths, stripAttachmentsLine } from '@casper/shared';
 import { config } from '../config.js';
 import type { Logger } from '../util/logger.js';
 import { isValidSessionId } from '../util/paths.js';
@@ -202,8 +203,11 @@ export async function hydrateTranscript(sessionId: string): Promise<TranscriptIt
     const pushMsg = (msg: TranscriptMessage) => items.push({ type: 'message', message: msg });
 
     if (entry.kind === 'Prompt') {
-      const text = textOf('text');
-      if (text.trim()) pushMsg({ id: `u-${baseId}`, role: 'user', text, timestamp: ts });
+      const raw = textOf('text');
+      const text = stripAttachmentsLine(raw);
+      const imagePaths = imageAttachmentPaths(raw);
+      if (text.trim() || imagePaths.length)
+        pushMsg({ id: `u-${baseId}`, role: 'user', text, timestamp: ts, imagePaths });
     } else if (entry.kind === 'AssistantMessage') {
       // Order within an assistant turn: reasoning, spoken text, then tool uses.
       const thinking = textOf('thinking');
