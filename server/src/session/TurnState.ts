@@ -74,6 +74,12 @@ export class TurnState {
         this.snapshot = { ...s, availableCommands: payload.params.commands };
         break;
       }
+      case 'compaction': {
+        // 'started' -> compacting; 'completed'/'failed' -> done. Context drops
+        // arrive separately via the metadata event.
+        this.snapshot = { ...s, compacting: payload.params.status.type === 'started' };
+        break;
+      }
       case 'oauth_request': {
         const prompts = [
           ...s.oauthPrompts,

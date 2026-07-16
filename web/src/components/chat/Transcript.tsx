@@ -3,6 +3,7 @@ import { useStore } from '../../state/store.js';
 import { api } from '../../api/rest.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { ToolCallCard } from './ToolCallCard.js';
+import { CompressIcon } from '../common/icons.js';
 
 interface Props {
   onRetry: (id: string, text: string) => void;
@@ -153,8 +154,10 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
               )}
             </div>
           )
-        ) : (
+        ) : item.type === 'tool_call' ? (
           <ToolCallCard key={item.tool.id} tool={item.tool} />
+        ) : (
+          <CompactionBlock key={item.id} summary={item.summary} />
         ),
       )}
 
@@ -236,6 +239,36 @@ function ThoughtBlock({ text, live = false }: { text: string; live?: boolean }) 
       {open && (
         <div className="thought-body">
           <MarkdownRenderer text={text} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A durable divider marking where the conversation was compacted. Everything
+ * above it was condensed by kiro into the summary shown here (which is what the
+ * model now carries as context). Collapsed by default since these summaries are
+ * long; click to reveal the full summary.
+ */
+function CompactionBlock({ summary }: { summary: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="compaction">
+      <div className="compaction-rule">
+        <button
+          className="compaction-head"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+        >
+          <CompressIcon size={14} className="compaction-icon" />
+          <span className="compaction-label">Conversation compacted</span>
+          <span className="compaction-toggle">{open ? 'Hide summary' : 'Show summary'}</span>
+        </button>
+      </div>
+      {open && (
+        <div className="compaction-body">
+          <MarkdownRenderer text={summary} />
         </div>
       )}
     </div>

@@ -42,6 +42,8 @@ export interface ObservabilitySnapshot {
   mcpServers: McpServerHealth[];
   availableCommands: KiroCommand[];
   oauthPrompts: OauthPrompt[];
+  /** True while a /compact operation is in progress. */
+  compacting: boolean;
 }
 
 export function emptyObservabilitySnapshot(): ObservabilitySnapshot {
@@ -56,5 +58,6 @@ export function emptyObservabilitySnapshot(): ObservabilitySnapshot {
     mcpServers: [],
     availableCommands: [],
     oauthPrompts: [],
+    compacting: false,
   };
 }

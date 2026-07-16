@@ -62,6 +62,15 @@ check(snap.mcpServers.find((m) => m.serverName === 'pippin-mcp')?.status === 'fa
 check(snap.mcpServers.find((m) => m.serverName === 'builder-mcp')?.status === 'initialized', 'healthy MCP server marked initialized');
 check(snap.availableCommands.length === 1, 'available commands captured');
 
+// Compaction: 'started' flips compacting on, 'completed' clears it (context
+// changes arrive separately via metadata).
+const tsc = new TurnState();
+check(tsc.get().compacting === false, 'compacting defaults to false');
+tsc.apply({ kind: 'compaction', params: { sessionId: 's', status: { type: 'started' }, summary: null } });
+check(tsc.get().compacting === true, 'compaction started sets compacting true');
+tsc.apply({ kind: 'compaction', params: { sessionId: 's', status: { type: 'completed' }, summary: 'sum' } });
+check(tsc.get().compacting === false, 'compaction completed clears compacting');
+
 // Seed (resume path) should set cumulative baseline.
 const ts2 = new TurnState();
 ts2.seed(1.5, 40);
@@ -136,6 +145,24 @@ check(
   check(
     stripAttachmentsLine('hello world') === 'hello world',
     'stripAttachmentsLine: unchanged without the line',
+  );
+}
+
+// Regression: a pasted-image-plus-text message. The composer terminates the
+// attachments line with '\n', so the store's turn_started echo and
+// hydrateTranscript (which join prompt text blocks with '', not '\n') still
+// recover the typed text and the image path - otherwise the whole line-based
+// strip swallowed the message and the bubble rendered empty.
+{
+  const attLine = `${ATTACHMENTS_PREFIX}.casper/uploads/pasted.png\n`;
+  const joinedEmpty = [attLine, 'look at this'].join('');
+  check(
+    stripAttachmentsLine(joinedEmpty) === 'look at this',
+    'attachments+text: typed text survives an empty-string join',
+  );
+  check(
+    imageAttachmentPaths(joinedEmpty).join() === '.casper/uploads/pasted.png',
+    'attachments+text: image path parsed after an empty-string join',
   );
 }
 

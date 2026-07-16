@@ -1007,6 +1007,64 @@
   font-style: italic;
 }
 
+/* Compaction divider - marks where kiro condensed the history into a summary. */
+.compaction {
+  align-self: stretch;
+  width: 100%;
+  margin: 6px 0;
+}
+.compaction-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.compaction-rule::before,
+.compaction-rule::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--n2);
+}
+.compaction-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: var(--r-pill, 999px);
+  border: 1px solid var(--n2);
+  background: var(--n1);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--n4);
+  cursor: pointer;
+}
+.compaction-head:hover {
+  color: var(--n6);
+  border-color: var(--n3);
+}
+.compaction-icon {
+  flex-shrink: 0;
+  color: var(--frost-deep);
+}
+.compaction-toggle {
+  color: var(--n3);
+  font-weight: 500;
+}
+.compaction-body {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--n2);
+  border-radius: var(--r-md);
+  background: var(--n1);
+}
+.compaction-body .md,
+.compaction-body .md p,
+.compaction-body .md li {
+  font-size: 13px;
+  color: var(--n5);
+}
+
 /* Markdown */
 .md {
   overflow-wrap: break-word;
@@ -1426,6 +1484,52 @@
 .composer-plus:disabled {
   color: var(--n3);
   cursor: not-allowed;
+}
+.composer-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.composer-menu {
+  position: absolute;
+  bottom: 42px;
+  left: 0;
+  z-index: 40;
+  min-width: 210px;
+  padding: 5px;
+  background: var(--n0);
+  border: 1px solid var(--n2);
+  border-radius: var(--r-md);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  animation: fade-in 0.12s ease;
+}
+.composer-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 11px;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  color: var(--n5);
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+.composer-menu-item:hover:not(:disabled) {
+  background: var(--n2);
+  color: var(--n6);
+}
+.composer-menu-item:disabled {
+  color: var(--n3);
+  cursor: not-allowed;
+}
+.composer-menu-icon {
+  flex-shrink: 0;
+  color: var(--n4);
+}
+.composer-menu-label {
+  white-space: nowrap;
 }
 .composer-input {
   flex: 1;
@@ -1902,6 +2006,10 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
+  /* dvh tracks the visible viewport (mobile address bar) so the centered modal
+     never extends past the screen; vh is the fallback. */
+  height: 100vh;
+  height: 100dvh;
   animation: fade-in 0.15s ease;
 }
 .fpreview-modal {
@@ -1910,6 +2018,7 @@
   width: 100%;
   max-width: 720px;
   max-height: 85vh;
+  max-height: 85dvh;
   background: var(--n0);
   border: 1px solid var(--n2);
   border-radius: var(--r-lg);
@@ -2005,6 +2114,7 @@
   }
   .fpreview-modal {
     max-height: 90vh;
+    max-height: 90dvh;
   }
 }
 

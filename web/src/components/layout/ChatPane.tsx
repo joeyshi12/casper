@@ -24,6 +24,7 @@ interface Props {
   onNew: () => void;
   onChangeModel: (modelId: string) => void;
   onChangeAgent: (modeId: string) => void;
+  onCompact: () => void;
 }
 
 /** The right-hand chat area. Shows an empty prompt when no session is open. */
@@ -41,6 +42,7 @@ export function ChatPane({
   onNew,
   onChangeModel,
   onChangeAgent,
+  onCompact,
 }: Props) {
   const currentModeId = useStore((s) => s.currentModeId);
   const currentModelId = useStore((s) => s.currentModelId);
@@ -139,6 +141,7 @@ export function ChatPane({
             sessionId={activeId}
             onSend={onSend}
             onCancel={onCancel}
+            onCompact={onCompact}
             connStatus={connStatus}
           />
           <div className="composer-bar">

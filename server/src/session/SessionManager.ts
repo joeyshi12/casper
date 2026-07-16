@@ -7,6 +7,7 @@ import {
   type CasperEventPayload,
   type JsonRpcNotification,
   type KiroCommandsAvailableParams,
+  type KiroCompactionStatusParams,
   type KiroMcpServerParams,
   type KiroMetadataParams,
   type KiroOauthRequestParams,
@@ -131,6 +132,8 @@ function mapNotification(n: JsonRpcNotification): CasperEventPayload | null {
       return { kind: 'mcp_health', params: n.params as KiroMcpServerParams, ok: false };
     case KIRO_NOTIFICATIONS.commandsAvailable:
       return { kind: 'commands_available', params: n.params as KiroCommandsAvailableParams };
+    case KIRO_NOTIFICATIONS.compactionStatus:
+      return { kind: 'compaction', params: n.params as KiroCompactionStatusParams };
     case KIRO_NOTIFICATIONS.mcpOauthRequest:
       return { kind: 'oauth_request', params: n.params as KiroOauthRequestParams };
     default:

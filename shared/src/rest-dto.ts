@@ -85,10 +85,11 @@ export interface TranscriptToolCall {
   content: unknown[];
 }
 
-/** A transcript entry: a message or an inline tool call. */
+/** A transcript entry: a message, an inline tool call, or a compaction marker. */
 export type TranscriptItem =
   | { type: 'message'; message: TranscriptMessage }
-  | { type: 'tool_call'; tool: TranscriptToolCall };
+  | { type: 'tool_call'; tool: TranscriptToolCall }
+  | { type: 'compaction'; id: string; summary: string; timestamp?: number };
 
 export interface SessionDetail {
   summary: SessionSummary;

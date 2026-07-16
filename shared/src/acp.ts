@@ -294,16 +294,28 @@ export interface KiroCommandsAvailableParams {
   commands: KiroCommand[];
 }
 
+/** Progress of a /compact operation (`_kiro.dev/compaction/status`). */
+export interface KiroCompactionStatusParams {
+  sessionId: string;
+  status: { type: 'started' | 'completed' | 'failed' | string };
+  /** The conversation summary once compaction completes (null while running). */
+  summary: string | null;
+}
+
 export interface KiroOauthRequestParams {
   sessionId: string;
   serverName?: string;
   url: string;
 }
 
+/**
+ * `_kiro.dev/commands/execute` params. The command is a structured object -
+ * the name has no leading slash (advertised "/compact", executed "compact")
+ * and args is an object (empty for no-arg commands like compact/context).
+ */
 export interface KiroCommandsExecuteParams {
   sessionId: string;
-  command: string;
-  args?: string;
+  command: { command: string; args: Record<string, unknown> };
 }
 
 // Well-known method names, so string literals never drift.
@@ -327,4 +339,5 @@ export const KIRO_NOTIFICATIONS = {
   mcpServerInitFailure: '_kiro.dev/mcp/server_init_failure',
   commandsAvailable: '_kiro.dev/commands/available',
   mcpOauthRequest: '_kiro.dev/mcp/oauth_request',
+  compactionStatus: '_kiro.dev/compaction/status',
 } as const;

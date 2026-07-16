@@ -11,6 +11,7 @@
 
 import type {
   KiroCommandsAvailableParams,
+  KiroCompactionStatusParams,
   KiroMcpServerParams,
   KiroMetadataParams,
   KiroOauthRequestParams,
@@ -51,6 +52,12 @@ export interface CommandsAvailableEvent {
   params: KiroCommandsAvailableParams;
 }
 
+/** Progress of a /compact operation, so the client can show a compacting state. */
+export interface CompactionEvent {
+  kind: 'compaction';
+  params: KiroCompactionStatusParams;
+}
+
 export interface OauthRequestEvent {
   kind: 'oauth_request';
   params: KiroOauthRequestParams;
@@ -85,6 +92,7 @@ export type CasperEventPayload =
   | SubagentEvent
   | McpHealthEvent
   | CommandsAvailableEvent
+  | CompactionEvent
   | OauthRequestEvent
   | TurnStartedEvent
   | TurnEndedEvent

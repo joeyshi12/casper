@@ -294,6 +294,25 @@ export const useStore = create<CasperState>((set, get) => ({
         });
         break;
 
+      case 'compaction': {
+        const done = p.params.status.type !== 'started';
+        const summary = p.params.summary ?? '';
+        set({
+          observability: { ...state.observability, compacting: !done },
+          // On completion, drop a durable divider into the transcript so the
+          // user sees what kiro condensed the history into (and why context
+          // dropped). Reloads reconstruct the same item from the .jsonl.
+          items:
+            done && summary.trim()
+              ? [
+                  ...state.items,
+                  { type: 'compaction', id: `c-${e.seq}`, summary, timestamp: e.ts },
+                ]
+              : state.items,
+        });
+        break;
+      }
+
       case 'oauth_request':
         set({
           observability: {

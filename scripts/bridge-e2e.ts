@@ -179,6 +179,48 @@ async function main() {
     await api('POST', `/api/sessions/${sid}/model`, { modelId: 'auto' });
     console.log('✅ set_model round-trip ok');
 
+    // 8. Compact the conversation: exec_command 'compact' triggers kiro's
+    // compaction, which emits compaction/status started -> completed.
+    const wsC = new WebSocket(`${WSBASE}/ws?sessionId=${sid}&cursor=0`, {
+      headers: cookie ? { cookie } : {},
+    });
+    const compactionEvents: CasperEvent[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('compaction timed out')), 60_000);
+      let sent = false;
+      wsC.on('message', (raw) => {
+        const msg = JSON.parse(raw.toString()) as ServerMessage;
+        if (msg.type === 'replay_complete' && !sent) {
+          sent = true; // attached + caught up; safe to send the command now
+          wsC.send(JSON.stringify({ type: 'exec_command', command: 'compact' }));
+        } else if (msg.type === 'event' && msg.event.payload.kind === 'compaction') {
+          compactionEvents.push(msg.event);
+          if (msg.event.payload.params.status.type === 'completed') {
+            clearTimeout(timer);
+            resolve();
+          }
+        }
+      });
+      wsC.on('error', reject);
+    });
+    wsC.close();
+    const started = compactionEvents.some(
+      (e) => e.payload.kind === 'compaction' && e.payload.params.status.type === 'started',
+    );
+    assert(started, 'compaction emitted a started status');
+    assert(compactionEvents.length >= 2, 'compaction emitted started -> completed');
+    const afterCompact = await api<SessionDetail>('GET', `/api/sessions/${sid}`);
+    assert(
+      afterCompact.observability.compacting === false,
+      'compacting flag is cleared after completion',
+    );
+    // The compaction is durable: hydrate reconstructs it from the .jsonl.
+    const compactionItem = afterCompact.transcript.find((it) => it.type === 'compaction');
+    assert(
+      compactionItem && 'summary' in compactionItem && compactionItem.summary.trim().length > 0,
+      'compaction appears in the hydrated transcript with a summary',
+    );
+
     console.log('\n🎉 Bridge E2E passed.');
   } finally {
     // Clean up the throwaway session (memory + kiro files + event mirror).

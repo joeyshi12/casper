@@ -135,10 +135,12 @@ export class KiroProcess extends EventEmitter {
   }
 
   execCommand(sessionId: string, command: string, args?: string): Promise<unknown> {
+    // kiro expects a structured command: { command: <name>, args: <object> }.
+    // The name has no leading slash (advertised as "/compact", executed as
+    // "compact"). A flat string param crashes the agent.
     return this.client.request(ACP_METHODS.commandsExecute, {
       sessionId,
-      command,
-      args,
+      command: { command: command.replace(/^\//, ''), args: args ? { input: args } : {} },
     });
   }
 

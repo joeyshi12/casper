@@ -72,6 +72,8 @@ interface KiroJsonlEntry {
     message_id?: string;
     content?: KiroContentBlock[];
     meta?: { timestamp?: number };
+    /** Present on `Compaction` entries: the conversation summary. */
+    summary?: string;
   };
 }
 
@@ -240,6 +242,12 @@ export async function hydrateTranscript(sessionId: string): Promise<TranscriptIt
         tool.status = d.status === 'error' ? 'failed' : 'completed';
         tool.content = d.content ?? [];
       }
+    } else if (entry.kind === 'Compaction') {
+      // kiro appends a Compaction entry (it does not rewrite prior entries) whose
+      // summary becomes the working context. Surface it as a durable divider.
+      const summary = entry.data.summary ?? '';
+      if (summary.trim())
+        items.push({ type: 'compaction', id: `c-${baseId}`, summary, timestamp: ts });
     }
   }
   return items;

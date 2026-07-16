@@ -256,6 +256,12 @@ function Shell({ onLock }: { onLock: () => void }) {
     socketRef.current?.setMode(modeId);
     useStore.setState({ currentModeId: modeId });
   }, []);
+  const compact = useCallback(() => {
+    socketRef.current?.execCommand('compact');
+    // Optimistic: flip to compacting until the server's compaction/status
+    // 'started' (which confirms) and 'completed' (which clears) arrive.
+    useStore.setState((s) => ({ observability: { ...s.observability, compacting: true } }));
+  }, []);
 
   // Lock the app: clear the session cookie server-side, tear down the socket,
   // and clear the active session so nothing lingers behind the login gate.
@@ -293,6 +299,7 @@ function Shell({ onLock }: { onLock: () => void }) {
         onNew={() => setNewOpen(true)}
         onChangeModel={changeModel}
         onChangeAgent={changeAgent}
+        onCompact={compact}
       />
       {newOpen && (
         <NewSessionSheet onCreate={createSession} onClose={() => setNewOpen(false)} />
