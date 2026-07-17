@@ -18,6 +18,18 @@ import {
 import { classifyKind, looksBinary } from '../server/src/util/filekind.js';
 import { bumpSessionToTop } from '../web/src/state/sessions.js';
 import { olderPageRequest } from '../web/src/state/pagination.js';
+import { lineDiff } from '../web/src/util/diff.js';
+import {
+  classifyTool,
+  toolLabel,
+  langFromPath,
+  outputText,
+  firstJsonData,
+  firstDiff,
+  parseTodo,
+  outputToBlocks,
+  toolBlocks,
+} from '../web/src/util/toolRender.js';
 import type { SessionSummary } from '@casper/shared';
 import {
   ATTACHMENTS_PREFIX,
@@ -307,6 +319,119 @@ check(
     remaining -= limit;
   }
   check(offsets.join() === '120,40,0' && remaining === 0, 'pagination: pages tile down to zero');
+}
+
+
+// Tool-call rendering helpers.
+{
+  // classifyTool: persisted calls carry the tool name as title; live calls
+  // carry a human title but a reliable kind + rawInput. Both must classify.
+  const cls = classifyTool;
+  // Persisted (title = tool name, no kind).
+  check(cls({ title: 'shell', input: { command: 'ls -la' } }) === 'shell', 'classify: persisted shell');
+  check(cls({ title: 'write', input: { command: 'create', path: '/a.ts', content: 'x' } }) === 'write', 'classify: persisted write create');
+  check(cls({ title: 'read', input: { operations: [{ mode: 'Line', path: '/a' }] } }) === 'read', 'classify: persisted read');
+  check(cls({ title: 'grep', input: { pattern: 'foo' } }) === 'grep', 'classify: persisted grep');
+  check(cls({ title: 'todo_list', input: { command: 'create', tasks: [] } }) === 'todo', 'classify: persisted todo');
+  // Live (human title, reliable kind).
+  check(cls({ title: 'Editing app.css', kind: 'edit', input: { command: 'strReplace', path: '/x', oldStr: 'a', newStr: 'b' } }) === 'write', 'classify: live edit -> write');
+  check(cls({ title: "Searching for 'x'", kind: 'search', input: { pattern: 'x', path: '/y' } }) === 'grep', 'classify: live search -> grep');
+  check(cls({ title: 'Running a command', kind: 'execute', input: { command: 'git status' } }) === 'shell', 'classify: live execute -> shell');
+  check(cls({ title: 'Reading dir', kind: 'read', input: { operations: [{ mode: 'Directory', path: '/z' }] } }) === 'read', 'classify: live read');
+  check(cls({ title: 'Completing #1', input: { command: 'complete', completed_task_ids: ['1'] } }) === 'todo', 'classify: live todo complete');
+  // Live create edit still shows the whole file (write), not misread as todo.
+  check(cls({ title: 'Creating x.ts', kind: 'edit', input: { command: 'create', path: '/x.ts', content: 'y' } }) === 'write', 'classify: live create -> write (not todo)');
+  check(cls({ title: 'mystery', input: {} }) === 'generic', 'classify: unknown -> generic');
+
+  // toolLabel: the header title must be identical whether the call is live
+  // (human ACP title) or hydrated (tool name).
+  check(
+    toolLabel({ title: 'Editing app.css', kind: 'edit', input: { command: 'strReplace', path: '/x', oldStr: 'a', newStr: 'b' } }) === 'write' &&
+      toolLabel({ title: 'write', input: { command: 'strReplace', path: '/x', oldStr: 'a', newStr: 'b' } }) === 'write',
+    'toolLabel: write consistent live vs hydrated',
+  );
+  check(
+    toolLabel({ title: 'Running: echo hi', kind: 'execute', input: { command: 'echo hi' } }) === 'shell' &&
+      toolLabel({ title: 'shell', input: { command: 'echo hi' } }) === 'shell',
+    'toolLabel: shell consistent live vs hydrated',
+  );
+  check(
+    toolLabel({ title: 'Creating task list: ...', input: { command: 'create', tasks: [] } }) === 'todo_list' &&
+      toolLabel({ title: 'todo_list', input: { command: 'complete', completed_task_ids: ['1'] } }) === 'todo_list',
+    'toolLabel: todo_list consistent live vs hydrated',
+  );
+  check(toolLabel({ title: 'web_fetch', input: {} }) === 'web_fetch', 'toolLabel: generic keeps a single-token name');
+  check(toolLabel({ title: 'Fetching a page', input: {} }) === 'tool', 'toolLabel: generic human title -> tool');
+
+  // Language from file extension (unknown -> text).
+  check(langFromPath('web/src/App.tsx') === 'tsx', 'lang: .tsx -> tsx');
+  check(langFromPath('a/b/styles.css') === 'css', 'lang: .css -> css');
+  check(langFromPath('/tmp/x.py') === 'python', 'lang: .py -> python');
+  check(langFromPath('Dockerfile') === 'docker', 'lang: Dockerfile -> docker');
+  check(langFromPath('/tmp/Caddyfile') === 'text', 'lang: unknown -> text');
+  check(langFromPath('noext') === 'text', 'lang: no extension -> text');
+
+  // outputText normalizes the three content shapes and ignores JSON blocks.
+  check(
+    outputText([{ type: 'content', content: { type: 'text', text: 'live-out' } }]) === 'live-out',
+    'outputText: ACP content block',
+  );
+  check(outputText([{ kind: 'text', data: 'persisted' }]) === 'persisted', 'outputText: persisted text');
+  check(outputText([{ type: 'text', text: 'acp' }]) === 'acp', 'outputText: acp text block');
+  check(outputText([{ kind: 'json', data: { stdout: 'x' } }]) === '', 'outputText: json block ignored');
+
+  // firstJsonData / firstDiff.
+  const j = firstJsonData([{ kind: 'json', data: { exit_status: 'exit status: 0', stdout: 'hi' } }]);
+  check(!!j && j.stdout === 'hi', 'firstJsonData: returns the data object');
+  check(firstJsonData([{ kind: 'text', data: 'x' }]) === null, 'firstJsonData: none when absent');
+  const d = firstDiff([{ type: 'diff', path: '/a.ts', oldText: 'old', newText: 'new' }]);
+  check(!!d && d.oldText === 'old' && d.newText === 'new' && d.path === '/a.ts', 'firstDiff: live diff block');
+  check(firstDiff([{ kind: 'text', data: 'x' }]) === null, 'firstDiff: none when absent');
+
+  // parseTodo from a persisted json block and from a live JSON text block.
+  const persisted = parseTodo([
+    { kind: 'json', data: { tasks: [{ task_description: 'a', completed: true }, { task_description: 'b', completed: false }] } },
+  ]);
+  check(
+    !!persisted && persisted.length === 2 && persisted[0]!.done && !persisted[1]!.done && persisted[0]!.desc === 'a',
+    'parseTodo: persisted json tasks',
+  );
+  const live = parseTodo([
+    { type: 'content', content: { type: 'text', text: '{"tasks":[{"task_description":"c","completed":true}]}' } },
+  ]);
+  check(!!live && live.length === 1 && live[0]!.done && live[0]!.desc === 'c', 'parseTodo: live JSON text tasks');
+  check(parseTodo([{ kind: 'text', data: 'not json' }]) === null, 'parseTodo: none when no task list');
+
+  // Live results arrive in rawOutput ({items:[{Text}|{Json}]}), not content.
+  // outputToBlocks normalizes them so the same extractors work live.
+  check(
+    outputText(outputToBlocks({ items: [{ Text: 'file contents' }] })) === 'file contents',
+    'outputToBlocks: Text item -> text',
+  );
+  const shellJson = firstJsonData(outputToBlocks({ items: [{ Json: { stdout: 'ok', stderr: '', exit_status: 'exit status: 0' } }] }));
+  check(!!shellJson && shellJson.stdout === 'ok', 'outputToBlocks: Json item -> json data');
+  check(outputText(outputToBlocks('raw string')) === 'raw string', 'outputToBlocks: plain string -> text');
+  check(outputToBlocks(null).length === 0, 'outputToBlocks: null -> empty');
+  // A live read: content empty, result in output.
+  check(
+    outputText(toolBlocks({ content: [], output: { items: [{ Text: 'pkg json' }] } })) === 'pkg json',
+    'toolBlocks: live read output text',
+  );
+  // A live todo_list: tasks live in output.Json.
+  const liveTodo = parseTodo(
+    toolBlocks({ content: [], output: { items: [{ Json: { tasks: [{ task_description: 'x', completed: true }] } }] } }),
+  );
+  check(!!liveTodo && liveTodo.length === 1 && liveTodo[0]!.done, 'toolBlocks: live todo tasks from output');
+}
+
+// Line diff (LCS): context kept, only changed lines marked.
+{
+  const d = lineDiff('alpha\nbeta\ngamma', 'alpha\nBETA\ngamma');
+  check(d[0]!.type === 'ctx' && d[0]!.text === 'alpha', 'diff: leading context kept');
+  check(d[d.length - 1]!.type === 'ctx', 'diff: trailing context kept');
+  check(d.some((l) => l.type === 'del' && l.text === 'beta'), 'diff: removed line marked del');
+  check(d.some((l) => l.type === 'add' && l.text === 'BETA'), 'diff: added line marked add');
+  check(lineDiff('x\ny', 'x\ny').every((l) => l.type === 'ctx'), 'diff: identical text all context');
 }
 
 

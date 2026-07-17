@@ -1320,17 +1320,31 @@
 .toolcall-title {
   font-family: var(--font-mono);
   font-size: 12.5px;
-  flex: 1;
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--n5);
+}
+/* Concise header subtitle: command / filename / grep pattern. */
+.toolcall-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--n4);
 }
 .toolcall-status {
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--n3);
   text-transform: lowercase;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 .toolcall-chevron {
   color: var(--n3);
@@ -1351,18 +1365,140 @@
   color: var(--n3);
   margin-bottom: 5px;
 }
-.toolcall-pre {
+/* Chrome-free highlighted code (no bar/border/copy) for tool bodies. */
+.toolcode {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--n-abyss);
+  border-radius: var(--r-sm);
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 460px;
+  font-size: 12px;
+}
+.toolcode pre {
+  margin: 0;
+  padding: 0;
+  background: transparent !important;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.toolcode-plain {
+  font-family: var(--font-mono);
+  color: var(--n5);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.toolcall-exit {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--aurora-red);
+}
+/* File-edit diff. */
+.diff-body {
+  margin-top: 10px;
+  padding: 6px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 460px;
+  background: var(--n-abyss);
+  border-radius: var(--r-sm);
+}
+.diff-line {
+  display: flex;
+  padding-right: 10px;
+}
+.diff-sign {
+  flex: 0 0 auto;
+  width: 20px;
+  text-align: center;
+  color: var(--n3);
+  user-select: none;
+}
+.diff-code {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.diff-add {
+  background: rgba(64, 160, 96, 0.14);
+}
+.diff-add .diff-sign {
+  color: var(--aurora-green);
+}
+.diff-del {
+  background: rgba(200, 72, 72, 0.14);
+}
+.diff-del .diff-sign {
+  color: var(--aurora-red);
+}
+.diff-ctx {
+  color: var(--n4);
+}
+/* grep results grouped by file. */
+.grep {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 460px;
+  overflow: auto;
+}
+.grep-fname {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--frost);
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.grep-matches {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--n5);
+  margin: 0;
+  padding: 8px 10px;
   background: var(--n-abyss);
   border-radius: var(--r-sm);
-  padding: 10px;
-  margin: 0;
-  overflow-x: auto;
-  max-height: 260px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+/* todo_list checklist. */
+.todo {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: var(--n-abyss);
+  border-radius: var(--r-sm);
+  max-height: 460px;
+  overflow-y: auto;
+}
+.todo-item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--n5);
+}
+.todo-check {
+  flex: 0 0 auto;
+  color: var(--n3);
+}
+.todo-item.is-done .todo-check {
+  color: var(--aurora-green);
+}
+.todo-item.is-done .todo-text {
+  color: var(--n3);
+  text-decoration: line-through;
 }
 /* Inline images from tool calls (e.g. charts, screenshots). */
 .toolcall-images {
@@ -1468,15 +1604,6 @@
   /* Must stay visible: an overflow scroll container clips the absolutely
      positioned dropdown panel, which made the selectors look broken. */
   overflow: visible;
-}
-.composer-tools .picker-select {
-  background: transparent;
-  border-color: transparent;
-  color: var(--n4);
-  padding: 4px 6px;
-}
-.composer-tools .picker-select:hover {
-  background: var(--n1);
 }
 .composer {
   padding: 12px var(--gutter) 8px;

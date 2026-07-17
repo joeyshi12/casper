@@ -20,8 +20,6 @@ import { bumpSessionToTop } from './sessions.js';
 /** A rendered tool call in the transcript (shared shape). */
 export type ToolCallView = TranscriptToolCall;
 
-export type { TranscriptItem };
-
 /** A locally-sent user message awaiting server acknowledgement. */
 export interface PendingMessage {
   id: string;

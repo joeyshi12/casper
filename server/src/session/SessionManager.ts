@@ -191,10 +191,6 @@ export class SessionManager {
     return s.cwd;
   }
 
-  hasSession(sessionId: string): boolean {
-    return this.sessions.has(sessionId);
-  }
-
   /** Open a session in memory (store + metadata) WITHOUT spawning a process. */
   async ensureOpen(sessionId: string): Promise<Session> {
     const existing = this.sessions.get(sessionId);
