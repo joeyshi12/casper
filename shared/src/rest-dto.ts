@@ -77,6 +77,10 @@ export interface TranscriptMessage {
 /** A tool-call entry in a session transcript (matches the live tool_call view). */
 export interface TranscriptToolCall {
   id: string;
+  /** The canonical kiro tool name (e.g. shell/write/read/grep/todo_list). From
+   *  _meta.kiro.toolName live, or the persisted tool name on hydrate. Drives
+   *  which renderer/label is used, consistently across both. */
+  name?: string;
   title: string;
   kind?: string;
   status: string;

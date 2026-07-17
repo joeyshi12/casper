@@ -328,7 +328,19 @@ check(
   // classifyTool: persisted calls carry the tool name as title; live calls
   // carry a human title but a reliable kind + rawInput. Both must classify.
   const cls = classifyTool;
-  // Persisted (title = tool name, no kind).
+  // Canonical name drives classification identically live and hydrated.
+  check(cls({ name: 'shell', title: 'Running: ...', input: {} }) === 'shell', 'classify: name shell');
+  check(cls({ name: 'write', title: 'Editing x', input: {} }) === 'write', 'classify: name write');
+  check(cls({ name: 'read', title: 'Reading x', input: {} }) === 'read', 'classify: name read');
+  check(cls({ name: 'grep', title: "Searching for x", input: {} }) === 'grep', 'classify: name grep');
+  check(cls({ name: 'todo_list', title: 'Completing #1', input: {} }) === 'todo', 'classify: name todo_list');
+  check(cls({ name: 'web_search', title: 'Searching the web', input: {} }) === 'generic', 'classify: name web_search -> generic');
+  // toolLabel returns the exact name, so live and hydrated headers match.
+  check(toolLabel({ name: 'web_search', title: 'Searching the web' }) === 'web_search', 'toolLabel: name web_search live');
+  check(toolLabel({ name: 'web_search', title: 'web_search' }) === 'web_search', 'toolLabel: name web_search hydrated');
+  check(toolLabel({ name: 'shell', title: 'Running: echo hi' }) === 'shell', 'toolLabel: name shell');
+
+  // Fallback (no name): heuristics on kind + input shape.
   check(cls({ title: 'shell', input: { command: 'ls -la' } }) === 'shell', 'classify: persisted shell');
   check(cls({ title: 'write', input: { command: 'create', path: '/a.ts', content: 'x' } }) === 'write', 'classify: persisted write create');
   check(cls({ title: 'read', input: { operations: [{ mode: 'Line', path: '/a' }] } }) === 'read', 'classify: persisted read');

@@ -10,13 +10,27 @@ const isObj = (v: unknown): v is Block => !!v && typeof v === 'object';
 type ToolKind = 'shell' | 'write' | 'read' | 'grep' | 'todo' | 'generic';
 
 /**
- * Which specialized renderer handles a tool call. Live ACP calls carry a
- * human `title` (e.g. "Editing app.css") but a reliable `kind`
- * (execute/read/search/edit) and `rawInput`; persisted calls carry the tool
- * name as `title` and the same input, but no `kind`. So dispatch on kind +
- * input shape, falling back to the title, rather than the title alone.
+ * Which specialized renderer handles a tool call. Prefer the canonical tool
+ * name (kiro's _meta.kiro.toolName live, or the persisted name on hydrate),
+ * which is identical across live and reload. Fall back to kind + input shape
+ * only for older data that lacks a name.
  */
-export function classifyTool(tool: { title?: string; kind?: string; input?: unknown }): ToolKind {
+export function classifyTool(tool: { name?: string; title?: string; kind?: string; input?: unknown }): ToolKind {
+  switch (tool.name) {
+    case 'shell':
+      return 'shell';
+    case 'write':
+    case 'strReplace':
+      return 'write';
+    case 'read':
+      return 'read';
+    case 'grep':
+      return 'grep';
+    case 'todo_list':
+      return 'todo';
+  }
+  if (tool.name) return 'generic'; // a known tool with no specialized renderer
+
   const inp = isObj(tool.input) ? tool.input : {};
   const k = tool.kind;
   const cmd = typeof inp.command === 'string' ? inp.command : undefined;
@@ -54,11 +68,12 @@ export function classifyTool(tool: { title?: string; kind?: string; input?: unkn
 }
 
 /**
- * A canonical tool label for the header, consistent whether the call is live
- * (human ACP title) or hydrated (tool name): the classified tool name for the
- * known tools, else a single-token tool name from the title, else "tool".
+ * A canonical tool label for the header, consistent whether the call is live or
+ * hydrated. Prefer the real tool name (identical across both); else derive from
+ * the classified kind, then a single-token title, then "tool".
  */
-export function toolLabel(tool: { title?: string; kind?: string; input?: unknown }): string {
+export function toolLabel(tool: { name?: string; title?: string; kind?: string; input?: unknown }): string {
+  if (tool.name) return tool.name;
   const k = classifyTool(tool);
   if (k === 'todo') return 'todo_list';
   if (k !== 'generic') return k; // shell / write / read / grep

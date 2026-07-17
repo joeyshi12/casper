@@ -188,6 +188,8 @@ export const useStore = create<CasperState>((set, get) => ({
           set({ streamingThought: state.streamingThought + chunk });
         } else if (u.sessionUpdate === 'tool_call') {
           const tc = u as ToolCallUpdate;
+          const toolName = (tc as { _meta?: { kiro?: { toolName?: string } } })._meta?.kiro
+            ?.toolName;
           set({
             items: [
               ...commitStreaming(state, `s-${e.seq}`, e.ts),
@@ -195,6 +197,7 @@ export const useStore = create<CasperState>((set, get) => ({
                 type: 'tool_call',
                 tool: {
                   id: tc.toolCallId,
+                  name: toolName,
                   title: tc.title ?? tc.toolCallId,
                   kind: tc.kind,
                   status: tc.status ?? 'pending',

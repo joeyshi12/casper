@@ -225,6 +225,7 @@ export async function hydrateTranscript(sessionId: string): Promise<TranscriptIt
         // Completed by default; a later ToolResults entry may override the status.
         const tool: TranscriptToolCall = {
           id: d.toolUseId,
+          name: d.name,
           title: d.name ?? d.toolUseId,
           status: 'completed',
           input: d.input,
