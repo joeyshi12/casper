@@ -4,7 +4,7 @@ import { useStore } from '../../state/store.js';
 function ContextMeter({ pct }: { pct: number }) {
   const clamped = Math.max(0, Math.min(100, pct));
   const color =
-    clamped > 85 ? 'var(--aurora-red)' : clamped > 60 ? 'var(--lantern)' : 'var(--frost)';
+    clamped > 85 ? 'var(--aurora-red)' : clamped > 60 ? 'var(--aurora-orange)' : 'var(--frost)';
   return (
     <span className="meter">
       <span className="meter-track">
