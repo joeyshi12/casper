@@ -337,6 +337,9 @@ check(
   // Live (human title, reliable kind).
   check(cls({ title: 'Editing app.css', kind: 'edit', input: { command: 'strReplace', path: '/x', oldStr: 'a', newStr: 'b' } }) === 'write', 'classify: live edit -> write');
   check(cls({ title: "Searching for 'x'", kind: 'search', input: { pattern: 'x', path: '/y' } }) === 'grep', 'classify: live search -> grep');
+  // web_search is also kind 'search' but has a query, not a pattern -> generic.
+  check(cls({ title: 'web_search', kind: 'search', input: { query: 'x' } }) === 'generic', 'classify: web_search (query) -> generic');
+  check(cls({ title: 'Searching the web', kind: 'search', input: { query: 'x' } }) === 'generic', 'classify: live web_search -> generic');
   check(cls({ title: 'Running a command', kind: 'execute', input: { command: 'git status' } }) === 'shell', 'classify: live execute -> shell');
   check(cls({ title: 'Reading dir', kind: 'read', input: { operations: [{ mode: 'Directory', path: '/z' }] } }) === 'read', 'classify: live read');
   check(cls({ title: 'Completing #1', input: { command: 'complete', completed_task_ids: ['1'] } }) === 'todo', 'classify: live todo complete');

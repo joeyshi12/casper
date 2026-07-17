@@ -215,8 +215,14 @@ function renderRead(tool: ToolCallView): ReactNode {
 function renderGrep(tool: ToolCallView): ReactNode {
   const blocks = toolBlocks(tool);
   const j = firstJsonData(blocks);
-  const results = j && Array.isArray(j.results) ? j.results : null;
-  if (results) {
+  const results =
+    j && Array.isArray(j.results)
+      ? j.results.filter((r) => {
+          const o = asObj(r);
+          return !!o && (Array.isArray(o.matches) || typeof o.file === 'string');
+        })
+      : null;
+  if (results && results.length > 0) {
     return (
       <div className="grep">
         {results.map((r, i) => {

@@ -35,7 +35,9 @@ export function classifyTool(tool: { title?: string; kind?: string; input?: unkn
     return 'todo';
   }
   if (k === 'read' || Array.isArray(inp.operations) || tool.title === 'read') return 'read';
-  if (k === 'search' || tool.title === 'grep' || (typeof inp.pattern === 'string' && !has('operations'))) {
+  // grep specifically has a `pattern`. kind 'search' also covers web_search
+  // (which has a `query` instead) - that falls through to the generic view.
+  if (tool.title === 'grep' || (typeof inp.pattern === 'string' && !has('operations'))) {
     return 'grep';
   }
   if (
