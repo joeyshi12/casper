@@ -29,6 +29,7 @@ import {
   parseTodo,
   outputToBlocks,
   toolBlocks,
+  soleStringField,
 } from '../web/src/util/toolRender.js';
 import type { SessionSummary } from '@casper/shared';
 import {
@@ -422,6 +423,14 @@ check(
     toolBlocks({ content: [], output: { items: [{ Json: { tasks: [{ task_description: 'x', completed: true }] } }] } }),
   );
   check(!!liveTodo && liveTodo.length === 1 && liveTodo[0]!.done, 'toolBlocks: live todo tasks from output');
+
+  // soleStringField: a JSON output that's just one string field (introspect's
+  // { documentation }) is shown as that text, not escaped JSON.
+  check(soleStringField({ documentation: 'the docs' }) === 'the docs', 'soleStringField: single string field');
+  check(soleStringField({ a: 'x', b: 'y' }) === null, 'soleStringField: multiple fields -> null');
+  check(soleStringField({ n: 5 }) === null, 'soleStringField: non-string field -> null');
+  const introspect = firstJsonData(toolBlocks({ content: [], output: { items: [{ Json: { documentation: 'ACP docs...' } }] } }));
+  check(!!introspect && soleStringField(introspect) === 'ACP docs...', 'soleStringField: introspect output unwrapped');
 }
 
 // Line diff (LCS): context kept, only changed lines marked.

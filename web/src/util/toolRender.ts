@@ -106,6 +106,16 @@ export function firstJsonData(content: unknown[]): Record<string, unknown> | nul
   return null;
 }
 
+/** If a JSON object carries exactly one string field (e.g. introspect's
+ *  { documentation }), return that string - it reads far better as text than
+ *  as escaped JSON. Otherwise null. */
+export function soleStringField(data: Record<string, unknown>): string | null {
+  const keys = Object.keys(data);
+  return keys.length === 1 && typeof data[keys[0]!] === 'string'
+    ? (data[keys[0]!] as string)
+    : null;
+}
+
 /** kiro's live rawOutput ({items:[{Text}|{Json}]}, or a plain string) turned
  *  into content-like blocks, so the same extractors work on live output as on
  *  the persisted {kind,data} content. */

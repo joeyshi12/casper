@@ -9,6 +9,7 @@ import {
   langFromPath,
   outputText,
   parseTodo,
+  soleStringField,
   toolBlocks,
   toolLabel,
 } from '../../util/toolRender.js';
@@ -198,7 +199,13 @@ function renderRead(tool: ToolCallView): ReactNode {
   const inp = asObj(tool.input);
   const ops = inp && Array.isArray(inp.operations) ? inp.operations : [];
   const text = outputText(toolBlocks(tool));
-  if (!text.trim()) return null; // image-only read: the image renders above
+  if (!text.trim()) {
+    // Image-only read: the image renders in the card header, nothing more.
+    if (extractImagePaths(tool.input).length > 0) return null;
+    // A read-kind tool without file text (e.g. introspect returns JSON) - show
+    // it generically rather than leaving the body empty.
+    return renderGeneric(tool);
+  }
   const textOp = ops.map(asObj).find((o) => o && o.mode !== 'Image');
   const path = textOp && typeof textOp.path === 'string' ? textOp.path : '';
   const lang = textOp?.mode === 'Line' ? langFromPath(path) : 'text';
@@ -260,7 +267,9 @@ function renderGeneric(tool: ToolCallView): ReactNode {
   }
   const blocks = toolBlocks(tool);
   const j = firstJsonData(blocks);
-  const outStr = j ? JSON.stringify(j, null, 2) : outputText(blocks);
+  const soleStr = j ? soleStringField(j) : null;
+  const outStr = soleStr ?? (j ? JSON.stringify(j, null, 2) : outputText(blocks));
+  const outLang = soleStr ? 'text' : /^\s*[[{]/.test(outStr) ? 'json' : 'text';
   return (
     <>
       {inputStr && inputStr !== '{}' && (
@@ -272,7 +281,7 @@ function renderGeneric(tool: ToolCallView): ReactNode {
       {outStr.trim() && (
         <div className="toolcall-section">
           <div className="toolcall-label">output</div>
-          <Code code={outStr} lang={/^\s*[[{]/.test(outStr) ? 'json' : 'text'} />
+          <Code code={outStr} lang={outLang} />
         </div>
       )}
     </>
