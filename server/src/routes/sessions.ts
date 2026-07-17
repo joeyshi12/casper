@@ -42,6 +42,26 @@ export function registerSessionRoutes(
     }
   });
 
+  // Older transcript items for lazy load-on-scroll-up: returns items in
+  // [offset, offset+limit) of the full transcript.
+  app.get<{ Params: { id: string }; Querystring: { offset?: string; limit?: string } }>(
+    '/api/sessions/:id/transcript',
+    async (req, reply) => {
+      const offset = Number.parseInt(req.query.offset ?? '', 10);
+      const limit = Number.parseInt(req.query.limit ?? '', 10);
+      if (!Number.isFinite(offset) || offset < 0 || !Number.isFinite(limit) || limit <= 0) {
+        reply.code(400);
+        return { error: 'offset (>=0) and limit (>0) are required' };
+      }
+      try {
+        return { items: await manager.getTranscriptPage(req.params.id, offset, limit) };
+      } catch (err) {
+        reply.code(404);
+        return { error: (err as Error).message };
+      }
+    },
+  );
+
   // Fire-and-forget prompt over REST (also available over WS). runPrompt spawns
   // the kiro process lazily if the session isn't live yet.
   app.post<{ Params: { id: string }; Body: PromptRequest }>(

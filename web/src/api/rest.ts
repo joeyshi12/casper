@@ -7,6 +7,7 @@ import type {
   ModelsResponse,
   SessionDetail,
   SessionListResponse,
+  TranscriptPageResponse,
   TreeResponse,
   UploadResponse,
 } from '@casper/shared';
@@ -59,6 +60,12 @@ export const api = {
   createSession: (body: CreateSessionRequest) =>
     req<SessionDetail>('POST', '/api/sessions', body),
   getSession: (id: string) => req<SessionDetail>('GET', `/api/sessions/${id}`),
+  /** Fetch an older page of transcript items: [offset, offset+limit). */
+  transcriptPage: (id: string, offset: number, limit: number) =>
+    req<TranscriptPageResponse>(
+      'GET',
+      `/api/sessions/${id}/transcript?offset=${offset}&limit=${limit}`,
+    ),
   deleteSession: (id: string) => req<{ ok: boolean }>('DELETE', `/api/sessions/${id}`),
   renameSession: (id: string, title: string) =>
     req<{ ok: boolean }>('POST', `/api/sessions/${id}/rename`, { title }),

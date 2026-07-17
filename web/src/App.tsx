@@ -101,7 +101,16 @@ function Shell({ onLock }: { onLock: () => void }) {
       const socket = new SessionSocket(
         id,
         {
-          onEvent: (e) => useStore.getState().applyEvent(e),
+          onEvent: (e) => {
+            useStore.getState().applyEvent(e);
+            // A turn just finished: kiro persists the session around now, so
+            // reconcile the list from the server (real updatedAt, auto-title,
+            // credits). Delayed slightly so the persisted file is settled; the
+            // optimistic turn_started bump holds the top spot until then.
+            if (e.payload.kind === 'turn_ended') {
+              setTimeout(refreshSessions, 1200);
+            }
+          },
           onStatus: setConnStatus,
           onResync: async () => {
             const fresh = await api.getSession(id);
@@ -121,7 +130,7 @@ function Shell({ onLock }: { onLock: () => void }) {
       socketRef.current = socket;
       socket.connect();
     },
-    [closeSocket, handleUnauthorized, store],
+    [closeSocket, handleUnauthorized, refreshSessions, store],
   );
 
   const backToList = useCallback(() => {
@@ -261,6 +270,15 @@ function Shell({ onLock }: { onLock: () => void }) {
     // Optimistic: flip to compacting until the server's compaction/status
     // 'started' (which confirms) and 'completed' (which clears) arrive.
     useStore.setState((s) => ({ observability: { ...s.observability, compacting: true } }));
+    // Safety net: if the command never lands (e.g. the socket dropped) and no
+    // compaction/status ever arrives, don't leave the UI stuck compacting.
+    setTimeout(() => {
+      useStore.setState((s) =>
+        s.observability.compacting
+          ? { observability: { ...s.observability, compacting: false } }
+          : {},
+      );
+    }, 120_000);
   }, []);
 
   // Lock the app: clear the session cookie server-side, tear down the socket,

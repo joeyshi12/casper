@@ -16,6 +16,9 @@ import {
   realConfineToRoot,
 } from '../server/src/util/paths.js';
 import { classifyKind, looksBinary } from '../server/src/util/filekind.js';
+import { bumpSessionToTop } from '../web/src/state/sessions.js';
+import { olderPageRequest } from '../web/src/state/pagination.js';
+import type { SessionSummary } from '@casper/shared';
 import {
   ATTACHMENTS_PREFIX,
   attachmentPaths,
@@ -261,7 +264,52 @@ check(
   }
 }
 
-// realConfineToRoot resolves symlinks: a link inside the root pointing out is rejected.
+// Sidebar reorder: sending a prompt floats the active session to the top by
+// stamping its updatedAt and re-sorting (same key/order as the server).
+{
+  const mk = (id: string, updatedAt: string): SessionSummary =>
+    ({ sessionId: id, title: id, cwd: '/', createdAt: updatedAt, updatedAt }) as SessionSummary;
+  const list = [
+    mk('a', '2026-07-16T10:00:00.000Z'),
+    mk('b', '2026-07-16T09:00:00.000Z'),
+    mk('c', '2026-07-16T08:00:00.000Z'),
+  ];
+  const after = bumpSessionToTop(list, 'c', '2026-07-16T11:00:00.000Z');
+  check(after[0].sessionId === 'c', 'reorder: bumped session moves to the top');
+  check(
+    after.map((s) => s.sessionId).join() === 'c,a,b',
+    'reorder: the rest keep their relative order',
+  );
+  check(list[0].sessionId === 'a', 'reorder: does not mutate the input array');
+  check(
+    bumpSessionToTop(list, 'missing', '2026-07-16T12:00:00.000Z').map((s) => s.sessionId).join() ===
+      'a,b,c',
+    'reorder: unknown session id leaves the order unchanged',
+  );
+}
+
+// Transcript pagination: the older-page window walks backward toward index 0,
+// fetching the page adjacent to the loaded window first, and never underflows.
+{
+  const full = olderPageRequest(200, 80);
+  check(full.offset === 120 && full.limit === 80, 'pagination: full page adjacent to the window');
+  const partial = olderPageRequest(50, 80);
+  check(partial.offset === 0 && partial.limit === 50, 'pagination: last partial page starts at 0');
+  const exact = olderPageRequest(80, 80);
+  check(exact.offset === 0 && exact.limit === 80, 'pagination: exact page ends at index 0');
+  check(olderPageRequest(0, 80).limit === 0, 'pagination: nothing older -> empty request');
+  // Walking backward from 200 in pages of 80 covers [120,200),[40,120),[0,40).
+  let remaining = 200;
+  const offsets: number[] = [];
+  while (remaining > 0) {
+    const { offset, limit } = olderPageRequest(remaining, 80);
+    offsets.push(offset);
+    remaining -= limit;
+  }
+  check(offsets.join() === '120,40,0' && remaining === 0, 'pagination: pages tile down to zero');
+}
+
+
 async function realpathTests(): Promise<void> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-root-'));
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-out-'));

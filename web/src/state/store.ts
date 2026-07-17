@@ -15,6 +15,8 @@ import {
   type TranscriptToolCall,
 } from '@casper/shared';
 
+import { bumpSessionToTop } from './sessions.js';
+
 /** A rendered tool call in the transcript (shared shape). */
 export type ToolCallView = TranscriptToolCall;
 
@@ -46,6 +48,9 @@ interface CasperState {
   currentModeId?: string;
   currentModelId?: string;
   items: TranscriptItem[];
+  /** Count of older transcript items not yet loaded (before the loaded window),
+   *  for lazy load-on-scroll-up. hasMore === remainingOlder > 0. */
+  remainingOlder: number;
   observability: ObservabilitySnapshot;
   streamingText: string; // in-flight assistant chunk not yet committed
   streamingThought: string; // in-flight reasoning chunk not yet committed
@@ -57,6 +62,7 @@ interface CasperState {
   setModels: (m: ModelInfo[]) => void;
   setAgents: (a: AgentMode[]) => void;
   loadDetail: (d: SessionDetail) => void;
+  prependItems: (older: TranscriptItem[]) => void;
   clearActive: () => void;
   applyEvent: (e: CasperEvent) => void;
   addPending: (id: string, text: string) => void;
@@ -73,6 +79,7 @@ export const useStore = create<CasperState>((set, get) => ({
   activeId: null,
   modes: [],
   items: [],
+  remainingOlder: 0,
   observability: emptyObservabilitySnapshot(),
   streamingText: '',
   streamingThought: '',
@@ -91,16 +98,26 @@ export const useStore = create<CasperState>((set, get) => ({
       currentModelId: d.summary.modelId,
       observability: d.observability,
       items: d.transcript,
+      remainingOlder: Math.max(0, d.transcriptTotal - d.transcript.length),
       streamingText: '',
       streamingThought: '',
       pending: [],
     }),
+
+  // Prepend an older page (loaded on scroll-up). remainingOlder shrinks by the
+  // number actually returned so it converges to 0 when the head is reached.
+  prependItems: (older) =>
+    set((s) => ({
+      items: [...older, ...s.items],
+      remainingOlder: Math.max(0, s.remainingOlder - older.length),
+    })),
 
   clearActive: () =>
     set({
       activeId: null,
       modes: [],
       items: [],
+      remainingOlder: 0,
       observability: emptyObservabilitySnapshot(),
       streamingText: '',
       streamingThought: '',
@@ -139,6 +156,11 @@ export const useStore = create<CasperState>((set, get) => ({
         // Drop the oldest optimistic bubble still marked 'sending' - turns are
         // serialized server-side, so this turn_started is that send's echo.
         const sendingIdx = state.pending.findIndex((pm) => pm.status === 'sending');
+        // Float this session to the top of the sidebar right away. The server
+        // orders by updatedAt, which only changes once kiro persists the turn,
+        // so bump it optimistically now; turn_ended reconciles from the server.
+        const bumpedAt = new Date(e.ts).toISOString();
+        const sessions = bumpSessionToTop(state.sessions, e.sessionId, bumpedAt);
         set({
           items: [
             ...state.items,
@@ -151,6 +173,7 @@ export const useStore = create<CasperState>((set, get) => ({
             sendingIdx === -1
               ? state.pending
               : state.pending.filter((_, i) => i !== sendingIdx),
+          sessions,
           streamingText: '',
           observability: { ...state.observability, turnStatus: 'running' },
         });

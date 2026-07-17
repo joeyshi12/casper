@@ -1,9 +1,17 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '../../state/store.js';
+import { olderPageRequest } from '../../state/pagination.js';
 import { api } from '../../api/rest.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { ToolCallCard } from './ToolCallCard.js';
-import { CompressIcon } from '../common/icons.js';
+import { CompressIcon, Spinner } from '../common/icons.js';
+
+// Live media query (its .matches updates as the OS setting changes), so the
+// easing follow can snap instantly for users who ask for reduced motion.
+const reduceMotion =
+  typeof window !== 'undefined'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)')
+    : null;
 
 interface Props {
   onRetry: (id: string, text: string) => void;
@@ -24,9 +32,17 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
   const streamingThought = useStore((s) => s.streamingThought);
   const pending = useStore((s) => s.pending);
   const turnStatus = useStore((s) => s.observability.turnStatus);
+  const compacting = useStore((s) => s.observability.compacting);
   const activeId = useStore((s) => s.activeId);
+  const remainingOlder = useStore((s) => s.remainingOlder);
+  const prependItems = useStore((s) => s.prependItems);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Guards a load-older fetch in flight, and the scroll anchor (distance from
+  // bottom) captured at fetch time so the viewport stays put across a prepend.
+  const loadingOlderRef = useRef(false);
+  const anchorRef = useRef<number | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   // Following the bottom as new content streams in. Off until the user opts in
   // via the jump-to-latest button.
   const followBottom = useRef(false);
@@ -37,6 +53,8 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
   const initializedFor = useRef<string | null>(null);
   // Pending-message count last seen, to detect a fresh user send.
   const prevPendingLen = useRef(0);
+  // Coalesces follow-scrolls to at most one per animation frame.
+  const followRaf = useRef(0);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
 
   // Each session starts with autoscroll off (covers switching to an empty
@@ -44,19 +62,95 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
   useEffect(() => {
     followBottom.current = false;
     prevPendingLen.current = 0;
+    loadingOlderRef.current = false;
+    anchorRef.current = null;
+    setLoadingOlder(false);
     setShowScrollBtn(false);
+    return () => {
+      if (followRaf.current) cancelAnimationFrame(followRaf.current);
+      followRaf.current = 0;
+    };
   }, [activeId]);
+
+  // Load an older page when the user scrolls near the top. The viewport is
+  // anchored to its distance-from-bottom (captured before the fetch) and
+  // restored after the prepend renders, so inserting content above does not
+  // make the view jump.
+  const loadOlder = () => {
+    const el = scrollRef.current;
+    if (!el || !activeId || loadingOlderRef.current || remainingOlder <= 0) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    const { offset, limit } = olderPageRequest(remainingOlder, 80);
+    anchorRef.current = el.scrollHeight - el.scrollTop;
+    api
+      .transcriptPage(activeId, offset, limit)
+      .then((res) => {
+        if (res.items.length > 0) {
+          prependItems(res.items); // anchor restored in the layout effect
+        } else {
+          anchorRef.current = null;
+          loadingOlderRef.current = false;
+          setLoadingOlder(false);
+        }
+      })
+      .catch(() => {
+        anchorRef.current = null;
+        loadingOlderRef.current = false;
+        setLoadingOlder(false);
+        useStore.getState().pushToast('Could not load earlier messages.');
+      });
+  };
+
+  // After a prepend, restore the anchored scroll position before paint.
+  useLayoutEffect(() => {
+    if (anchorRef.current == null) return;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight - anchorRef.current;
+    anchorRef.current = null;
+    loadingOlderRef.current = false;
+    setLoadingOlder(false);
+  }, [items]);
 
   const updateScrollBtn = (el: HTMLDivElement) => {
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     setShowScrollBtn(distanceFromBottom > 240);
   };
 
+  // Smoothly follow the bottom with a single rAF loop that eases scrollTop
+  // toward the bottom itself. Unlike CSS smooth-scroll + repeated scrollIntoView
+  // (which restarts an eased animation from a moving target every frame and so
+  // pulses down-and-up), this is position-based: each frame it moves a fraction
+  // of the remaining distance and only ever downward, so streamed chunks and
+  // mid-stream markdown reflow never jerk it. One loop at a time; it stops when
+  // caught up and the content effect re-arms it when new content arrives.
+  const followTick = () => {
+    followRaf.current = 0;
+    const el = scrollRef.current;
+    if (!el || !followBottom.current) return;
+    const target = el.scrollHeight - el.clientHeight;
+    const delta = target - el.scrollTop;
+    if (delta <= 1 || reduceMotion?.matches) {
+      el.scrollTop = target; // snap the final pixel (or all of it) and idle
+      lastScrollTop.current = el.scrollTop;
+      return;
+    }
+    el.scrollTop += Math.max(10, Math.ceil(delta * 0.3));
+    lastScrollTop.current = el.scrollTop;
+    followRaf.current = requestAnimationFrame(followTick);
+  };
+
+  const scheduleFollow = () => {
+    if (followRaf.current) return; // loop already running
+    followRaf.current = requestAnimationFrame(followTick);
+  };
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     // First content for a freshly opened session: jump to the latest message
-    // once (no smooth animation, no continuous follow).
+    // instantly (animating a scroll through the whole history is disorienting),
+    // with no follow.
     if (initializedFor.current !== activeId && items.length > 0) {
       initializedFor.current = activeId;
       followBottom.current = false;
@@ -67,21 +161,17 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
       return;
     }
     // A new pending message means the user just sent a prompt: resume following
-    // so their message and the streamed reply stay in view.
+    // so their message and the streamed reply smoothly scroll into view.
     if (pending.length > prevPendingLen.current) {
       followBottom.current = true;
     }
     prevPendingLen.current = pending.length;
     if (followBottom.current) {
-      // Instant (not smooth): while a turn streams, chunks arrive many times a
-      // second and stacking smooth-scroll animations makes mobile scroll jitter.
-      // The jump-to-latest button still animates smoothly (one-shot).
-      bottomRef.current?.scrollIntoView({ block: 'end' });
-      lastScrollTop.current = el.scrollTop;
+      scheduleFollow();
     } else {
       updateScrollBtn(el);
     }
-  }, [items, streamingText, streamingThought, pending, activeId]);
+  }, [items, streamingText, streamingThought, pending, activeId, compacting]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -93,12 +183,17 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
     }
     lastScrollTop.current = el.scrollTop;
     updateScrollBtn(el);
+    // Near the top: pull in the previous page of history. Restoring the anchor
+    // pushes the view back down past this threshold, so it won't cascade.
+    if (el.scrollTop < 300 && !loadingOlderRef.current && remainingOlder > 0) {
+      loadOlder();
+    }
   };
 
   const scrollToBottom = () => {
     followBottom.current = true;
     setShowScrollBtn(false);
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    scheduleFollow();
   };
 
   const empty =
@@ -106,6 +201,12 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
 
   return (
     <div className="transcript-wrap">
+    {loadingOlder && (
+      <div className="loading-older" role="status">
+        <Spinner size={14} />
+        <span>Loading earlier messages…</span>
+      </div>
+    )}
     <div className="transcript" ref={scrollRef} onScroll={onScroll}>
       {empty && (
         <div className="transcript-empty">
@@ -192,6 +293,17 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
           <span className="thinking-dot" />
           <span className="thinking-dot" />
           <span className="thinking-dot" />
+        </div>
+      )}
+
+      {compacting && (
+        <div className="compaction compaction-live">
+          <div className="compaction-rule">
+            <span className="compaction-head">
+              <Spinner size={13} className="compaction-icon" />
+              <span className="compaction-label">Compacting conversation…</span>
+            </span>
+          </div>
         </div>
       )}
 

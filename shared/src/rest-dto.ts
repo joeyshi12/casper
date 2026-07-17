@@ -95,10 +95,20 @@ export interface SessionDetail {
   summary: SessionSummary;
   modes: AgentMode[];
   currentModeId?: string;
+  /** The most recent page of transcript items (see transcriptTotal). Older
+   *  items are fetched on demand via GET /api/sessions/:id/transcript. */
   transcript: TranscriptItem[];
+  /** Total number of items in the full transcript, so the client knows whether
+   *  older pages remain to load. */
+  transcriptTotal: number;
   observability: ObservabilitySnapshot;
   /** Highest event seq currently in the server buffer (client's replay cursor start). */
   head: number;
+}
+
+/** A slice of an older transcript, returned by the paged transcript endpoint. */
+export interface TranscriptPageResponse {
+  items: TranscriptItem[];
 }
 
 export interface SetModelRequest {

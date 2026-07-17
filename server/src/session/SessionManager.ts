@@ -17,6 +17,7 @@ import {
   type SessionNewResult,
   type SessionSummary,
   type SessionUpdateParams,
+  type TranscriptItem,
 } from '@casper/shared';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -140,6 +141,11 @@ function mapNotification(n: JsonRpcNotification): CasperEventPayload | null {
       return null;
   }
 }
+
+// How many transcript items to send on initial load / per older-page fetch.
+// A large session's full transcript is multiple MB; loading just the tail keeps
+// opening it fast, and the client fetches older pages on scroll-to-top.
+const TRANSCRIPT_PAGE_SIZE = 80;
 
 export class SessionManager {
   private readonly sessions = new Map<string, Session>();
@@ -458,7 +464,8 @@ export class SessionManager {
       summary: { ...persisted, title: this.titles.get(sessionId) ?? persisted.title },
       modes: [],
       currentModeId: persisted.agentId,
-      transcript,
+      transcript: transcript.slice(-TRANSCRIPT_PAGE_SIZE),
+      transcriptTotal: transcript.length,
       observability: {
         ...emptyObservabilitySnapshot(),
         creditsSpent: persisted.creditsSpent ?? 0,
@@ -466,6 +473,22 @@ export class SessionManager {
       },
       head: 0,
     };
+  }
+
+  /**
+   * A slice of the transcript for lazy "load older on scroll up". Re-hydrates
+   * from disk (fast: ~150ms even for a multi-MB session) and returns the
+   * requested window. offset/limit are clamped to the transcript bounds.
+   */
+  async getTranscriptPage(
+    sessionId: string,
+    offset: number,
+    limit: number,
+  ): Promise<TranscriptItem[]> {
+    const transcript = await hydrateTranscript(sessionId);
+    const start = Math.max(0, Math.min(offset, transcript.length));
+    const end = Math.max(start, Math.min(start + limit, transcript.length));
+    return transcript.slice(start, end);
   }
 
   private buildDetail(
@@ -492,7 +515,9 @@ export class SessionManager {
       },
       modes: s.availableModes,
       currentModeId: s.currentModeId,
-      transcript,
+      // Only the tail is sent on load; replayHead/title use the full transcript.
+      transcript: transcript.slice(-TRANSCRIPT_PAGE_SIZE),
+      transcriptTotal: transcript.length,
       observability: snap,
       head: this.replayHead(s, transcript),
     };

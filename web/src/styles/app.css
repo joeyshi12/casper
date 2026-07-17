@@ -839,6 +839,27 @@
   transition: background 0.12s, color 0.12s, transform 0.12s;
   animation: fade-in 0.15s ease;
 }
+/* Overlay pill shown while loading older history. Absolutely positioned so it
+   does not add to the scroll content height (which would break scroll anchoring
+   during a prepend). */
+.loading-older {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--n2);
+  background: var(--n1);
+  color: var(--n5);
+  font-size: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  animation: fade-in 0.15s ease;
+}
 .scroll-to-bottom:hover {
   background: var(--n2);
   color: var(--n6);
@@ -853,6 +874,10 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  scrollbar-width: none; /* Firefox: hide the scrollbar, keep scrolling */
+}
+.transcript::-webkit-scrollbar {
+  display: none; /* WebKit/Blink */
 }
 /* Direct children are flex items and default to flex-shrink: 1, so a full
    column compresses them (tool cards clip and flatten). Pin them all. */
@@ -1063,6 +1088,17 @@
 .compaction-body .md li {
   font-size: 13px;
   color: var(--n5);
+}
+/* In-progress indicator (not clickable). */
+.compaction-live .compaction-head {
+  cursor: default;
+}
+.compaction-live .compaction-head:hover {
+  color: var(--n4);
+  border-color: var(--n2);
+}
+.compaction-live .compaction-icon {
+  color: var(--frost-deep);
 }
 
 /* Markdown */
