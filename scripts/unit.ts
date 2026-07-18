@@ -334,7 +334,9 @@ check(
   check(cls({ name: 'read', title: 'Reading x', input: {} }) === 'read', 'classify: name read');
   check(cls({ name: 'grep', title: "Searching for x", input: {} }) === 'grep', 'classify: name grep');
   check(cls({ name: 'todo_list', title: 'Completing #1', input: {} }) === 'todo', 'classify: name todo_list');
-  check(cls({ name: 'web_search', title: 'Searching the web', input: {} }) === 'generic', 'classify: name web_search -> generic');
+  check(cls({ name: 'web_search', title: 'Searching the web', input: {} }) === 'websearch', 'classify: name web_search -> websearch');
+  check(cls({ name: 'web_fetch', title: 'Fetching a page', input: {} }) === 'webfetch', 'classify: name web_fetch -> webfetch');
+  check(cls({ name: 'introspect', title: 'Looking it up', input: {} }) === 'introspect', 'classify: name introspect -> introspect');
   // toolLabel returns the exact name, so live and hydrated headers match.
   check(toolLabel({ name: 'web_search', title: 'Searching the web' }) === 'web_search', 'toolLabel: name web_search live');
   check(toolLabel({ name: 'web_search', title: 'web_search' }) === 'web_search', 'toolLabel: name web_search hydrated');
@@ -348,10 +350,13 @@ check(
   check(cls({ title: 'todo_list', input: { command: 'create', tasks: [] } }) === 'todo', 'classify: persisted todo');
   // Live (human title, reliable kind).
   check(cls({ title: 'Editing app.css', kind: 'edit', input: { command: 'strReplace', path: '/x', oldStr: 'a', newStr: 'b' } }) === 'write', 'classify: live edit -> write');
-  check(cls({ title: "Searching for 'x'", kind: 'search', input: { pattern: 'x', path: '/y' } }) === 'grep', 'classify: live search -> grep');
-  // web_search is also kind 'search' but has a query, not a pattern -> generic.
-  check(cls({ title: 'web_search', kind: 'search', input: { query: 'x' } }) === 'generic', 'classify: web_search (query) -> generic');
-  check(cls({ title: 'Searching the web', kind: 'search', input: { query: 'x' } }) === 'generic', 'classify: live web_search -> generic');
+  check(cls({ title: "Searching for 'x'", kind: 'search', input: { pattern: 'x', path: '/y' } }) === 'grep', 'classify: live search (pattern) -> grep');
+  // web_search is also kind 'search' but has a query, not a pattern -> websearch.
+  check(cls({ title: 'web_search', kind: 'search', input: { query: 'x' } }) === 'websearch', 'classify: web_search (query) -> websearch');
+  check(cls({ title: 'Searching the web', kind: 'search', input: { query: 'x' } }) === 'websearch', 'classify: live web_search -> websearch');
+  check(cls({ title: 'web_fetch', input: { url: 'https://x' } }) === 'webfetch', 'classify: web_fetch (url) -> webfetch');
+  check(cls({ title: 'introspect', input: { query: 'x' } }) === 'introspect', 'classify: introspect (title) -> introspect');
+  check(cls({ title: 'Looking it up', input: { doc_path: 'features/x.md' } }) === 'introspect', 'classify: introspect (doc_path) -> introspect');
   check(cls({ title: 'Running a command', kind: 'execute', input: { command: 'git status' } }) === 'shell', 'classify: live execute -> shell');
   check(cls({ title: 'Reading dir', kind: 'read', input: { operations: [{ mode: 'Directory', path: '/z' }] } }) === 'read', 'classify: live read');
   check(cls({ title: 'Completing #1', input: { command: 'complete', completed_task_ids: ['1'] } }) === 'todo', 'classify: live todo complete');

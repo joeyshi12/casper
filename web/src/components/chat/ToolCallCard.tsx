@@ -13,6 +13,7 @@ import {
   toolBlocks,
   toolLabel,
 } from '../../util/toolRender.js';
+import { MarkdownRenderer } from './MarkdownRenderer.js';
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'queued',
@@ -58,6 +59,22 @@ function summaryOf(tool: ToolCallView): { text: string; title?: string } | null 
     case 'grep': {
       const p = str(inp.pattern);
       return p ? { text: p } : null;
+    }
+    case 'websearch':
+    case 'introspect': {
+      const q = str(inp.query) ?? str(inp.doc_path);
+      return q ? { text: q } : null;
+    }
+    case 'webfetch': {
+      const u = str(inp.url);
+      if (!u) return null;
+      let host = u;
+      try {
+        host = new URL(u).hostname || u;
+      } catch {
+        // not a parseable URL; show it as-is
+      }
+      return { text: host, title: u };
     }
     default:
       return null;
@@ -145,6 +162,12 @@ function renderBody(tool: ToolCallView): ReactNode {
       return renderGrep(tool);
     case 'todo':
       return renderTodo(tool);
+    case 'webfetch':
+      return renderWebFetch(tool);
+    case 'websearch':
+      return renderWebSearch(tool);
+    case 'introspect':
+      return renderIntrospect(tool);
     default:
       return renderGeneric(tool);
   }
@@ -202,8 +225,8 @@ function renderRead(tool: ToolCallView): ReactNode {
   if (!text.trim()) {
     // Image-only read: the image renders in the card header, nothing more.
     if (extractImagePaths(tool.input).length > 0) return null;
-    // A read-kind tool without file text (e.g. introspect returns JSON) - show
-    // it generically rather than leaving the body empty.
+    // A read-kind tool without file text - show it generically rather than
+    // leaving the body empty.
     return renderGeneric(tool);
   }
   const textOp = ops.map(asObj).find((o) => o && o.mode !== 'Image');
@@ -258,6 +281,140 @@ function renderTodo(tool: ToolCallView): ReactNode {
         </div>
       ))}
     </div>
+  );
+}
+
+/** introspect: show the query, then render the `documentation` as markdown.
+ *  The result is JSON ({ documentation, query_context }); the docs read far
+ *  better rendered than as an escaped JSON blob (which is what the generic
+ *  view produces, since the two-field object defeats soleStringField). */
+function renderIntrospect(tool: ToolCallView): ReactNode {
+  const inp = asObj(tool.input);
+  const query = str(inp?.query) ?? str(inp?.doc_path);
+  const blocks = toolBlocks(tool);
+  const j = firstJsonData(blocks);
+  const doc = (j ? (str(j.documentation) ?? soleStringField(j)) : null) ?? outputText(blocks);
+  return (
+    <>
+      {query && (
+        <div className="toolcall-section">
+          <div className="toolcall-label">query</div>
+          <Code code={query} lang="text" />
+        </div>
+      )}
+      {doc.trim() ? (
+        <div className="toolcall-doc">
+          <MarkdownRenderer text={doc} />
+        </div>
+      ) : (
+        renderGeneric(tool)
+      )}
+    </>
+  );
+}
+
+/** web_fetch: a clickable source URL (+ mode tag / search terms), then the
+ *  fetched page content rendered as markdown. */
+function renderWebFetch(tool: ToolCallView): ReactNode {
+  const inp = asObj(tool.input);
+  const url = str(inp?.url);
+  const mode = str(inp?.mode);
+  const terms = str(inp?.search_terms);
+  const blocks = toolBlocks(tool);
+  const j = firstJsonData(blocks);
+  const content = j
+    ? (soleStringField(j) ?? str(j.content) ?? JSON.stringify(j, null, 2))
+    : outputText(blocks);
+  return (
+    <>
+      {url && (
+        <div className="toolcall-meta">
+          <a className="toolcall-link" href={url} target="_blank" rel="noopener noreferrer">
+            {url}
+          </a>
+          {mode && <span className="toolcall-tag">{mode}</span>}
+        </div>
+      )}
+      {terms && (
+        <div className="toolcall-section">
+          <div className="toolcall-label">search terms</div>
+          <Code code={terms} lang="text" />
+        </div>
+      )}
+      {content.trim() ? (
+        <div className="toolcall-doc">
+          <MarkdownRenderer text={content} />
+        </div>
+      ) : (
+        renderGeneric(tool)
+      )}
+    </>
+  );
+}
+
+interface SearchHit {
+  title?: string;
+  url?: string;
+  snippet?: string;
+}
+
+/** Pull a list of {title,url,snippet} from web_search output regardless of the
+ *  envelope key (results/items/data, or a bare array), tolerating the common
+ *  field-name variants. */
+function searchHits(j: Record<string, unknown> | null): SearchHit[] | null {
+  if (!j) return null;
+  const arr = Array.isArray(j.results)
+    ? j.results
+    : Array.isArray(j.items)
+      ? j.items
+      : Array.isArray(j.data)
+        ? j.data
+        : null;
+  if (!arr) return null;
+  const hits: SearchHit[] = [];
+  for (const it of arr) {
+    const o = asObj(it);
+    if (!o) continue;
+    hits.push({
+      title: str(o.title) ?? str(o.name),
+      url: str(o.url) ?? str(o.link) ?? str(o.href),
+      snippet: str(o.snippet) ?? str(o.description) ?? str(o.content) ?? str(o.text),
+    });
+  }
+  return hits.length ? hits : null;
+}
+
+/** web_search: the query, then a compact list of result hits (title links +
+ *  snippets). Falls back to the generic view when results aren't structured. */
+function renderWebSearch(tool: ToolCallView): ReactNode {
+  const blocks = toolBlocks(tool);
+  const hits = searchHits(firstJsonData(blocks));
+  if (!hits) return renderGeneric(tool);
+  const query = str(asObj(tool.input)?.query);
+  return (
+    <>
+      {query && (
+        <div className="toolcall-section">
+          <div className="toolcall-label">query</div>
+          <Code code={query} lang="text" />
+        </div>
+      )}
+      <ol className="websearch">
+        {hits.map((h, i) => (
+          <li key={i} className="websearch-item">
+            {h.url ? (
+              <a className="websearch-title" href={h.url} target="_blank" rel="noopener noreferrer">
+                {h.title ?? h.url}
+              </a>
+            ) : (
+              <span className="websearch-title">{h.title ?? '(untitled)'}</span>
+            )}
+            {h.url && <div className="websearch-url">{h.url}</div>}
+            {h.snippet && <p className="websearch-snippet">{h.snippet}</p>}
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }
 

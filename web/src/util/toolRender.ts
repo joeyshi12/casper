@@ -7,7 +7,16 @@ type Block = Record<string, unknown>;
 
 const isObj = (v: unknown): v is Block => !!v && typeof v === 'object';
 
-type ToolKind = 'shell' | 'write' | 'read' | 'grep' | 'todo' | 'generic';
+type ToolKind =
+  | 'shell'
+  | 'write'
+  | 'read'
+  | 'grep'
+  | 'todo'
+  | 'webfetch'
+  | 'websearch'
+  | 'introspect'
+  | 'generic';
 
 /**
  * Which specialized renderer handles a tool call. Prefer the canonical tool
@@ -28,6 +37,12 @@ export function classifyTool(tool: { name?: string; title?: string; kind?: strin
       return 'grep';
     case 'todo_list':
       return 'todo';
+    case 'web_fetch':
+      return 'webfetch';
+    case 'web_search':
+      return 'websearch';
+    case 'introspect':
+      return 'introspect';
   }
   if (tool.name) return 'generic'; // a known tool with no specialized renderer
 
@@ -64,6 +79,12 @@ export function classifyTool(tool: { name?: string; title?: string; kind?: strin
     return 'write';
   }
   if (k === 'execute' || tool.title === 'shell' || typeof inp.command === 'string') return 'shell';
+  // Name-less fallbacks for the web / introspect tools (older data without a
+  // name). `url` is unique to web_fetch; web_search vs introspect both carry a
+  // `query`, so lean on kind/title to disambiguate.
+  if (typeof inp.url === 'string') return 'webfetch';
+  if (typeof inp.query === 'string' && (k === 'search' || tool.title === 'web_search')) return 'websearch';
+  if (tool.title === 'introspect' || typeof inp.doc_path === 'string') return 'introspect';
   return 'generic';
 }
 
@@ -72,11 +93,22 @@ export function classifyTool(tool: { name?: string; title?: string; kind?: strin
  * hydrated. Prefer the real tool name (identical across both); else derive from
  * the classified kind, then a single-token title, then "tool".
  */
+const KIND_LABEL: Record<ToolKind, string | undefined> = {
+  shell: 'shell',
+  write: 'write',
+  read: 'read',
+  grep: 'grep',
+  todo: 'todo_list',
+  webfetch: 'web_fetch',
+  websearch: 'web_search',
+  introspect: 'introspect',
+  generic: undefined,
+};
+
 export function toolLabel(tool: { name?: string; title?: string; kind?: string; input?: unknown }): string {
   if (tool.name) return tool.name;
-  const k = classifyTool(tool);
-  if (k === 'todo') return 'todo_list';
-  if (k !== 'generic') return k; // shell / write / read / grep
+  const mapped = KIND_LABEL[classifyTool(tool)];
+  if (mapped) return mapped;
   const t = tool.title ?? '';
   return t && !/\s/.test(t) ? t : 'tool';
 }
