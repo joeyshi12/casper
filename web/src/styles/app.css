@@ -1349,6 +1349,30 @@
 .toolcall-chevron {
   color: var(--n3);
   font-size: 11px;
+  transition: transform 0.22s ease;
+}
+.toolcall-chevron.is-open {
+  transform: rotate(90deg);
+}
+/* Expand/collapse height animation: grid 0fr -> 1fr animates to the content's
+   natural height without measuring it. */
+.collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
+}
+.collapse.is-open {
+  grid-template-rows: 1fr;
+}
+.collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toolcall-chevron,
+  .collapse {
+    transition: none;
+  }
 }
 .toolcall-body {
   padding: 0 13px 12px;

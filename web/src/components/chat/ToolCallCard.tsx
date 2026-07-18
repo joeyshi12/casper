@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode, type TransitionEvent } from 'react';
 import type { ToolCallView } from '../../state/store.js';
 import { highlightToHtml } from '../../util/highlighter.js';
 import { lineDiff, type DiffLine } from '../../util/diff.js';
@@ -121,7 +121,7 @@ export function ToolCallCard({ tool }: { tool: ToolCallView }) {
           </span>
         )}
         <span className="toolcall-status">{STATUS_LABEL[status] ?? status}</span>
-        <span className="toolcall-chevron">{open ? '▾' : '▸'}</span>
+        <span className={`toolcall-chevron ${open ? 'is-open' : ''}`}>&#9656;</span>
       </button>
 
       {imagePaths.length > 0 && (
@@ -145,7 +145,31 @@ export function ToolCallCard({ tool }: { tool: ToolCallView }) {
         </div>
       )}
 
-      {open && <div className="toolcall-body">{renderBody(tool)}</div>}
+      <Collapse open={open}>
+        <div className="toolcall-body">{renderBody(tool)}</div>
+      </Collapse>
+    </div>
+  );
+}
+
+/**
+ * Height transition for expanding/collapsing content. Uses the grid-rows
+ * 0fr -> 1fr trick so it animates to the content's natural height without
+ * measuring. The body stays lazily mounted: it mounts on first open and
+ * unmounts again once the closing transition finishes, so collapsed tool calls
+ * still don't pay for highlighting until opened.
+ */
+function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+  const [mounted, setMounted] = useState(open);
+  useEffect(() => {
+    if (open) setMounted(true);
+  }, [open]);
+  const onTransitionEnd = (e: TransitionEvent) => {
+    if (e.propertyName === 'grid-template-rows' && !open) setMounted(false);
+  };
+  return (
+    <div className={`collapse ${open ? 'is-open' : ''}`} onTransitionEnd={onTransitionEnd}>
+      <div className="collapse-inner">{mounted ? children : null}</div>
     </div>
   );
 }
