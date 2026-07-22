@@ -366,9 +366,7 @@ function renderWebFetch(tool: ToolCallView): ReactNode {
         </div>
       )}
       {content.trim() ? (
-        <div className="toolcall-doc">
-          <MarkdownRenderer text={content} />
-        </div>
+        <Code code={content} lang="markdown" />
       ) : (
         renderGeneric(tool)
       )}

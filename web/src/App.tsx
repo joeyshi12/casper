@@ -58,7 +58,7 @@ function Shell({ onLock }: { onLock: () => void }) {
       .catch(() => store.pushToast('Could not load models.'));
     api
       .agents()
-      .then((r) => store.setAgents(r.agents))
+      .then((r) => store.setAgents(r.agents, r.defaultAgentId))
       .catch(() => store.pushToast('Could not load agents.'));
     refreshSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -263,7 +263,17 @@ function Shell({ onLock }: { onLock: () => void }) {
   }, []);
   const changeAgent = useCallback((modeId: string) => {
     socketRef.current?.setMode(modeId);
-    useStore.setState({ currentModeId: modeId });
+    // Optimistically reflect the switch in both the active session's picker
+    // (currentModeId) and its row in the session list (agentId), so the sidebar
+    // updates immediately instead of only after the next listSessions/reload.
+    useStore.setState((s) => ({
+      currentModeId: modeId,
+      sessions: s.activeId
+        ? s.sessions.map((sess) =>
+            sess.sessionId === s.activeId ? { ...sess, agentId: modeId } : sess,
+          )
+        : s.sessions,
+    }));
   }, []);
   const compact = useCallback(() => {
     socketRef.current?.execCommand('compact');

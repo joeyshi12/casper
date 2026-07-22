@@ -39,6 +39,7 @@ interface CasperState {
   sessions: SessionSummary[];
   models: ModelInfo[];
   agents: AgentMode[]; // global agent list (from /api/agents) - always populated
+  defaultAgentId: string; // server-configured default (DEFAULT_AGENT) for new sessions
 
   // Active session
   activeId: string | null;
@@ -58,7 +59,7 @@ interface CasperState {
   // actions
   setSessions: (s: SessionSummary[]) => void;
   setModels: (m: ModelInfo[]) => void;
-  setAgents: (a: AgentMode[]) => void;
+  setAgents: (a: AgentMode[], defaultAgentId: string) => void;
   loadDetail: (d: SessionDetail) => void;
   prependItems: (older: TranscriptItem[]) => void;
   clearActive: () => void;
@@ -74,6 +75,7 @@ export const useStore = create<CasperState>((set, get) => ({
   sessions: [],
   models: [],
   agents: [],
+  defaultAgentId: 'kiro_default',
   activeId: null,
   modes: [],
   items: [],
@@ -86,7 +88,7 @@ export const useStore = create<CasperState>((set, get) => ({
 
   setSessions: (sessions) => set({ sessions }),
   setModels: (models) => set({ models }),
-  setAgents: (agents) => set({ agents }),
+  setAgents: (agents, defaultAgentId) => set({ agents, defaultAgentId }),
 
   loadDetail: (d) =>
     set({

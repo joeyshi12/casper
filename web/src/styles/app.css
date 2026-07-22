@@ -2179,10 +2179,20 @@
   font-weight: 500;
 }
 .ftree-chevron {
-  font-size: 10px;
-  width: 12px;
+  width: 14px;
   flex-shrink: 0;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: -2px;
+  color: var(--n4);
+}
+.ftree-chevron-icon {
+  transition: transform 0.15s ease;
+  transform: rotate(-90deg);
+}
+.ftree-chevron.is-open .ftree-chevron-icon {
+  transform: rotate(0deg);
 }
 .ftree-icon {
   font-size: 14px;

@@ -28,6 +28,16 @@ if command -v systemctl >/dev/null 2>&1; then
   ok "Service removed"
 fi
 
+# --- Remove the Casper kiro agent symlink ---------------------------------
+AGENT_LINK="$HOME/.kiro/agents/casper.json"
+if [ -L "$AGENT_LINK" ]; then
+  say "Removing Casper agent symlink"
+  rm -f "$AGENT_LINK"
+  ok "Agent symlink removed"
+elif [ -e "$AGENT_LINK" ]; then
+  printf '\033[33m! Kept %s (not a Casper symlink).\033[0m\n' "$AGENT_LINK"
+fi
+
 # --- Remove the install directory -----------------------------------------
 if [ -d "$DIR" ]; then
   say "Removing install directory $DIR"

@@ -15,6 +15,7 @@ import {
   DownloadIcon,
   RefreshIcon,
   CloseIcon,
+  ChevronIcon,
   Spinner,
 } from '../common/icons.js';
 
@@ -252,8 +253,12 @@ function TreeEntry({
           onClick={toggle}
           style={{ paddingLeft: `${indent + 8}px` }}
         >
-          <span className="ftree-chevron">
-            {folder.loading ? <Spinner size={12} /> : folder.expanded ? '▾' : '▸'}
+          <span className={`ftree-chevron ${folder.expanded ? 'is-open' : ''}`}>
+            {folder.loading ? (
+              <Spinner size={12} />
+            ) : (
+              <ChevronIcon size={12} className="ftree-chevron-icon" />
+            )}
           </span>
           <span className="ftree-icon">
             {folder.expanded ? (

@@ -27,6 +27,9 @@ export interface ModelsResponse {
 
 export interface AgentsResponse {
   agents: AgentMode[];
+  /** Server-configured default agent (DEFAULT_AGENT); the new-session UI
+   *  initializes its picker to this. */
+  defaultAgentId: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -54,6 +54,30 @@ say "Building (shared, server, web). This can take a minute"
 ( cd "$DIR" && npm run build >/dev/null )
 ok "Build complete"
 
+# --- Casper kiro agent -----------------------------------------------------
+# Soft-link the bundled agent into kiro's global agent dir so `--agent casper`
+# resolves from any working directory. Idempotent and non-destructive: an
+# existing real (non-symlink) casper.json is left untouched. DEFAULT_AGENT is
+# set to casper only when the agent is actually resolvable, else kiro_default.
+AGENT_SRC="$DIR/assets/agents/casper.json"
+AGENT_DIR="$HOME/.kiro/agents"
+AGENT_LINK="$AGENT_DIR/casper.json"
+AGENT_NAME="kiro_default"
+if [ -f "$AGENT_SRC" ]; then
+  mkdir -p "$AGENT_DIR"
+  if [ -e "$AGENT_LINK" ] && [ ! -L "$AGENT_LINK" ]; then
+    printf '\033[33m! %s exists and is not a Casper symlink; leaving it as-is.\033[0m\n' "$AGENT_LINK"
+    AGENT_NAME="casper"
+  else
+    ln -sfn "$AGENT_SRC" "$AGENT_LINK"
+    AGENT_NAME="casper"
+    if command -v kiro-cli >/dev/null 2>&1 && ! kiro-cli agent validate --path "$AGENT_LINK" >/dev/null 2>&1; then
+      printf '\033[33m! casper agent failed validation; it may not load.\033[0m\n'
+    fi
+    ok "Linked Casper agent into $AGENT_DIR"
+  fi
+fi
+
 # --- Configure -------------------------------------------------------------
 ENV_FILE="$DIR/.env"
 if [ -f "$ENV_FILE" ] && grep -q '^CASPER_TOKEN=' "$ENV_FILE"; then
@@ -70,6 +94,7 @@ PORT=$PORT
 CASPER_TOKEN=$TOKEN
 CASPER_WEB_DIST=$DIR/web/dist
 NODE_ENV=production
+DEFAULT_AGENT=$AGENT_NAME
 EOF
 ok "Wrote $ENV_FILE"
 

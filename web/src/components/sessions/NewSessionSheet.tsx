@@ -10,8 +10,9 @@ interface Props {
 
 export function NewSessionSheet({ onCreate, onClose }: Props) {
   const models = useStore((s) => s.models);
+  const defaultAgentId = useStore((s) => s.defaultAgentId);
   const [cwd, setCwd] = useState('');
-  const [agentId, setAgentId] = useState('kiro_default');
+  const [agentId, setAgentId] = useState(defaultAgentId);
   const [modelId, setModelId] = useState(
     models.find((m) => m.isDefault)?.modelId ?? 'auto',
   );
