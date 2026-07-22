@@ -1320,8 +1320,12 @@
 .toolcall-title {
   font-family: var(--font-mono);
   font-size: 12.5px;
-  flex: 0 1 auto;
-  min-width: 0;
+  /* Don't shrink: the label is short and must stay fully readable. The long
+     summary (flex: 1 1 auto) yields first, so it truncates instead of the
+     title. max-width caps a pathologically long tool name so it can't eat the
+     whole row, with ellipsis only past that cap. */
+  flex: 0 0 auto;
+  max-width: 45%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
