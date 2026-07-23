@@ -68,7 +68,12 @@ export class EventStore extends EventEmitter {
    * evicted and the client must resync (full transcript refetch).
    */
   getSince(cursor: number): { events: CasperEvent[]; gap: boolean } {
-    if (this.buffer.length === 0) return { events: [], gap: false };
+    // After a server restart the buffer is empty but the client may hold a
+    // cursor from the previous lifetime. That's a gap: events between the
+    // client's cursor and "now" were lost with the old process.
+    if (this.buffer.length === 0) {
+      return { events: [], gap: cursor > 0 };
+    }
     const tail = this.tail();
     // cursor >= tail-1 means everything after cursor is still buffered.
     const gap = cursor > 0 && cursor < tail - 1;

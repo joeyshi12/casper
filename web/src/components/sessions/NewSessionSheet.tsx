@@ -12,10 +12,11 @@ export function NewSessionSheet({ onCreate, onClose }: Props) {
   const models = useStore((s) => s.models);
   const defaultAgentId = useStore((s) => s.defaultAgentId);
   const [cwd, setCwd] = useState('');
-  const [agentId, setAgentId] = useState(defaultAgentId);
-  const [modelId, setModelId] = useState(
-    models.find((m) => m.isDefault)?.modelId ?? 'auto',
-  );
+  const [agentOverride, setAgentOverride] = useState<string>();
+  const [modelOverride, setModelOverride] = useState<string>();
+  const agentId = agentOverride ?? defaultAgentId;
+  const modelId =
+    modelOverride ?? models.find((m) => m.isDefault)?.modelId ?? 'auto';
 
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -84,8 +85,8 @@ export function NewSessionSheet({ onCreate, onClose }: Props) {
           </span>
         </label>
 
-        <AgentPicker value={agentId} onChange={setAgentId} />
-        <ModelPicker value={modelId} onChange={setModelId} />
+        <AgentPicker value={agentId} onChange={setAgentOverride} />
+        <ModelPicker value={modelId} onChange={setModelOverride} />
 
         <div className="sheet-actions">
           <button className="btn-ghost" onClick={onClose}>

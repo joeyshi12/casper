@@ -67,14 +67,19 @@ if [ -f "$AGENT_SRC" ]; then
   mkdir -p "$AGENT_DIR"
   if [ -e "$AGENT_LINK" ] && [ ! -L "$AGENT_LINK" ]; then
     printf '\033[33m! %s exists and is not a Casper symlink; leaving it as-is.\033[0m\n' "$AGENT_LINK"
-    AGENT_NAME="casper"
   else
     ln -sfn "$AGENT_SRC" "$AGENT_LINK"
-    AGENT_NAME="casper"
-    if command -v kiro-cli >/dev/null 2>&1 && ! kiro-cli agent validate --path "$AGENT_LINK" >/dev/null 2>&1; then
-      printf '\033[33m! casper agent failed validation; it may not load.\033[0m\n'
-    fi
     ok "Linked Casper agent into $AGENT_DIR"
+  fi
+
+  if command -v kiro-cli >/dev/null 2>&1; then
+    if kiro-cli agent validate --path "$AGENT_LINK" >/dev/null 2>&1; then
+      AGENT_NAME="casper"
+    else
+      printf '\033[33m! casper agent failed validation; falling back to kiro_default.\033[0m\n'
+    fi
+  else
+    AGENT_NAME="casper"
   fi
 fi
 

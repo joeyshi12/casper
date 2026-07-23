@@ -86,7 +86,7 @@ export function Dropdown({ label, value, options, onChange }: Props) {
         onKeyDown={onKeyDown}
       >
         <span className="dd-label">{label}</span>
-        <span className="dd-value">{selected?.label ?? 'Select…'}</span>
+        <span className="dd-value">{selected?.label ?? value ?? 'Select…'}</span>
         <ChevronIcon size={13} className="dd-chevron" />
       </button>
 

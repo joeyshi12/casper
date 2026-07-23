@@ -199,6 +199,16 @@ check(
     wire(s: unknown, proc: unknown): void;
   };
   const store = new EventStore('replay-regression-test', noopLog);
+  const freshCursor = store.getSince(0);
+  check(
+    !freshCursor.gap && freshCursor.events.length === 0,
+    'eventstore: empty buffer accepts a fresh cursor',
+  );
+  const staleCursor = store.getSince(42);
+  check(
+    staleCursor.gap && staleCursor.events.length === 0,
+    'eventstore: empty buffer rejects a cursor from a prior server lifetime',
+  );
   const session = new Session('replay-regression-test', store, '/tmp');
   const proc = new EventEmitter();
   mgr.wire(session, proc);
