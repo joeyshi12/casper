@@ -48,6 +48,7 @@ Open the printed URL and paste your `CASPER_TOKEN`.
 | `MAX_LIVE_SESSIONS` | `6` | Max concurrent live kiro processes |
 | `DEFAULT_AGENT` | `kiro_default` | Default agent for new sessions |
 | `CASPER_WEB_DIST` | `../web/dist` | Built web app to serve (set to an absolute path in prod) |
+| `CASPER_NODE` | `node` | Explicit Node binary for the `casper` runner (the installer records the resolved path so the service starts under a minimal PATH). |
 
 ## Install
 
@@ -80,7 +81,6 @@ long read timeout for lengthy agent turns.
 
 ```bash
 npm test        # unit: observability fold
-npm run probe   # raw ACP bridge (spawns real kiro-cli, costs a few credits)
 npm run e2e     # full server: prompt, disconnect mid-turn, reconnect, replay
 ```
 

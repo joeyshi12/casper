@@ -98,10 +98,27 @@ HOST=0.0.0.0
 PORT=$PORT
 CASPER_TOKEN=$TOKEN
 CASPER_WEB_DIST=$DIR/web/dist
+CASPER_NODE=$NODE_BIN
 NODE_ENV=production
 DEFAULT_AGENT=$AGENT_NAME
 EOF
 ok "Wrote $ENV_FILE"
+
+# --- casper command --------------------------------------------------------
+# Put a `casper` command on PATH that runs the server in the foreground. It is
+# what the service below launches, and it also lets you run Casper by hand on a
+# machine without a user systemd - or under a completely different init system.
+CASPER_SCRIPT="$DIR/scripts/casper"
+BIN_DIR="$HOME/.local/bin"
+BIN_LINK="$BIN_DIR/casper"
+chmod +x "$CASPER_SCRIPT" 2>/dev/null || true
+mkdir -p "$BIN_DIR"
+ln -sfn "$CASPER_SCRIPT" "$BIN_LINK"
+ok "Linked casper command into $BIN_DIR"
+case ":$PATH:" in
+  *":$BIN_DIR:"*) : ;;
+  *) printf '\033[33m! %s is not on your PATH; add it to run `casper` directly.\033[0m\n' "$BIN_DIR" ;;
+esac
 
 # --- systemd user service --------------------------------------------------
 say "Installing systemd user service"
@@ -116,7 +133,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=$DIR/server
 EnvironmentFile=$ENV_FILE
-ExecStart=$NODE_BIN dist/index.js
+ExecStart=$CASPER_SCRIPT start
 Restart=on-failure
 RestartSec=3
 
@@ -144,5 +161,6 @@ printf '\n\033[32m👻 Casper is installed and running.\033[0m\n\n'
 printf '  Open:   http://%s:%s   (or http://localhost:%s)\n' "${IP:-<this-host>}" "$PORT" "$PORT"
 printf '  Token:  %s\n\n' "$TOKEN"
 printf '  Logs:      systemctl --user status %s   |   journalctl --user -u %s -f\n' "$SERVICE" "$SERVICE"
+printf '  Run by hand: casper        (foreground; works without systemd too)\n'
 printf '  Update:    re-run this installer\n'
 printf '  Uninstall: %s/scripts/uninstall.sh\n\n' "$DIR"

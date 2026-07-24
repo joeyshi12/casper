@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# casper - run the Casper server in the foreground.
+#
+# Installed as a symlink on your PATH by scripts/install.sh. It runs the server
+# as a plain foreground process, so it works with or without systemd:
+#   - any supervisor (systemd, OpenRC, runit, s6, supervisord) can run it, and
+#   - you can start it directly, or background it yourself (e.g. `nohup casper &`).
+#
+# Configuration is read from the install's .env (HOST, PORT, CASPER_TOKEN, ...).
+set -euo pipefail
+
+# Resolve this script's real path, following the PATH symlink, so we can find
+# the Casper install directory (repo root = the parent of scripts/).
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+  link="$(readlink "$self")"
+  case "$link" in
+    /*) self="$link" ;;
+    *)  self="$(dirname "$self")/$link" ;;
+  esac
+done
+script_dir="$(cd "$(dirname "$self")" && pwd)"
+root="$(cd "$script_dir/.." && pwd)"
+
+usage() {
+  cat <<EOF
+casper - run the Casper server (foreground)
+
+Usage:
+  casper [start]      Run the server in the foreground (default)
+  casper -h, --help   Show this help
+
+Configuration is read from:
+  $root/.env
+Runs in the foreground so any init system - or 'nohup casper &' - can supervise it.
+EOF
+}
+
+case "${1:-start}" in
+  -h|--help|help) usage; exit 0 ;;
+  start) ;;
+  *) printf 'casper: unknown command: %s\n\n' "${1:-}" >&2; usage; exit 2 ;;
+esac
+
+entry="$root/server/dist/index.js"
+if [ ! -f "$entry" ]; then
+  printf 'casper: not built yet (missing %s)\n' "$entry" >&2
+  printf "casper: build it with: (cd '%s' && npm run build)\n" "$root" >&2
+  exit 1
+fi
+
+# Load the install's .env (KEY=VALUE lines) into the environment.
+if [ -f "$root/.env" ]; then
+  set -a
+  # shellcheck disable=SC1090,SC1091
+  . "$root/.env"
+  set +a
+fi
+
+# Prefer an explicit node path (the installer records one in .env as CASPER_NODE)
+# so the server starts even under a minimal PATH, such as a systemd user unit;
+# fall back to whatever `node` is on PATH for interactive use.
+node_bin="${CASPER_NODE:-node}"
+if ! command -v "$node_bin" >/dev/null 2>&1; then
+  printf 'casper: node not found (%s). Install Node 18.20+ or set CASPER_NODE.\n' "$node_bin" >&2
+  exit 1
+fi
+
+# Run from the server dir so relative path defaults resolve as under systemd.
+cd "$root/server"
+exec "$node_bin" dist/index.js

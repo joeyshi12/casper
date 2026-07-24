@@ -38,6 +38,22 @@ elif [ -e "$AGENT_LINK" ]; then
   printf '\033[33m! Kept %s (not a Casper symlink).\033[0m\n' "$AGENT_LINK"
 fi
 
+# --- Remove the casper command symlink ------------------------------------
+BIN_LINK="$HOME/.local/bin/casper"
+if [ -L "$BIN_LINK" ]; then
+  target="$(readlink "$BIN_LINK" 2>/dev/null || true)"
+  case "$target" in
+    "$DIR"/scripts/casper)
+      say "Removing casper command symlink"
+      rm -f "$BIN_LINK"
+      ok "Command symlink removed"
+      ;;
+    *)
+      printf '\033[33m! Kept %s (points elsewhere: %s).\033[0m\n' "$BIN_LINK" "${target:-unknown}"
+      ;;
+  esac
+fi
+
 # --- Remove the install directory -----------------------------------------
 if [ -d "$DIR" ]; then
   say "Removing install directory $DIR"
