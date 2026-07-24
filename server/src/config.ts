@@ -53,7 +53,11 @@ export const config = {
   /** Device-login lifetime in seconds; slid forward on activity. Default 7 days. */
   sessionTtlSeconds: envInt('CASPER_SESSION_TTL_SECONDS', 60 * 60 * 24 * 7),
   kiroBin: resolveKiroBin(env('KIRO_BIN', 'kiro-cli'), home),
-  defaultCwd: env('DEFAULT_CWD', process.cwd()),
+  // Working directory for new sessions when the user doesn't pick one. Defaults
+  // to the user's home directory - not the server's own install dir, which is
+  // where the process happens to run from under systemd / the casper runner.
+  // Set DEFAULT_CWD to override.
+  defaultCwd: env('DEFAULT_CWD', home),
   maxLiveSessions: envInt('MAX_LIVE_SESSIONS', 6),
   defaultAgent: env('DEFAULT_AGENT', 'kiro_default'),
   /**
