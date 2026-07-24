@@ -56,7 +56,7 @@ Open the printed URL and paste your `CASPER_TOKEN`.
 | `CASPER_SESSION_TTL_SECONDS` | `604800` | Device-login lifetime (slid forward on activity). |
 | `KIRO_BIN` | `kiro-cli` | Path to the kiro-cli binary |
 | `DEFAULT_CWD` | cwd | Default working directory for new sessions |
-| `CASPER_FILE_ROOT` | `$HOME` | Filesystem root that file-serving endpoints are confined to; requests resolving outside it are rejected. |
+| `CASPER_FILE_ROOT` | `/` | Filesystem root that file-serving endpoints are confined to; requests resolving outside it are rejected. Defaults to `/` (the whole filesystem the server can read); set a narrower path (e.g. `$HOME`) to restrict file browsing. |
 | `MAX_LIVE_SESSIONS` | `6` | Max concurrent live kiro processes |
 | `DEFAULT_AGENT` | `kiro_default` | Default agent for new sessions |
 | `CASPER_WEB_DIST` | `../web/dist` | Built web app to serve (set to an absolute path in prod) |
