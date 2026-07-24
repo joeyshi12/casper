@@ -74,7 +74,8 @@ curl -fsSL https://raw.githubusercontent.com/joeyshi12/casper/refs/heads/main/sc
 That's it. The installer builds Casper and puts a `casper` command on your
 `PATH`. Where user systemd is available it also runs Casper as a background
 service that survives reboots; otherwise you start it yourself with `casper`
-(below). Re-run the same command any time to update - your access token is
+(below). To update later, run `casper update` - it pulls the latest version,
+rebuilds, and restarts the service if it's running. Your access token is
 preserved.
 
 **Run it by hand.** The `casper` command runs the server in the foreground -

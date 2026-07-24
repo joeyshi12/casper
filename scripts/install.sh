@@ -187,5 +187,5 @@ else
   printf '  Then open: http://%s:%s   (or http://localhost:%s)\n' "${IP:-<this-host>}" "$PORT" "$PORT"
   printf '  Token:     %s\n' "$TOKEN"
 fi
-printf '  Update:    re-run this installer\n'
+printf '  Update:    casper update\n'
 printf '  Uninstall: %s/scripts/uninstall.sh\n\n' "$DIR"
