@@ -7,8 +7,10 @@
 #   - you can start it directly, or background it yourself (e.g. `nohup casper &`).
 #
 # Subcommands:
-#   casper [start]   run the server in the foreground (default)
-#   casper update    pull the latest version, rebuild, and restart if running
+#   casper [start]              run the server in the foreground (default)
+#   casper update              pull the latest version, rebuild, and restart if running
+#   casper reset-token [TOKEN] rotate CASPER_TOKEN, revoke all device sessions,
+#                              and restart if running
 #
 # Configuration is read from the install's .env (HOST, PORT, CASPER_TOKEN, ...).
 set -euo pipefail
@@ -31,14 +33,21 @@ usage() {
 casper - run and manage the Casper server
 
 Usage:
-  casper [start]      Run the server in the foreground (default)
-  casper update       Update to the latest version, rebuild, and restart if running
-  casper -h, --help   Show this help
+  casper [start]              Run the server in the foreground (default)
+  casper update               Update to the latest version, rebuild, and restart if running
+  casper reset-token [TOKEN]  Rotate CASPER_TOKEN (generate one, or use TOKEN if given),
+                              revoke all device sessions, and restart if running
+  casper -h, --help           Show this help
 
 Configuration is read from:
   $root/.env
 Runs in the foreground so any init system - or 'nohup casper &' - can supervise it.
 EOF
+}
+
+# True if a systemd user service named 'casper' is currently managing Casper.
+service_active() {
+  command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet casper 2>/dev/null
 }
 
 # Update the install in place: fast-forward the checkout to its upstream,
@@ -67,7 +76,7 @@ do_update() {
   echo "casper: building..."
   ( cd "$root" && npm run build >/dev/null )
 
-  if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet casper 2>/dev/null; then
+  if service_active; then
     echo "casper: restarting service..."
     systemctl --user restart casper
     echo "casper: updated and restarted."
@@ -76,9 +85,63 @@ do_update() {
   fi
 }
 
+# Rotate the shared secret (CASPER_TOKEN) in .env and revoke every device
+# session, so old cookies stop working. Restarts the service if it's running
+# (required for the new token to take effect).
+do_reset_token() {
+  local env_file="$root/.env"
+  [ -f "$env_file" ] || { echo "casper: no .env at $env_file; is Casper installed?" >&2; exit 1; }
+
+  local new_token=""
+  for arg in "$@"; do
+    case "$arg" in
+      -*) echo "casper: unknown option for reset-token: $arg" >&2; exit 2 ;;
+      *) new_token="$arg" ;;
+    esac
+  done
+  # 24 random bytes as hex (matches the installer's token strength).
+  [ -n "$new_token" ] || new_token="$(od -An -tx1 -N 24 /dev/urandom | tr -d ' \n')"
+
+  # Rewrite the CASPER_TOKEN line in place (append if absent). ENVIRON avoids any
+  # interpretation of the token value; a same-dir temp keeps the swap atomic.
+  local tmp; tmp="$(mktemp "${env_file}.XXXXXX")"
+  CASPER_NEW_TOKEN="$new_token" awk '
+    /^CASPER_TOKEN=/ { print "CASPER_TOKEN=" ENVIRON["CASPER_NEW_TOKEN"]; found=1; next }
+    { print }
+    END { if (!found) print "CASPER_TOKEN=" ENVIRON["CASPER_NEW_TOKEN"] }
+  ' "$env_file" > "$tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv "$tmp" "$env_file"
+  echo "casper: wrote a new CASPER_TOKEN to $env_file"
+
+  # Device logins live in CASPER_DATA_DIR/logins.json (default ~/.casper).
+  local data_dir
+  data_dir="$(grep '^CASPER_DATA_DIR=' "$env_file" | tail -n1 | cut -d= -f2- || true)"
+  data_dir="${data_dir:-$HOME/.casper}"
+  local logins="$data_dir/logins.json"
+
+  if service_active; then
+    # Stop first so the running process can't rewrite logins.json from memory,
+    # then clear sessions and start fresh with the new token.
+    systemctl --user stop casper
+    rm -f "$logins"
+    systemctl --user start casper
+    echo "casper: rotated the token, revoked all device sessions, and restarted."
+  else
+    rm -f "$logins"
+    echo "casper: rotated the token and removed $logins."
+    echo "        Restart Casper now to complete revocation (a running instance"
+    echo "        may rewrite that file until it is restarted)."
+  fi
+
+  echo
+  echo "  New token: $new_token"
+}
+
 case "${1:-start}" in
   -h|--help|help) usage; exit 0 ;;
   update) do_update; exit 0 ;;
+  reset-token) shift; do_reset_token "$@"; exit 0 ;;
   start) ;;
   *) printf 'casper: unknown command: %s\n\n' "${1:-}" >&2; usage; exit 2 ;;
 esac
