@@ -19,9 +19,8 @@
     "build": "npm run build:shared && npm run build --workspace @casper/server && npm run build --workspace @casper/web",
     "start": "npm run start --workspace @casper/server",
     "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present",
-    "test": "npm run build:shared && tsx scripts/unit.ts",
-    "probe": "npm run build:shared && tsx scripts/acp-probe.ts",
-    "e2e": "npm run build:shared && tsx scripts/bridge-e2e.ts"
+    "test": "npm run build:shared && node --import tsx --test tests/unit.ts",
+    "e2e": "npm run build:shared && tsx tests/bridge-e2e.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
