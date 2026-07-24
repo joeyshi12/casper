@@ -170,6 +170,14 @@ if ! command -v "$node_bin" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Run from the server dir so relative path defaults resolve as under systemd.
-cd "$root/server"
-exec "$node_bin" dist/index.js
+# Locate the built web assets relative to the install - not the caller's cwd -
+# so they're found no matter where casper is run from (.env may override this).
+: "${CASPER_WEB_DIST:=$root/web/dist}"
+export CASPER_WEB_DIST
+
+# Start the server WITHOUT changing directory, so the working directory stays
+# wherever you ran `casper`. The server uses process.cwd() as the DEFAULT_CWD
+# fallback for new sessions, so running `casper` from a project directory roots
+# new sessions there. node resolves modules from the script's own path, so the
+# absolute entry works regardless of cwd.
+exec "$node_bin" "$root/server/dist/index.js"
