@@ -78,13 +78,21 @@ service that survives reboots; otherwise you start it yourself with `casper`
 rebuilds, and restarts the service if it's running. Your access token is
 preserved.
 
-**Run it by hand.** The `casper` command runs the server in the foreground -
-this is what the systemd service launches, and it's also how you run Casper on a
-machine without a user systemd, or under a different init system:
+**Run it by hand (no systemd).** If the installer set up the systemd service,
+Casper is **already running** - open the URL the installer printed and you're
+done. Don't also run `casper`; it would fail to bind the port the service
+already holds.
+
+On a machine without user systemd - or under a different init system - you start
+Casper yourself. The `casper` command runs the server in the foreground (this is
+also what the systemd service launches):
 
 ```bash
 casper           # run in the foreground (Ctrl-C to stop)
 ```
+
+Background it however your setup prefers: your init system (OpenRC, runit, ...),
+`nohup casper &`, or tmux.
 
 **Uninstall:**
 
