@@ -5,7 +5,7 @@
 <p align="center">
 <a href="https://github.com/joeyshi12/casper/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License: MIT"/></a>
 <a href="https://github.com/joeyshi12/casper/releases"><img src="https://img.shields.io/github/release/joeyshi12/casper.svg" alt="Version"/></a>
-<a href="https://github.com/joeyshi12/casper/actions/workflows/ci.yml"><img src="https://github.com/joeyshi12/casper/actions/workflows/ci.yml/badge.svg" alt="CI status"/></a>
+<a href="https://github.com/joeyshi12/casper/actions/workflows/test.yml"><img src="https://github.com/joeyshi12/casper/actions/workflows/test.yml/badge.svg" alt="Tests"/></a>
 </p>
 
 A web client for `kiro-cli`, over its Agent Client Protocol (ACP).
@@ -23,6 +23,16 @@ On reconnect the client replays exactly what it missed.
   (syntax-highlighted text, images, PDFs), and download them.
 - **Observability** - credits spent, context-window usage, and turn duration.
 - **PWA** - installable, responsive, auto-reconnects when the network returns.
+
+## Prerequisites
+
+- [`kiro-cli`](https://kiro.dev) installed and authenticated (`kiro-cli login`) -
+  Casper is a client for it, so nothing works without it.
+- Node.js 18.20+.
+- `git` and `npm`, if you use the one-line installer (it clones and builds from source).
+- systemd is **optional** - it's only used to auto-start Casper as a background
+  service that survives reboots. Without it (or under a different init system),
+  you run Casper with the `casper` command.
 
 ## Develop
 
@@ -54,22 +64,22 @@ Open the printed URL and paste your `CASPER_TOKEN`.
 
 ## Install
 
-On the Linux machine you want to run Casper on, make sure `kiro-cli` is installed
-and logged in (`kiro-cli login`), then run:
+On the machine you want to run Casper on, make sure `kiro-cli` is installed and
+logged in (`kiro-cli login`), then run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/joeyshi12/casper/refs/heads/main/scripts/install.sh | bash
 ```
 
-That's it. The installer builds Casper, starts it in the background (and keeps it
-running across reboots), and prints the URL and access token to open in your
-browser. Re-run the same command any time to update to the latest version. Your
-access token is preserved.
+That's it. The installer builds Casper and puts a `casper` command on your
+`PATH`. Where user systemd is available it also runs Casper as a background
+service that survives reboots; otherwise you start it yourself with `casper`
+(below). Re-run the same command any time to update - your access token is
+preserved.
 
-**Run it by hand.** The installer also puts a `casper` command on your `PATH`
-that runs the server in the foreground - handy on a machine without a user
-systemd, or under a different init system (the systemd service launches this
-same command):
+**Run it by hand.** The `casper` command runs the server in the foreground -
+this is what the systemd service launches, and it's also how you run Casper on a
+machine without a user systemd, or under a different init system:
 
 ```bash
 casper           # run in the foreground (Ctrl-C to stop)
