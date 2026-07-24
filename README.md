@@ -2,6 +2,12 @@
   <img src="/assets/banner.svg" alt="Casper banner" width="100%" />
 </p>
 
+<p align="center">
+  <a href="https://github.com/joeyshi12/casper/actions/workflows/ci.yml">
+    <img src="https://github.com/joeyshi12/casper/actions/workflows/ci.yml/badge.svg" alt="CI status" />
+  </a>
+</p>
+
 A web client for `kiro-cli`, over its Agent Client Protocol (ACP).
 Start a long Kiro task and it keeps running server-side.
 On reconnect the client replays exactly what it missed.
