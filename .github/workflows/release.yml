@@ -1,0 +1,57 @@
+name: Release
+
+# Create a GitHub release whenever the version in package.json changes on main.
+# The tag/release is v<version>. Idempotent: skips if that release already
+# exists, and only fires when the version field actually changed (not on every
+# package.json edit).
+on:
+  push:
+    branches: [main]
+    paths: ['package.json']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # need the parent commit to diff the version field
+
+      - name: Detect version change
+        id: v
+        run: |
+          current="$(node -p "require('./package.json').version")"
+          if git cat-file -e HEAD~1:package.json 2>/dev/null; then
+            git show HEAD~1:package.json > /tmp/prev-package.json
+            previous="$(node -p "require('/tmp/prev-package.json').version || ''")"
+          else
+            previous=""
+          fi
+          echo "current=$current"   >> "$GITHUB_OUTPUT"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          if [ "$current" != "$previous" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "package.json version: $previous -> $current (changed: $([ "$current" != "$previous" ] && echo yes || echo no))"
+
+      - name: Create release
+        if: steps.v.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${{ steps.v.outputs.current }}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists; nothing to do."
+            exit 0
+          fi
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$tag" \
+            --target "$GITHUB_SHA" \
+            --generate-notes
