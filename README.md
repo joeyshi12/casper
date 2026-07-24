@@ -6,6 +6,12 @@
   <a href="https://github.com/joeyshi12/casper/actions/workflows/ci.yml">
     <img src="https://github.com/joeyshi12/casper/actions/workflows/ci.yml/badge.svg" alt="CI status" />
   </a>
+  <a href="https://github.com/joeyshi12/casper/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License: MIT" />
+  </a>
+  <a href="https://github.com/joeyshi12/casper/blob/main/package.json">
+    <img src="https://img.shields.io/github/package-json/v/joeyshi12/casper" alt="Version" />
+  </a>
 </p>
 
 A web client for `kiro-cli`, over its Agent Client Protocol (ACP).
