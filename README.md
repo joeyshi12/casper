@@ -19,15 +19,10 @@ On reconnect the client replays exactly what it missed.
 - **Per-session model & agent** - from the live model list and kiro's agents.
 - **Rich rendering** - Markdown, Mermaid diagrams, syntax-highlighted code, and
   MCP tool calls with status/input/output.
+- **File browser** - browse the session's workspace, preview files
+  (syntax-highlighted text, images, PDFs), and download them.
 - **Observability** - credits spent, context-window usage, and turn duration.
 - **PWA** - installable, responsive, auto-reconnects when the network returns.
-
-## Layout
-
-- `shared/` - `@casper/shared`: the TypeScript contract (ACP, WS, REST types).
-- `server/` - Fastify HTTP + WebSocket gateway that owns the `kiro-cli acp`
-  child processes and a per-session replay buffer.
-- `web/` - React + Vite PWA.
 
 ## Develop
 
@@ -51,6 +46,7 @@ Open the printed URL and paste your `CASPER_TOKEN`.
 | `CASPER_SESSION_TTL_SECONDS` | `604800` | Device-login lifetime (slid forward on activity). |
 | `KIRO_BIN` | `kiro-cli` | Path to the kiro-cli binary |
 | `DEFAULT_CWD` | cwd | Default working directory for new sessions |
+| `CASPER_FILE_ROOT` | `$HOME` | Filesystem root that file-serving endpoints are confined to; requests resolving outside it are rejected. |
 | `MAX_LIVE_SESSIONS` | `6` | Max concurrent live kiro processes |
 | `DEFAULT_AGENT` | `kiro_default` | Default agent for new sessions |
 | `CASPER_WEB_DIST` | `../web/dist` | Built web app to serve (set to an absolute path in prod) |
@@ -70,6 +66,15 @@ running across reboots), and prints the URL and access token to open in your
 browser. Re-run the same command any time to update to the latest version. Your
 access token is preserved.
 
+**Run it by hand.** The installer also puts a `casper` command on your `PATH`
+that runs the server in the foreground - handy on a machine without a user
+systemd, or under a different init system (the systemd service launches this
+same command):
+
+```bash
+casper           # run in the foreground (Ctrl-C to stop)
+```
+
 **Uninstall:**
 
 ```bash
@@ -86,7 +91,7 @@ long read timeout for lengthy agent turns.
 ## Verify
 
 ```bash
-npm test        # unit: observability fold
+npm test        # unit tests (node:test)
 npm run e2e     # full server: prompt, disconnect mid-turn, reconnect, replay
 ```
 
