@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# casper - run the Casper server in the foreground.
+# casper - run and manage the Casper server.
 #
 # Installed as a symlink on your PATH by scripts/install.sh. It runs the server
 # as a plain foreground process, so it works with or without systemd:
 #   - any supervisor (systemd, OpenRC, runit, s6, supervisord) can run it, and
 #   - you can start it directly, or background it yourself (e.g. `nohup casper &`).
+#
+# Subcommands:
+#   casper [start]   run the server in the foreground (default)
+#   casper update    pull the latest version, rebuild, and restart if running
 #
 # Configuration is read from the install's .env (HOST, PORT, CASPER_TOKEN, ...).
 set -euo pipefail
@@ -24,10 +28,11 @@ root="$(cd "$script_dir/.." && pwd)"
 
 usage() {
   cat <<EOF
-casper - run the Casper server (foreground)
+casper - run and manage the Casper server
 
 Usage:
   casper [start]      Run the server in the foreground (default)
+  casper update       Update to the latest version, rebuild, and restart if running
   casper -h, --help   Show this help
 
 Configuration is read from:
@@ -36,8 +41,44 @@ Runs in the foreground so any init system - or 'nohup casper &' - can supervise 
 EOF
 }
 
+# Update the install in place: fast-forward the checkout to its upstream,
+# reinstall deps, rebuild, and restart the systemd service if it manages Casper.
+#
+# Defined as a function so its body is fully parsed into memory before it runs -
+# `git reset` rewrites files under $root (including this script), and a function
+# already parsed is unaffected by the file changing mid-execution.
+do_update() {
+  command -v git >/dev/null 2>&1 || { echo "casper: git is required to update" >&2; exit 1; }
+  command -v npm >/dev/null 2>&1 || { echo "casper: npm is required to update" >&2; exit 1; }
+  [ -d "$root/.git" ] || {
+    echo "casper: $root is not a git checkout; re-run the installer to update" >&2
+    exit 1
+  }
+
+  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+  echo "casper: updating $root ($branch)..."
+  git -C "$root" fetch --quiet origin "$branch"
+  git -C "$root" reset --hard --quiet "origin/$branch"
+
+  # --include=dev so the build toolchain is installed even if NODE_ENV=production
+  # is set in the environment (npm would otherwise prune devDependencies).
+  echo "casper: installing dependencies..."
+  ( cd "$root" && npm ci --include=dev --silent )
+  echo "casper: building..."
+  ( cd "$root" && npm run build >/dev/null )
+
+  if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet casper 2>/dev/null; then
+    echo "casper: restarting service..."
+    systemctl --user restart casper
+    echo "casper: updated and restarted."
+  else
+    echo "casper: updated. Restart Casper to apply the new version."
+  fi
+}
+
 case "${1:-start}" in
   -h|--help|help) usage; exit 0 ;;
+  update) do_update; exit 0 ;;
   start) ;;
   *) printf 'casper: unknown command: %s\n\n' "${1:-}" >&2; usage; exit 2 ;;
 esac
