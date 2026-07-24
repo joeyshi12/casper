@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Casper installer. Clones (or updates) the repo, builds it, and runs it as a
-# systemd user service that survives logout and reboot. Safe to re-run: it
-# updates an existing install in place and preserves your token.
+# Casper installer. Clones (or updates) the repo, builds it, and installs a
+# `casper` command. Where a user systemd is available it also runs Casper as a
+# service that survives logout and reboot; otherwise you start it with `casper`
+# (or wire that command into your own init system). Safe to re-run: it updates
+# an existing install in place and preserves your token.
 #
 #   curl -fsSL <install-url> | bash
 #
@@ -24,7 +26,6 @@ die()  { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 command -v git  >/dev/null 2>&1 || die "git is required but not installed."
 command -v node >/dev/null 2>&1 || die "Node.js is required but not installed (need 18.20+)."
 command -v npm  >/dev/null 2>&1 || die "npm is required but not installed."
-command -v systemctl >/dev/null 2>&1 || die "systemd is required (this installer targets Linux with systemd)."
 
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
 [ "$NODE_MAJOR" -ge 18 ] || die "Node 18.20+ required; found $(node -v)."
@@ -120,10 +121,20 @@ case ":$PATH:" in
   *) printf '\033[33m! %s is not on your PATH; add it to run `casper` directly.\033[0m\n' "$BIN_DIR" ;;
 esac
 
-# --- systemd user service --------------------------------------------------
-say "Installing systemd user service"
-mkdir -p "$UNIT_DIR"
-cat > "$UNIT" <<EOF
+# --- Run as a service (systemd user), if available -------------------------
+# systemd in user mode is optional. If it isn't available - no systemd, or user
+# services aren't permitted - we skip the service and you run Casper yourself
+# with the `casper` command (directly, via nohup, or your own init system).
+HAS_USER_SYSTEMD=0
+if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+  HAS_USER_SYSTEMD=1
+fi
+
+SERVICE_ACTIVE=0
+if [ "$HAS_USER_SYSTEMD" = 1 ]; then
+  say "Installing systemd user service"
+  mkdir -p "$UNIT_DIR"
+  cat > "$UNIT" <<EOF
 [Unit]
 Description=Casper (kiro-cli web client)
 After=network-online.target
@@ -141,26 +152,40 @@ RestartSec=3
 WantedBy=default.target
 EOF
 
-# Keep the service running after logout / across reboots.
-loginctl enable-linger "$USER" >/dev/null 2>&1 || \
-  printf '\033[33m! Could not enable linger; service may stop on logout. Run: sudo loginctl enable-linger %s\033[0m\n' "$USER"
+  # Keep the service running after logout / across reboots.
+  loginctl enable-linger "$USER" >/dev/null 2>&1 || \
+    printf '\033[33m! Could not enable linger; service may stop on logout. Run: sudo loginctl enable-linger %s\033[0m\n' "$USER"
 
-systemctl --user daemon-reload
-systemctl --user enable --now "$SERVICE" >/dev/null
-sleep 1
+  systemctl --user daemon-reload || true
+  systemctl --user enable --now "$SERVICE" >/dev/null 2>&1 || true
+  sleep 1
 
-if systemctl --user is-active --quiet "$SERVICE"; then
-  ok "Casper is running"
+  if systemctl --user is-active --quiet "$SERVICE"; then
+    SERVICE_ACTIVE=1
+    ok "Casper is running as a systemd user service"
+  else
+    printf '\033[33m! Service did not start; run Casper directly with: casper\033[0m\n'
+    printf '\033[33m  (details: systemctl --user status %s)\033[0m\n' "$SERVICE"
+  fi
 else
-  die "Service failed to start. Check: systemctl --user status $SERVICE"
+  say "No user systemd detected; skipping service setup"
+  ok "Run Casper with the installed 'casper' command"
 fi
 
 # --- Done ------------------------------------------------------------------
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-printf '\n\033[32m👻 Casper is installed and running.\033[0m\n\n'
-printf '  Open:   http://%s:%s   (or http://localhost:%s)\n' "${IP:-<this-host>}" "$PORT" "$PORT"
-printf '  Token:  %s\n\n' "$TOKEN"
-printf '  Logs:      systemctl --user status %s   |   journalctl --user -u %s -f\n' "$SERVICE" "$SERVICE"
-printf '  Run by hand: casper        (foreground; works without systemd too)\n'
+if [ "$SERVICE_ACTIVE" = 1 ]; then
+  printf '\n\033[32m👻 Casper is installed and running.\033[0m\n\n'
+  printf '  Open:   http://%s:%s   (or http://localhost:%s)\n' "${IP:-<this-host>}" "$PORT" "$PORT"
+  printf '  Token:  %s\n\n' "$TOKEN"
+  printf '  Status/logs: systemctl --user status %s   |   journalctl --user -u %s -f\n' "$SERVICE" "$SERVICE"
+  printf '  Run by hand: casper        (the service launches this same command)\n'
+else
+  printf '\n\033[32m👻 Casper is installed.\033[0m\n\n'
+  printf '  Start it:  casper          (foreground; Ctrl-C to stop)\n'
+  printf '             or background it via your init system (OpenRC, runit, ...), nohup, or tmux\n\n'
+  printf '  Then open: http://%s:%s   (or http://localhost:%s)\n' "${IP:-<this-host>}" "$PORT" "$PORT"
+  printf '  Token:     %s\n' "$TOKEN"
+fi
 printf '  Update:    re-run this installer\n'
 printf '  Uninstall: %s/scripts/uninstall.sh\n\n' "$DIR"
