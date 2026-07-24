@@ -8,24 +8,6 @@ import { config } from '../config.js';
 import { confineToRoot, realConfineToRoot } from '../util/paths.js';
 import { classifyKind, mimeForExt, looksBinary } from '../util/filekind.js';
 
-/** Directories to exclude from tree listings. */
-const EXCLUDED_DIRS = new Set([
-  'node_modules',
-  '.git',
-  '.hg',
-  '.svn',
-  'dist',
-  'build',
-  'out',
-  '.cache',
-  'target',
-  '.next',
-  '.nuxt',
-  '__pycache__',
-  '.venv',
-  'venv',
-]);
-
 /** Maximum file size for downloads (100 MB). */
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 
@@ -112,11 +94,6 @@ export function registerWorkspaceRoutes(
       const entries: FileEntry[] = [];
       for (const d of dirents) {
         const name = d.name as string;
-        // Skip hidden directories, except .casper so users can see and download
-        // their uploaded files (stored under .casper/uploads/).
-        if (name.startsWith('.') && name !== '.casper' && d.isDirectory()) continue;
-        if (d.isDirectory() && EXCLUDED_DIRS.has(name)) continue;
-
         const entryRelative = relative ? `${relative}/${name}` : name;
         const entryAbsolute = path.join(realTarget, name);
 

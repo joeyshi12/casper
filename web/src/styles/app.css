@@ -2240,24 +2240,6 @@
   color: var(--n3);
   flex-shrink: 0;
 }
-.ftree-download {
-  font-size: 13px;
-  padding: 2px 4px;
-  border-radius: var(--r-sm);
-  border: none;
-  background: none;
-  color: var(--n3);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s, background 0.12s;
-}
-.ftree-row:hover .ftree-download {
-  opacity: 1;
-}
-.ftree-download:hover {
-  background: var(--n2);
-  color: var(--frost);
-}
 .ftree-children {
   /* No extra spacing; indent is handled via inline padding. */
 }

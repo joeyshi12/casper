@@ -228,15 +228,6 @@ function TreeEntry({
     }
   }, [entry, sessionId, folder.expanded, folder.children, folder.loading]);
 
-  const download = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      const url = api.downloadUrl(sessionId, entry.path);
-      window.open(url, '_blank');
-    },
-    [sessionId, entry.path],
-  );
-
   const handleClick = useCallback(() => {
     if (entry.type === 'file') {
       onPreview(entry);
@@ -300,19 +291,14 @@ function TreeEntry({
       style={{ paddingLeft: `${indent + 8}px` }}
       onClick={handleClick}
     >
+      {/* Empty disclosure gutter so file icons line up with folder icons at the
+          same depth (the chevron sits in this gutter, to the left of the icon). */}
+      <span className="ftree-chevron ftree-chevron-spacer" aria-hidden="true" />
       <span className="ftree-icon"><FileTypeIcon name={entry.name} /></span>
       <span className="ftree-name">{entry.name}</span>
       {entry.size != null && (
         <span className="ftree-size">{formatSize(entry.size)}</span>
       )}
-      <button
-        className="ftree-download"
-        onClick={download}
-        title={`Download ${entry.name}`}
-        aria-label={`Download ${entry.name}`}
-      >
-        <DownloadIcon size={13} />
-      </button>
     </div>
   );
 }
