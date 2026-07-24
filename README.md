@@ -55,7 +55,7 @@ Open the printed URL and paste your `CASPER_TOKEN`.
 | `CASPER_TOKEN` | _(empty)_ | Shared secret entered once at login; server exchanges it for a per-device session cookie. **Set before exposing.** |
 | `CASPER_SESSION_TTL_SECONDS` | `604800` | Device-login lifetime (slid forward on activity). |
 | `KIRO_BIN` | `kiro-cli` | Path to the kiro-cli binary |
-| `DEFAULT_CWD` | `$HOME` | Default working directory for new sessions |
+| `DEFAULT_CWD` | cwd | Default working directory for new sessions |
 | `CASPER_FILE_ROOT` | `/` | Filesystem root that file-serving endpoints are confined to; requests resolving outside it are rejected. Defaults to `/` (the whole filesystem the server can read); set a narrower path (e.g. `$HOME`) to restrict file browsing. |
 | `MAX_LIVE_SESSIONS` | `6` | Max concurrent live kiro processes |
 | `DEFAULT_AGENT` | `kiro_default` | Default agent for new sessions |
