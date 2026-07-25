@@ -76,19 +76,34 @@ export function registerWorkspaceRoutes(
         return { error: 'Invalid path' };
       }
 
+      // A session's workspace can be moved or deleted after it was created (the
+      // cwd is persisted with the session). Report that distinctly, so the tree
+      // explains why it's empty instead of showing a bare "not found".
+      const workspaceMissing = async (): Promise<boolean> => {
+        try {
+          return !(await fs.stat(cwd)).isDirectory();
+        } catch {
+          return true;
+        }
+      };
+      const notFound = async (): Promise<{ error: string }> => {
+        reply.code(404);
+        return (await workspaceMissing())
+          ? { error: `Workspace folder no longer exists: ${cwd}` }
+          : { error: 'Directory not found' };
+      };
+
       // Symlink-safe: reject if the real target escapes fileRoot.
       const realTarget = await realConfineToRoot(config.fileRoot, target);
       if (!realTarget) {
-        reply.code(404);
-        return { error: 'Directory not found' };
+        return notFound();
       }
 
       let dirents: import('node:fs').Dirent<string>[];
       try {
         dirents = await fs.readdir(realTarget, { withFileTypes: true, encoding: 'utf8' });
       } catch {
-        reply.code(404);
-        return { error: 'Directory not found' };
+        return notFound();
       }
 
       const entries: FileEntry[] = [];
