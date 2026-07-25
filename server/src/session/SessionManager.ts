@@ -34,6 +34,7 @@ import {
   readPersistedSession,
 } from './kiroFiles.js';
 import { TitleStore } from './titles.js';
+import { CwdStore } from './cwds.js';
 
 // Resolve a working directory for a new session, normalized to an absolute path
 // (relative input is resolved against DEFAULT_CWD). If the directory doesn't
@@ -151,10 +152,12 @@ export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly log: Logger;
   private readonly titles: TitleStore;
+  private readonly cwds: CwdStore;
 
   constructor(log: Logger) {
     this.log = log;
     this.titles = new TitleStore(log);
+    this.cwds = new CwdStore(log);
   }
 
   /** Set a user title override for a session. */
@@ -162,6 +165,37 @@ export class SessionManager {
     this.titles.set(sessionId, title);
     const s = this.sessions.get(sessionId);
     if (s) s.title = title.trim() || s.title;
+  }
+
+  /**
+   * Re-point a session at a different working directory. A session's cwd is
+   * fixed at creation, so this is needed when the original folder was moved or
+   * deleted (the workspace endpoints and the kiro process are scoped to it).
+   *
+   * The target is validated and created exactly like a new session's cwd, so a
+   * folder is only created on this explicit action - never silently on resume.
+   * Any live kiro process was spawned with the old cwd, so it's disposed here;
+   * the next turn respawns in the new directory with the transcript intact
+   * (kiro reloads the session from its own file).
+   *
+   * Returns the resolved absolute path.
+   */
+  async setSessionCwd(sessionId: string, input: string): Promise<string> {
+    const resolved = resolveCwd(input);
+
+    // Confirm the session exists before recording an override for it.
+    const s = await this.ensureOpen(sessionId);
+
+    this.cwds.set(sessionId, resolved);
+    if (s.cwd !== resolved) {
+      s.cwd = resolved;
+      // The child was started in the old directory; drop it so the next prompt
+      // spawns a fresh process in the new one.
+      s.proc?.dispose();
+      s.proc = undefined;
+      this.log.info({ sessionId, cwd: resolved }, 'session working directory changed');
+    }
+    return resolved;
   }
 
   get liveCount(): number {
@@ -199,18 +233,23 @@ export class SessionManager {
     const persisted = await readPersistedSession(sessionId);
     if (!persisted) throw new Error(`Unknown session: ${sessionId}`);
 
+    // A session's cwd is persisted by kiro at creation. If the user re-pointed
+    // the session (original folder moved or deleted), the Casper-side override
+    // wins.
+    const effectiveCwd = this.cwds.get(sessionId) ?? persisted.cwd;
+
     // Confine the persisted cwd to fileRoot. A session created before this
     // boundary existed - or one created directly by kiro-cli - could carry an
     // out-of-root cwd; the workspace endpoints scope file access to it, so an
     // unbounded cwd would re-open the arbitrary-read hole. Fail closed.
-    if (!isWithinRoot(config.fileRoot, persisted.cwd)) {
+    if (!isWithinRoot(config.fileRoot, effectiveCwd)) {
       throw new Error(
-        `Session working directory is outside the allowed root: ${persisted.cwd}`,
+        `Session working directory is outside the allowed root: ${effectiveCwd}`,
       );
     }
 
     const store = new EventStore(sessionId, this.log);
-    const s = new Session(sessionId, store, persisted.cwd);
+    const s = new Session(sessionId, store, effectiveCwd);
     s.title = persisted.title;
     s.agentId = persisted.agentId;
     s.currentModeId = persisted.agentId;
@@ -426,7 +465,11 @@ export class SessionManager {
     const persisted = await listPersistedSessions(this.log);
     const byId = new Map<string, SessionSummary>();
     for (const p of persisted) {
-      byId.set(p.sessionId, { ...p, title: this.titles.get(p.sessionId) ?? p.title });
+      byId.set(p.sessionId, {
+        ...p,
+        title: this.titles.get(p.sessionId) ?? p.title,
+        cwd: this.cwds.get(p.sessionId) ?? p.cwd,
+      });
     }
     for (const s of this.sessions.values()) {
       const snap = s.turnState.get();
@@ -457,7 +500,11 @@ export class SessionManager {
     const persisted = await readPersistedSession(sessionId);
     if (!persisted) throw new Error(`Unknown session: ${sessionId}`);
     return {
-      summary: { ...persisted, title: this.titles.get(sessionId) ?? persisted.title },
+      summary: {
+        ...persisted,
+        title: this.titles.get(sessionId) ?? persisted.title,
+        cwd: this.cwds.get(sessionId) ?? persisted.cwd,
+      },
       modes: [],
       currentModeId: persisted.agentId,
       transcript: transcript.slice(-TRANSCRIPT_PAGE_SIZE),
@@ -582,6 +629,7 @@ export class SessionManager {
     }
     this.evict(sessionId);
     this.titles.remove(sessionId);
+    this.cwds.remove(sessionId);
     await deletePersistedSession(sessionId);
     // kiro-cli spawns a wrapped kiro-cli-chat that flushes the session file on
     // its own shutdown, which can land just after our delete. Sweep once more

@@ -126,6 +126,12 @@ export interface RenameSessionRequest {
   title: string;
 }
 
+/** Re-point a session at a different working directory. */
+export interface SetCwdRequest {
+  /** Absolute path, or relative to the server's DEFAULT_CWD. Created if absent. */
+  cwd: string;
+}
+
 export interface SetModeRequest {
   modeId: string;
 }

@@ -69,6 +69,9 @@ export const api = {
   deleteSession: (id: string) => req<{ ok: boolean }>('DELETE', `/api/sessions/${id}`),
   renameSession: (id: string, title: string) =>
     req<{ ok: boolean }>('POST', `/api/sessions/${id}/rename`, { title }),
+  /** Re-point a session at a different working directory. */
+  setSessionCwd: (id: string, cwd: string) =>
+    req<{ ok: boolean; cwd: string }>('POST', `/api/sessions/${id}/cwd`, { cwd }),
   setModel: (id: string, modelId: string) =>
     req('POST', `/api/sessions/${id}/model`, { modelId }),
   setMode: (id: string, modeId: string) =>

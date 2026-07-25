@@ -2155,6 +2155,27 @@
 .ftree-error {
   color: var(--aurora-red);
 }
+/* "Change folder…" action shown with a tree error (e.g. a deleted workspace). */
+.ftree-repoint {
+  display: block;
+  margin: 8px auto 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--frost);
+  background: var(--n1);
+  border-radius: var(--r-sm);
+}
+.ftree-repoint:hover {
+  background: var(--n2);
+  color: var(--n6);
+}
+/* Inline validation error inside a sheet (e.g. rejected working directory). */
+.sheet-error {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--aurora-red);
+  word-break: break-word;
+}
 
 /* Tree rows. */
 .ftree-row {

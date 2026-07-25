@@ -3,6 +3,7 @@ import type {
   CreateSessionRequest,
   PromptRequest,
   RenameSessionRequest,
+  SetCwdRequest,
   SetModeRequest,
   SetModelRequest,
 } from '@casper/shared';
@@ -104,6 +105,25 @@ export function registerSessionRoutes(
     async (req) => {
       manager.renameSession(req.params.id, req.body.title);
       return { ok: true };
+    },
+  );
+
+  // Re-point a session at a different working directory (Casper-side override,
+  // for when the original folder was moved or deleted).
+  app.post<{ Params: { id: string }; Body: SetCwdRequest }>(
+    '/api/sessions/:id/cwd',
+    async (req, reply) => {
+      const cwd = (req.body?.cwd ?? '').trim();
+      if (!cwd) {
+        reply.code(400);
+        return { error: 'cwd is required' };
+      }
+      try {
+        return { ok: true, cwd: await manager.setSessionCwd(req.params.id, cwd) };
+      } catch (err) {
+        reply.code(400);
+        return { error: (err as Error).message };
+      }
     },
   );
 

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FileEntry } from '@casper/shared';
 import { api } from '../../api/rest.js';
+import { useStore } from '../../state/store.js';
+import { ChangeFolderSheet } from '../sessions/ChangeFolderSheet.js';
 import { highlightToHtml } from '../../util/highlighter.js';
 import {
   FileIcon,
@@ -393,6 +395,10 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [changingFolder, setChangingFolder] = useState(false);
+  const sessions = useStore((s) => s.sessions);
+  const setSessions = useStore((s) => s.setSessions);
+  const summaryCwd = sessions.find((s) => s.sessionId === sessionId)?.cwd;
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -470,6 +476,14 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
         </span>
         <button
           className="ftree-refresh"
+          onClick={() => setChangingFolder(true)}
+          title="Change working directory"
+          aria-label="Change working directory"
+        >
+          <FolderIcon size={14} />
+        </button>
+        <button
+          className="ftree-refresh"
           onClick={refresh}
           title="Refresh file tree"
           aria-label="Refresh file tree"
@@ -490,7 +504,14 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
       {cwd && <div className="ftree-cwd" title={cwd}>{cwd}</div>}
       <div className="ftree-list">
         {loading && <div className="ftree-loading">Loading…</div>}
-        {error && <div className="ftree-error">{error}</div>}
+        {error && (
+          <div className="ftree-error">
+            {error}
+            <button className="ftree-repoint" onClick={() => setChangingFolder(true)}>
+              Change folder…
+            </button>
+          </div>
+        )}
         {!loading && !error && entries.length === 0 && (
           <div className="ftree-empty">No files</div>
         )}
@@ -509,6 +530,24 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
 
       {preview && (
         <FilePreview preview={preview} sessionId={sessionId} onClose={closePreview} />
+      )}
+
+      {changingFolder && (
+        <ChangeFolderSheet
+          sessionId={sessionId}
+          // The tree request fails when the folder is gone, so fall back to the
+          // cwd from the session list to prefill the input.
+          currentCwd={cwd || summaryCwd}
+          onChanged={(next) => {
+            setSessions(
+              sessions.map((s) =>
+                s.sessionId === sessionId ? { ...s, cwd: next } : s,
+              ),
+            );
+            refresh();
+          }}
+          onClose={() => setChangingFolder(false)}
+        />
       )}
     </div>
   );
