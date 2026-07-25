@@ -8,6 +8,8 @@ on:
   push:
     branches: [main]
     paths: ['package.json']
+  # Allows re-running for the current version if a push was missed.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,18 +21,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2 # need the parent commit to diff the version field
+          fetch-depth: 0 # need history to diff against the push's base commit
 
       - name: Detect version change
         id: v
         run: |
           current="$(node -p "require('./package.json').version")"
-          if git cat-file -e HEAD~1:package.json 2>/dev/null; then
-            git show HEAD~1:package.json > /tmp/prev-package.json
-            previous="$(node -p "require('/tmp/prev-package.json').version || ''")"
-          else
-            previous=""
+
+          # Compare against the commit the branch was at BEFORE this push - not
+          # HEAD~1. A push can contain several commits, and the bump is often not
+          # the last one (e.g. a lockfile sync follows it), in which case HEAD~1
+          # already has the new version and the change would be missed.
+          base="${{ github.event.before }}"
+          case "$base" in
+            ''|0000000000000000000000000000000000000000) base="" ;;
+          esac
+          if [ -z "$base" ] && [ "${{ github.event_name }}" = "push" ]; then
+            base="HEAD~1"
           fi
+
+          previous=""
+          if [ -n "$base" ] && git cat-file -e "$base:package.json" 2>/dev/null; then
+            git show "$base:package.json" > /tmp/prev-package.json
+            previous="$(node -p "require('/tmp/prev-package.json').version || ''")"
+          fi
+
           echo "current=$current"   >> "$GITHUB_OUTPUT"
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
           if [ "$current" != "$previous" ]; then
@@ -38,10 +53,11 @@ jobs:
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "package.json version: $previous -> $current (changed: $([ "$current" != "$previous" ] && echo yes || echo no))"
+          echo "package.json version: ${previous:-<none>} -> $current (base: ${base:-<none>})"
 
+      # Manual runs release the current version even if it didn't change in a push.
       - name: Create release
-        if: steps.v.outputs.changed == 'true'
+        if: steps.v.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
