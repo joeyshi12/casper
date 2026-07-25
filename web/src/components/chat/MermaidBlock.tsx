@@ -9,10 +9,10 @@ function getMermaid() {
         theme: 'dark',
         securityLevel: 'strict',
         themeVariables: {
-          primaryColor: '#3c3f41',
-          primaryTextColor: '#a9b7c6',
-          primaryBorderColor: '#6897bb',
-          lineColor: '#4eade5',
+          primaryColor: '#44475a',
+          primaryTextColor: '#f8f8f2',
+          primaryBorderColor: '#bd93f9',
+          lineColor: '#8be9fd',
           fontFamily: 'Inter, sans-serif',
         },
       });

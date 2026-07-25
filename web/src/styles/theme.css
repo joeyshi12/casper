@@ -1,32 +1,32 @@
-/* Darcula theme. JetBrains' dark palette: warm-gray surfaces, #a9b7c6 body
-   text, and the classic orange/green/blue/yellow syntax accents. Token names
-   are kept from the previous theme so the whole app re-skins from these. */
+/* Dracula theme (https://draculatheme.com). Dark blue-gray surfaces with a
+   bright #f8f8f2 foreground and vivid purple/cyan/pink/green accents - high
+   contrast by design. Token names are kept so the whole app re-skins from these. */
 
 :root {
   /* base surfaces (darkest -> lightest) */
-  --n-abyss: #2b2b2b; /* app background (Darcula editor bg) */
-  --n0: #323232; /* raised surface */
-  --n1: #3c3f41; /* cards, inputs (Darcula tool windows) */
-  --n2: #4e5254; /* hover / borders */
-  --n3: #5e6366; /* faint lines, disabled */
+  --n-abyss: #21222c; /* app shell / deepest */
+  --n0: #282a36; /* main surface (Dracula background) */
+  --n1: #343746; /* cards, inputs */
+  --n2: #44475a; /* hover / borders (Dracula current line) */
+  --n3: #565872; /* faint lines, disabled */
 
   /* text */
-  --n4: #808080; /* muted text (Darcula comment gray) */
-  --n5: #a9b7c6; /* body text (Darcula default foreground) */
-  --n6: #d9dade; /* strong text */
+  --n4: #6272a4; /* muted text (Dracula comment) */
+  --n5: #f8f8f2; /* body text (Dracula foreground) */
+  --n6: #ffffff; /* strong text */
 
-  /* primary UI accents (Darcula blues) */
-  --frost-teal: #56a8c4; /* secondary accent */
-  --frost: #6897bb; /* primary accent (Darcula blue) */
-  --frost-blue: #4eade5; /* brighter links / hover */
-  --frost-deep: #4a708f; /* deep blue */
+  /* primary UI accents */
+  --frost-teal: #8be9fd; /* cyan */
+  --frost: #bd93f9; /* primary accent (Dracula purple) */
+  --frost-blue: #8be9fd; /* cyan - links / hover */
+  --frost-deep: #6272a4; /* muted blue */
 
-  /* states (Darcula syntax accents) */
-  --aurora-red: #cc5c5c; /* error / stop */
-  --aurora-orange: #cc7832; /* running / warning (Darcula keyword orange) */
-  --aurora-yellow: #ffc66d; /* credits (Darcula method yellow) */
-  --aurora-green: #6a8759; /* success / done (Darcula string green) */
-  --aurora-purple: #9876aa; /* accents (Darcula constant purple) */
+  /* states */
+  --aurora-red: #ff5555; /* error / stop */
+  --aurora-orange: #ffb86c; /* running / warning */
+  --aurora-yellow: #f1fa8c; /* credits */
+  --aurora-green: #50fa7b; /* success / done */
+  --aurora-purple: #ff79c6; /* accents (Dracula pink) */
 
   --font-display: 'Space Grotesk', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
