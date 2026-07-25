@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- Casper banner: logo.svg artwork on a Nord Deep (#2E3440) background -->
+<!-- Casper banner: logo.svg artwork on a Dracula (#282a36) background -->
 
 <svg
    width="729.07446"
@@ -44,7 +44,7 @@
   <rect
      width="729.07446"
      height="119.85024"
-     fill="#2e3440"
+     fill="#282a36"
      id="rect191"
      x="0"
      y="0"
