@@ -1,4 +1,5 @@
 import type { Highlighter } from 'shiki';
+import { darcula } from './darculaTheme.js';
 
 /**
  * A single Shiki highlighter, created with NO languages. Grammars are loaded
@@ -11,7 +12,7 @@ let highlighterPromise: Promise<Highlighter> | null = null;
 function base(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = import('shiki').then(({ createHighlighter: create }) =>
-      create({ themes: ['aurora-x'], langs: [] }),
+      create({ themes: [darcula], langs: [] }),
     );
   }
   return highlighterPromise;
@@ -21,7 +22,7 @@ const loaded = new Set<string>();
 const failed = new Set<string>();
 
 /**
- * Highlight code to HTML with the aurora-x theme, loading the grammar on demand.
+ * Highlight code to HTML with the darcula theme, loading the grammar on demand.
  * Falls back to plain text when the language is unknown/unsupported. Returns
  * null only if highlighting fails entirely (caller renders raw text).
  */
@@ -40,7 +41,7 @@ export async function highlightToHtml(code: string, lang: string): Promise<strin
       }
       if (hl.getLoadedLanguages().includes(lang)) useLang = lang;
     }
-    return hl.codeToHtml(code, { lang: useLang, theme: 'aurora-x' });
+    return hl.codeToHtml(code, { lang: useLang, theme: 'darcula' });
   } catch {
     return null;
   }

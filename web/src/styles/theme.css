@@ -1,31 +1,32 @@
-/* Nord Deep theme. The Polar Night base sits a shade below the canonical nord0
-   for a darker background, with Frost blues and Aurora accents. */
+/* Darcula theme. JetBrains' dark palette: warm-gray surfaces, #a9b7c6 body
+   text, and the classic orange/green/blue/yellow syntax accents. Token names
+   are kept from the previous theme so the whole app re-skins from these. */
 
 :root {
-  /* Nord Deep - base (darker than canonical nord0 #2e3440) */
-  --n-abyss: #21262f; /* app background */
-  --n0: #2e3440; /* raised surface */
-  --n1: #3b4252; /* cards, inputs */
-  --n2: #434c5e; /* hover / borders */
-  --n3: #4c566a; /* faint lines, disabled */
+  /* base surfaces (darkest -> lightest) */
+  --n-abyss: #2b2b2b; /* app background (Darcula editor bg) */
+  --n0: #323232; /* raised surface */
+  --n1: #3c3f41; /* cards, inputs (Darcula tool windows) */
+  --n2: #4e5254; /* hover / borders */
+  --n3: #5e6366; /* faint lines, disabled */
 
-  /* Snow Storm - text */
-  --n4: #d8dee9; /* muted text */
-  --n5: #e5e9f0; /* body text */
-  --n6: #eceff4; /* strong text */
+  /* text */
+  --n4: #808080; /* muted text (Darcula comment gray) */
+  --n5: #a9b7c6; /* body text (Darcula default foreground) */
+  --n6: #d9dade; /* strong text */
 
-  /* Frost - primary UI accents */
-  --frost-teal: #8fbcbb; /* nord7 */
-  --frost: #88c0d0; /* nord8 - primary accent */
-  --frost-blue: #81a1c1; /* nord9 */
-  --frost-deep: #5e81ac; /* nord10 */
+  /* primary UI accents (Darcula blues) */
+  --frost-teal: #56a8c4; /* secondary accent */
+  --frost: #6897bb; /* primary accent (Darcula blue) */
+  --frost-blue: #4eade5; /* brighter links / hover */
+  --frost-deep: #4a708f; /* deep blue */
 
-  /* Aurora - states */
-  --aurora-red: #bf616a; /* nord11 - error / stop */
-  --aurora-orange: #d08770; /* nord12 - running / warning */
-  --aurora-yellow: #ebcb8b; /* nord13 - credits */
-  --aurora-green: #a3be8c; /* nord14 - success / done */
-  --aurora-purple: #b48ead; /* nord15 - accents */
+  /* states (Darcula syntax accents) */
+  --aurora-red: #cc5c5c; /* error / stop */
+  --aurora-orange: #cc7832; /* running / warning (Darcula keyword orange) */
+  --aurora-yellow: #ffc66d; /* credits (Darcula method yellow) */
+  --aurora-green: #6a8759; /* success / done (Darcula string green) */
+  --aurora-purple: #9876aa; /* accents (Darcula constant purple) */
 
   --font-display: 'Space Grotesk', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
