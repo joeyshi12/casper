@@ -83,6 +83,7 @@ function Shell({ onLock }: { onLock: () => void }) {
       if (store.activeId === id) return;
       closeSocket();
       setConnStatus('connecting');
+      useStore.getState().setLoadingSession(id);
 
       let detail: Awaited<ReturnType<typeof api.getSession>>;
       try {
@@ -91,6 +92,7 @@ function Shell({ onLock }: { onLock: () => void }) {
         // Fetch failed (network, or the session was deleted): don't strand the
         // UI in "connecting" - reset and surface the error.
         setConnStatus('closed');
+        useStore.getState().setLoadingSession(null);
         useStore
           .getState()
           .pushToast(err instanceof Error ? err.message : 'Could not open session.');
@@ -300,13 +302,18 @@ function Shell({ onLock }: { onLock: () => void }) {
     onLock();
   }, [closeSocket, onLock, store]);
 
-  const hasActive = store.activeId !== null || creating || createError !== null;
+  const hasActive =
+    store.activeId !== null ||
+    store.loadingSessionId !== null ||
+    creating ||
+    createError !== null;
 
   return (
     <div className={`layout ${hasActive ? 'has-active' : ''}`}>
       <Sidebar
         sessions={store.sessions}
         activeId={store.activeId}
+        loadingId={store.loadingSessionId}
         onOpen={openSession}
         onNew={() => setNewOpen(true)}
         onDelete={deleteSession}
@@ -315,6 +322,7 @@ function Shell({ onLock }: { onLock: () => void }) {
       />
       <ChatPane
         hasActive={hasActive}
+        loadingSessionId={store.loadingSessionId}
         connStatus={connStatus}
         creating={creating}
         createError={createError}

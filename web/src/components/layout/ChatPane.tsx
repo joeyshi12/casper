@@ -12,6 +12,10 @@ import { Spinner, FilesIcon } from '../common/icons.js';
 
 interface Props {
   hasActive: boolean;
+  /** Session whose detail is being fetched (switching sessions), distinct from
+   *  the currently-loaded one so we don't render its stale transcript while
+   *  waiting on a slow hydrate. */
+  loadingSessionId: string | null;
   connStatus: ConnStatus;
   creating: boolean;
   createError: string | null;
@@ -30,6 +34,7 @@ interface Props {
 /** The right-hand chat area. Shows an empty prompt when no session is open. */
 export function ChatPane({
   hasActive,
+  loadingSessionId,
   connStatus,
   creating,
   createError,
@@ -49,6 +54,27 @@ export function ChatPane({
   const title = useStore((s) => s.sessions.find((x) => x.sessionId === s.activeId)?.title);
   const activeId = useStore((s) => s.activeId);
   const [showTree, setShowTree] = useState(false);
+
+  // Switching to a different session: its detail (transcript, mode, etc.) is
+  // still being fetched. Checked before the main branch below so we don't keep
+  // rendering the previous session's transcript under its old header while a
+  // slow hydrate (large transcripts re-parse their full history on open) is in
+  // flight - that reads as the click having done nothing.
+  if (loadingSessionId) {
+    return (
+      <main className="chatpane">
+        <header className="chat-head">
+          <button className="backbtn" onClick={onBack} aria-label="Back to sessions">
+            ‹
+          </button>
+          <span className="chat-title">Opening session…</span>
+        </header>
+        <div className="chat-blank">
+          <Spinner size={28} className="chat-spinner" />
+        </div>
+      </main>
+    );
+  }
 
   if (!hasActive) {
     return (

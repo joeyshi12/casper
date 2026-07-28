@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SessionSummary } from '@casper/shared';
-import { LockIcon, PlusIcon, SearchIcon } from '../common/icons.js';
+import { LockIcon, PlusIcon, SearchIcon, Spinner } from '../common/icons.js';
 import { SearchModal } from '../sessions/SearchModal.js';
 import { DevicesModal } from '../sessions/DevicesModal.js';
 import { ConfirmDialog } from '../common/ConfirmDialog.js';
@@ -8,6 +8,9 @@ import { ConfirmDialog } from '../common/ConfirmDialog.js';
 interface Props {
   sessions: SessionSummary[];
   activeId: string | null;
+  /** Session currently being fetched after a click, for a small inline spinner
+   *  while a slow transcript hydrates. */
+  loadingId: string | null;
   onOpen: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
@@ -40,6 +43,7 @@ function relTime(iso: string): string {
 export function Sidebar({
   sessions,
   activeId,
+  loadingId,
   onOpen,
   onNew,
   onDelete,
@@ -170,7 +174,11 @@ export function Sidebar({
                     <span className="srow-sub">
                       <span className="srow-agent">{s.agentId ?? 'kiro_default'}</span>
                       <span className="srow-dot">·</span>
-                      <span>{relTime(s.updatedAt)}</span>
+                      {loadingId === s.sessionId ? (
+                        <Spinner size={11} className="srow-spinner" />
+                      ) : (
+                        <span>{relTime(s.updatedAt)}</span>
+                      )}
                     </span>
                     {s.cwd && (
                       <span className="srow-cwd" title={s.cwd}>

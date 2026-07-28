@@ -43,6 +43,10 @@ interface CasperState {
 
   // Active session
   activeId: string | null;
+  /** Session whose detail is currently being fetched (opening/switching), so
+   *  the pane can show a loading state instead of the previous session's stale
+   *  content while a slow transcript hydrates. Null once loadDetail lands. */
+  loadingSessionId: string | null;
   modes: AgentMode[];
   currentModeId?: string;
   currentModelId?: string;
@@ -60,6 +64,7 @@ interface CasperState {
   setSessions: (s: SessionSummary[]) => void;
   setModels: (m: ModelInfo[]) => void;
   setAgents: (a: AgentMode[], defaultAgentId: string) => void;
+  setLoadingSession: (id: string | null) => void;
   loadDetail: (d: SessionDetail) => void;
   prependItems: (older: TranscriptItem[]) => void;
   clearActive: () => void;
@@ -77,6 +82,7 @@ export const useStore = create<CasperState>((set, get) => ({
   agents: [],
   defaultAgentId: 'kiro_default',
   activeId: null,
+  loadingSessionId: null,
   modes: [],
   items: [],
   remainingOlder: 0,
@@ -89,10 +95,12 @@ export const useStore = create<CasperState>((set, get) => ({
   setSessions: (sessions) => set({ sessions }),
   setModels: (models) => set({ models }),
   setAgents: (agents, defaultAgentId) => set({ agents, defaultAgentId }),
+  setLoadingSession: (loadingSessionId) => set({ loadingSessionId }),
 
   loadDetail: (d) =>
     set({
       activeId: d.summary.sessionId,
+      loadingSessionId: null,
       modes: d.modes,
       currentModeId: d.currentModeId,
       currentModelId: d.summary.modelId,
@@ -115,6 +123,7 @@ export const useStore = create<CasperState>((set, get) => ({
   clearActive: () =>
     set({
       activeId: null,
+      loadingSessionId: null,
       modes: [],
       items: [],
       remainingOlder: 0,

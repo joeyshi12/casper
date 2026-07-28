@@ -170,6 +170,10 @@
 .srow-dot {
   color: var(--n3);
 }
+.srow-spinner {
+  color: var(--frost);
+  flex: none;
+}
 .srow-cwd {
   margin-top: 2px;
   font-family: var(--font-mono);
