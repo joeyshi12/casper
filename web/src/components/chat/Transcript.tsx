@@ -5,6 +5,7 @@ import { api } from '../../api/rest.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { ToolCallCard } from './ToolCallCard.js';
 import { CompressIcon, Spinner } from '../common/icons.js';
+import { lazyImageProps } from '../../util/lazyImage.js';
 
 // Live media query (its .matches updates as the OS setting changes), so the
 // easing follow can snap instantly for users who ask for reduced motion.
@@ -242,7 +243,7 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
                             src={api.previewUrl(activeId, p)}
                             alt={p.split('/').pop() ?? 'image'}
                             className="msg-image"
-                            loading="lazy"
+                            {...lazyImageProps}
                           />
                         </a>
                       ))}

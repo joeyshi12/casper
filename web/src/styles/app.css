@@ -174,6 +174,20 @@
   color: var(--frost);
   flex: none;
 }
+/* While a row is opening, the spinner stands in for its timestamp. */
+.srow-spinner ~ .srow-when {
+  display: none;
+}
+/* Desktop keeps the timestamp and drops the spinner: the chat pane is right
+   there with its own loading state. Must follow the rules above to win. */
+@media (min-width: 769px) {
+  .srow-spinner {
+    display: none;
+  }
+  .srow-spinner ~ .srow-when {
+    display: inline;
+  }
+}
 .srow-cwd {
   margin-top: 2px;
   font-family: var(--font-mono);
@@ -945,6 +959,13 @@
   object-fit: cover;
   display: block;
 }
+/* Hold a box until the bytes arrive. An unsized <img> is zero-tall, which puts
+   every image in the transcript "in view" and defeats loading="lazy". */
+.msg-image:not([data-loaded]) {
+  width: 220px;
+  height: 220px;
+  background: var(--n1);
+}
 .msg-pending {
   position: relative;
   opacity: 0.6;
@@ -1621,6 +1642,10 @@
   max-height: 400px;
   object-fit: contain;
   background: var(--n0);
+}
+.toolcall-image:not([data-loaded]) {
+  width: 240px;
+  height: 240px;
 }
 
 /* Observability */

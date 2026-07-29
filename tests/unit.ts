@@ -18,6 +18,7 @@ import { config } from '../server/src/config.js';
 import { TurnState } from '../server/src/session/TurnState.js';
 import { SessionManager, Session } from '../server/src/session/SessionManager.js';
 import { EventStore } from '../server/src/session/EventStore.js';
+import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
 import {
   confineToRoot,
   isValidSessionId,
@@ -28,6 +29,7 @@ import { classifyKind, looksBinary } from '../server/src/util/filekind.js';
 import { bumpSessionToTop } from '../web/src/state/sessions.js';
 import { olderPageRequest } from '../web/src/state/pagination.js';
 import { lineDiff } from '../web/src/util/diff.js';
+import { lazyImageProps } from '../web/src/util/lazyImage.js';
 import {
   classifyTool,
   toolLabel,
@@ -648,5 +650,88 @@ describe('store.applyEvent (duplicate event suppression)', () => {
 
     useStore.getState().applyEvent(userTurn(6, 'genuinely new'));
     assert.equal(useStore.getState().items.length, 1);
+  });
+});
+
+describe('lazyImageProps (placeholder box release)', () => {
+  it('defers loading and decoding', () => {
+    assert.equal(lazyImageProps.loading, 'lazy');
+    assert.equal(lazyImageProps.decoding, 'async');
+  });
+
+  it('marks an image loaded so CSS drops the reserved box', () => {
+    const el = { dataset: {} as Record<string, string> };
+    lazyImageProps.onLoad({ currentTarget: el as unknown as HTMLImageElement });
+    assert.equal(el.dataset.loaded, '');
+  });
+
+  it('marks an already-complete (cached) image on mount', () => {
+    const cached = { complete: true, dataset: {} as Record<string, string> };
+    lazyImageProps.ref(cached as unknown as HTMLImageElement);
+    assert.equal(cached.dataset.loaded, '');
+  });
+
+  it('leaves an incomplete image for onLoad to mark', () => {
+    const pending = { complete: false, dataset: {} as Record<string, string> };
+    lazyImageProps.ref(pending as unknown as HTMLImageElement);
+    assert.equal(pending.dataset.loaded, undefined);
+  });
+});
+
+describe('hydrateTranscript: inline tool-result images are not shipped', () => {
+  const sid = 'hydrate-image-strip-test';
+  const file = path.join(config.kiroSessionsDir, `${sid}.jsonl`);
+
+  before(() => {
+    fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
+    const lines = [
+      {
+        kind: 'AssistantMessage',
+        data: {
+          message_id: 'm1',
+          content: [
+            { kind: 'toolUse', data: { toolUseId: 'tu1', name: 'shell', input: { command: 'ls' } } },
+          ],
+        },
+      },
+      {
+        kind: 'ToolResults',
+        data: {
+          message_id: 'm2',
+          content: [
+            {
+              kind: 'toolResult',
+              data: {
+                toolUseId: 'tu1',
+                status: 'success',
+                content: [
+                  { kind: 'text', data: { text: 'kept' } },
+                  // How kiro persists a screenshot: raw bytes as a JSON number array.
+                  { kind: 'image', data: { format: 'png', source: { kind: 'bytes', data: [1, 2, 3] } } },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    ];
+    fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  });
+  after(() => fs.rmSync(file, { force: true }));
+
+  it('keeps the tool call and its text block', async () => {
+    const items = await hydrateTranscript(sid);
+    const call = items.find((i) => i.type === 'tool_call');
+    assert.ok(call, 'tool call is hydrated');
+    const blocks = (call as { tool: { content?: unknown[] } }).tool.content ?? [];
+    assert.equal(blocks.length, 1, 'only the text block survives');
+    assert.equal((blocks[0] as { kind: string }).kind, 'text');
+  });
+
+  it('drops the inline image block entirely', async () => {
+    const items = await hydrateTranscript(sid);
+    const json = JSON.stringify(items);
+    assert.ok(!json.includes('"image"'), 'no image block in the hydrated transcript');
+    assert.ok(!json.includes('"png"'), 'no image payload in the hydrated transcript');
   });
 });

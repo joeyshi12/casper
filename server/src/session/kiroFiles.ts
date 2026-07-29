@@ -84,6 +84,21 @@ function blockText(c: KiroContentBlock): string {
   return d?.text ?? '';
 }
 
+/**
+ * Drop image blocks from a persisted tool result.
+ *
+ * kiro stores tool-result images inline as a raw byte array (data.source.data),
+ * which costs several bytes of JSON per image byte - a tool call returning a few
+ * screenshots becomes megabytes, and one transcript page measured 5.1 MB against
+ * ~100 KB for pages without them. Nothing renders these: the live path already
+ * keeps only Text and Json items (see outputToBlocks), so a reload was shipping
+ * payload the UI has no code to display. Images the user should see come from
+ * the file endpoints by path instead.
+ */
+function withoutInlineImages(blocks: unknown[]): unknown[] {
+  return blocks.filter((b) => (b as { kind?: unknown } | null)?.kind !== 'image');
+}
+
 function summarize(j: KiroSessionJson): SessionSummary {
   const state = j.session_state;
   const turns = state?.conversation_metadata?.user_turn_metadatas ?? [];
@@ -241,7 +256,7 @@ export async function hydrateTranscript(sessionId: string): Promise<TranscriptIt
         const tool = toolsById.get(d.toolUseId);
         if (!tool) continue;
         tool.status = d.status === 'error' ? 'failed' : 'completed';
-        tool.content = d.content ?? [];
+        tool.content = withoutInlineImages(d.content ?? []);
       }
     } else if (entry.kind === 'Compaction') {
       // kiro appends a Compaction entry (it does not rewrite prior entries) whose

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode, type TransitionEvent } from 'react
 import type { ToolCallView } from '../../state/store.js';
 import { highlightToHtml } from '../../util/highlighter.js';
 import { lineDiff, type DiffLine } from '../../util/diff.js';
+import { lazyImageProps } from '../../util/lazyImage.js';
 import {
   classifyTool,
   firstDiff,
@@ -138,7 +139,7 @@ export function ToolCallCard({ tool }: { tool: ToolCallView }) {
                 src={imageUrl(p)}
                 alt={p.split('/').pop() ?? 'image'}
                 className="toolcall-image"
-                loading="lazy"
+                {...lazyImageProps}
               />
             </a>
           ))}

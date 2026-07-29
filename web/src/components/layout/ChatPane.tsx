@@ -70,7 +70,7 @@ export function ChatPane({
           <span className="chat-title">Opening session…</span>
         </header>
         <div className="chat-blank">
-          <Spinner size={28} className="chat-spinner" />
+          <Spinner size={48} className="chat-spinner" />
         </div>
       </main>
     );

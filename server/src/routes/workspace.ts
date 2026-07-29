@@ -308,6 +308,21 @@ export function registerWorkspaceRoutes(
       // Stream images and PDFs with Content-Disposition: inline so the browser
       // renders them directly (in an <img> or the built-in PDF viewer).
       if (isImage || isPdf) {
+        // Transcript images re-render on every reload and every reconnect
+        // replay, so without this the browser refetches each one in full every
+        // time. Matches the /api/fs/image cache policy. The validator is
+        // size+mtime rather than a content hash to avoid reading the file.
+        const etag = `W/"${stat.size}-${stat.mtimeMs}"`;
+        reply.header('Cache-Control', 'private, max-age=3600');
+        reply.header('ETag', etag);
+        reply.header('Last-Modified', stat.mtime.toUTCString());
+
+        const ifNoneMatch = req.headers['if-none-match'];
+        if (ifNoneMatch === etag) {
+          reply.code(304);
+          return reply.send();
+        }
+
         reply.header('Content-Type', mime);
         reply.header('Content-Disposition', 'inline');
         reply.header('Content-Length', stat.size);

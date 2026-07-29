@@ -154,9 +154,18 @@ export function registerFsRoutes(app: FastifyInstance): void {
         return { error: 'Image too large' };
       }
 
+      const etag = `W/"${stat.size}-${stat.mtimeMs}"`;
+      reply.header('Cache-Control', 'private, max-age=3600');
+      reply.header('ETag', etag);
+      reply.header('Last-Modified', stat.mtime.toUTCString());
+
+      if (req.headers['if-none-match'] === etag) {
+        reply.code(304);
+        return reply.send();
+      }
+
       reply.header('Content-Type', mime);
       reply.header('Content-Length', stat.size);
-      reply.header('Cache-Control', 'private, max-age=3600');
       return reply.send(createReadStream(real));
     },
   );

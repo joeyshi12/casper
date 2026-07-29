@@ -172,11 +172,10 @@ export function Sidebar({
                     <span className="srow-sub">
                       <span className="srow-agent">{s.agentId ?? 'kiro_default'}</span>
                       <span className="srow-dot">·</span>
-                      {loadingId === s.sessionId ? (
+                      {loadingId === s.sessionId && (
                         <Spinner size={11} className="srow-spinner" />
-                      ) : (
-                        <span>{relTime(s.updatedAt)}</span>
                       )}
+                      <span className="srow-when">{relTime(s.updatedAt)}</span>
                     </span>
                     {s.cwd && (
                       <span className="srow-cwd" title={s.cwd}>
