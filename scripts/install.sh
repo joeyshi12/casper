@@ -174,18 +174,33 @@ fi
 
 # --- Done ------------------------------------------------------------------
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+
+# The token line is the one thing in this output a new user must not lose, so
+# it gets its own bordered block instead of sitting as one more field among the
+# URL and status lines - and a reminder that `casper token` reprints it later.
+print_token_block() {
+  printf '\n'
+  printf '  \033[1;35m┌─────────────────────────────────────────────────────────────┐\033[0m\n'
+  printf '  \033[1;35m│\033[0m  \033[1mYour access token (save this - you will need it to log in)\033[0m \033[1;35m│\033[0m\n'
+  printf '  \033[1;35m│\033[0m\n'
+  printf '  \033[1;35m│\033[0m  \033[1;33m%s\033[0m\n' "$TOKEN"
+  printf '  \033[1;35m│\033[0m\n'
+  printf '  \033[1;35m│\033[0m  Forgot it later? Run: \033[1mcasper token\033[0m\n'
+  printf '  \033[1;35m└─────────────────────────────────────────────────────────────┘\033[0m\n'
+}
+
 if [ "$SERVICE_ACTIVE" = 1 ]; then
   printf '\n\033[32m👻 Casper is installed and running.\033[0m\n\n'
   printf '  Open:   http://%s:%s   (or http://localhost:%s)\n' "${IP:-<this-host>}" "$PORT" "$PORT"
-  printf '  Token:  %s\n\n' "$TOKEN"
-  printf '  Status/logs: systemctl --user status %s   |   journalctl --user -u %s -f\n' "$SERVICE" "$SERVICE"
+  print_token_block
+  printf '\n  Status/logs: systemctl --user status %s   |   journalctl --user -u %s -f\n' "$SERVICE" "$SERVICE"
   printf '  Run by hand: casper        (the service launches this same command)\n'
 else
   printf '\n\033[32m👻 Casper is installed.\033[0m\n\n'
   printf '  Start it:  casper          (foreground; Ctrl-C to stop)\n'
   printf '             or background it via your init system (OpenRC, runit, ...), nohup, or tmux\n\n'
   printf '  Then open: http://%s:%s   (or http://localhost:%s)\n' "${IP:-<this-host>}" "$PORT" "$PORT"
-  printf '  Token:     %s\n' "$TOKEN"
+  print_token_block
 fi
-printf '  Update:    casper update\n'
+printf '\n  Update:    casper update\n'
 printf '  Uninstall: %s/scripts/uninstall.sh\n\n' "$DIR"

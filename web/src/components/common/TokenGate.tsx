@@ -38,6 +38,9 @@ export function TokenGate({ onReady }: { onReady: () => void }) {
       <button className="btn-primary gate-btn" onClick={submit} disabled={checking}>
         {checking ? 'Checking…' : 'Continue'}
       </button>
+      <p className="gate-hint">
+        Don't have it? On the machine running Casper, run <code>casper token</code>.
+      </p>
     </div>
   );
 }

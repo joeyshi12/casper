@@ -8,6 +8,7 @@
 #
 # Subcommands:
 #   casper [start]              run the server in the foreground (default)
+#   casper token                print the current access token
 #   casper update              pull the latest version, rebuild, and restart if running
 #   casper reset-token [TOKEN] rotate CASPER_TOKEN, revoke all device sessions,
 #                              and restart if running
@@ -34,6 +35,7 @@ casper - run and manage the Casper server
 
 Usage:
   casper [start]              Run the server in the foreground (default)
+  casper token                Print the current access token (CASPER_TOKEN)
   casper update               Update to the latest version, rebuild, and restart if running
   casper reset-token [TOKEN]  Rotate CASPER_TOKEN (generate one, or use TOKEN if given),
                               revoke all device sessions, and restart if running
@@ -138,8 +140,25 @@ do_reset_token() {
   echo "  New token: $new_token"
 }
 
+# Print the current access token. Read-only: unlike reset-token this changes
+# nothing, so it's safe to run any time you've forgotten it or want to check it
+# against what's set in a browser.
+do_token() {
+  local env_file="$root/.env"
+  [ -f "$env_file" ] || { echo "casper: no .env at $env_file; is Casper installed?" >&2; exit 1; }
+
+  local current
+  current="$(grep '^CASPER_TOKEN=' "$env_file" | tail -n1 | cut -d= -f2-)"
+  if [ -z "$current" ]; then
+    echo "casper: CASPER_TOKEN is empty in $env_file - authentication is disabled." >&2
+    exit 1
+  fi
+  echo "$current"
+}
+
 case "${1:-start}" in
   -h|--help|help) usage; exit 0 ;;
+  token) do_token; exit 0 ;;
   update) do_update; exit 0 ;;
   reset-token) shift; do_reset_token "$@"; exit 0 ;;
   start) ;;

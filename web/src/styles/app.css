@@ -1947,6 +1947,19 @@
   font-size: 13px;
   max-width: 300px;
 }
+.gate-hint {
+  color: var(--n4);
+  font-size: 12.5px;
+  max-width: 300px;
+  margin: 10px 0 0;
+}
+.gate-hint code {
+  color: var(--n5);
+  background: var(--n1);
+  border-radius: var(--r-sm);
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+}
 
 /* Sheet */
 .sheet-backdrop {

@@ -52,7 +52,7 @@ Open the printed URL and paste your `CASPER_TOKEN`.
 |-----|---------|---------|
 | `HOST` | `0.0.0.0` | Bind address |
 | `PORT` | `4319` | Server port |
-| `CASPER_TOKEN` | _(empty)_ | Shared secret entered once at login; server exchanges it for a per-device session cookie. **Set before exposing.** |
+| `CASPER_TOKEN` | _(empty)_ | Shared secret entered once at login; server exchanges it for a per-device session cookie. **Set before exposing.** Run `casper token` to print the current value. |
 | `CASPER_SESSION_TTL_SECONDS` | `604800` | Device-login lifetime (slid forward on activity). |
 | `KIRO_BIN` | `kiro-cli` | Path to the kiro-cli binary |
 | `DEFAULT_CWD` | cwd | Default working directory for new sessions |
@@ -77,6 +77,10 @@ service that survives reboots; otherwise you start it yourself with `casper`
 (below). To update later, run `casper update` - it pulls the latest version,
 rebuilds, and restarts the service if it's running. Your access token is
 preserved.
+
+The installer prints your access token once, in a bordered block - copy it
+before scrolling on. If you lose it later, run `casper token` to print it again,
+or read it directly from `~/.local/share/casper/.env` (`CASPER_TOKEN=...`).
 
 **Run it by hand (no systemd).** If the installer set up the systemd service,
 Casper is **already running** - open the URL the installer printed and you're
