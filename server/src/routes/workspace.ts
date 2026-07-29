@@ -112,11 +112,35 @@ export function registerWorkspaceRoutes(
         const entryRelative = relative ? `${relative}/${name}` : name;
         const entryAbsolute = path.join(realTarget, name);
 
-        if (d.isDirectory()) {
-          entries.push({ name, path: entryRelative, type: 'directory' });
-        } else if (d.isFile()) {
+        // Dirent.isDirectory()/isFile() reflect the entry's own type, so a
+        // symlink reports false for both even when it points at a real
+        // directory or file - resolve it first to find out what it actually
+        // is. A symlink whose target escapes fileRoot or no longer exists is
+        // skipped rather than shown.
+        let kind: 'directory' | 'file' | null = d.isDirectory()
+          ? 'directory'
+          : d.isFile()
+            ? 'file'
+            : null;
+        let statTarget = entryAbsolute;
+        if (kind === null && d.isSymbolicLink()) {
+          const real = await realConfineToRoot(config.fileRoot, entryAbsolute);
+          if (!real) continue;
           try {
-            const stat = await fs.stat(entryAbsolute);
+            const st = await fs.stat(real);
+            kind = st.isDirectory() ? 'directory' : st.isFile() ? 'file' : null;
+            statTarget = real;
+          } catch {
+            continue;
+          }
+        }
+        if (kind === null) continue;
+
+        if (kind === 'directory') {
+          entries.push({ name, path: entryRelative, type: 'directory' });
+        } else {
+          try {
+            const stat = await fs.stat(statTarget);
             entries.push({
               name,
               path: entryRelative,

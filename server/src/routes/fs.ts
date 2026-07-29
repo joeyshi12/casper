@@ -61,9 +61,27 @@ export function registerFsRoutes(app: FastifyInstance): void {
       let entries: string[] = [];
       try {
         const dirents = await fs.readdir(realDir, { withFileTypes: true });
-        entries = dirents
-          .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
-          .map((d) => d.name)
+        const candidates = dirents.filter((d) => !d.name.startsWith('.'));
+        // Dirent.isDirectory() reflects the entry's own type, so a symlink
+        // reports false even when it points at a directory - stat() follows
+        // the link to find out what it actually is. A symlink whose target
+        // escapes fileRoot or no longer exists is skipped rather than shown.
+        const checks = await Promise.all(
+          candidates.map(async (d) => {
+            if (d.isDirectory()) return d.name;
+            if (!d.isSymbolicLink()) return null;
+            const full = path.join(realDir, d.name);
+            const real = await realConfineToRoot(config.fileRoot, full);
+            if (!real) return null;
+            try {
+              return (await fs.stat(real)).isDirectory() ? d.name : null;
+            } catch {
+              return null;
+            }
+          }),
+        );
+        entries = checks
+          .filter((name): name is string => name !== null)
           .filter((name) => name.toLowerCase().startsWith(prefix.toLowerCase()))
           .sort((a, b) => a.localeCompare(b))
           .slice(0, 20)
