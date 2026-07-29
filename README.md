@@ -64,52 +64,38 @@ Open the printed URL and paste your `CASPER_TOKEN`.
 
 ## Install
 
-On the machine you want to run Casper on, make sure `kiro-cli` is installed and
-logged in (`kiro-cli login`), then run:
+Make sure `kiro-cli` is installed and logged in (`kiro-cli login`), then run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/joeyshi12/casper/refs/heads/main/scripts/install.sh | bash
 ```
 
-That's it. The installer builds Casper and puts a `casper` command on your
-`PATH`. Where user systemd is available it also runs Casper as a background
-service that survives reboots; otherwise you start it yourself with `casper`
-(below). To update later, run `casper update` - it pulls the latest version,
-rebuilds, and restarts the service if it's running. Your access token is
-preserved.
-
-The installer prints your access token once, in a bordered block - copy it
-before scrolling on. If you lose it later, run `casper token` to print it again,
-or read it directly from `~/.local/share/casper/.env` (`CASPER_TOKEN=...`).
-
-**Run it by hand (no systemd).** If the installer set up the systemd service,
-Casper is **already running** - open the URL the installer printed and you're
-done. Don't also run `casper`; it would fail to bind the port the service
-already holds.
-
-On a machine without user systemd - or under a different init system - you start
-Casper yourself. The `casper` command runs the server in the foreground (this is
-also what the systemd service launches):
+This builds Casper and puts a `casper` command on your `PATH`. Where user
+systemd is available it also starts Casper as a background service that
+survives reboots - it's already running, so open the URL the installer
+printed. Without systemd, start it yourself:
 
 ```bash
-casper           # run in the foreground (Ctrl-C to stop)
+casper           # runs in the foreground (Ctrl-C to stop)
 ```
 
-Background it however your setup prefers: your init system (OpenRC, runit, ...),
-`nohup casper &`, or tmux.
+Background it however your setup prefers: your init system, `nohup casper &`,
+or tmux.
 
-**Uninstall:**
+Your access token prints once in a bordered block - copy it before scrolling.
+If you lose it, run `casper token`, or read `CASPER_TOKEN` directly from
+`~/.local/share/casper/.env`.
 
-```bash
-~/.local/share/casper/scripts/uninstall.sh
-```
+**Update:** `casper update` pulls the latest version, rebuilds, and restarts
+the service if one is running. Your token is preserved.
 
-Add `--purge` to also delete your saved sessions and logins.
+**Uninstall:** `~/.local/share/casper/scripts/uninstall.sh` (add `--purge` to
+also delete saved sessions and logins).
 
-**HTTPS (recommended when exposing beyond your LAN).** Put a TLS-terminating
-reverse proxy in front. It's required for PWA install and reliable reconnects.
-Point it at `http://127.0.0.1:4319`, forwarding WebSocket upgrades and using a
-long read timeout for lengthy agent turns.
+**HTTPS** (recommended beyond your LAN): put a TLS-terminating reverse proxy
+in front, pointed at `http://127.0.0.1:4319`, forwarding WebSocket upgrades
+with a long read timeout for lengthy agent turns. Required for PWA install
+and reliable reconnects.
 
 ## Verify
 

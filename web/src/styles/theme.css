@@ -116,4 +116,10 @@ a {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+  /* The loading spinner is functional, not decorative - freezing it removes
+     the only sign that a session is opening, which reduced motion shouldn't do. */
+  .spinner {
+    animation-duration: 0.8s !important;
+    animation-iteration-count: infinite !important;
+  }
 }
