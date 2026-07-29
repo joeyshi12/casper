@@ -1,12 +1,19 @@
 // Unit tests for the pure fold logic (no processes or network).
 // Run with: npm test   (Node's built-in test runner via tsx)
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import type { CasperEventPayload, SessionSummary } from '@casper/shared';
+import type {
+  CasperEvent,
+  CasperEventPayload,
+  SessionDetail,
+  SessionSummary,
+} from '@casper/shared';
+import { emptyObservabilitySnapshot } from '@casper/shared';
+import { useStore } from '../web/src/state/store.js';
 import { config } from '../server/src/config.js';
 import { TurnState } from '../server/src/session/TurnState.js';
 import { SessionManager, Session } from '../server/src/session/SessionManager.js';
@@ -559,5 +566,87 @@ describe('realConfineToRoot (symlink-aware confinement)', () => {
   it('in-root file allowed', async () => {
     const inRoot = await realConfineToRoot(root, path.join(root, 'ok.txt'));
     assert.notEqual(inRoot, null);
+  });
+});
+
+describe('store.applyEvent (duplicate event suppression)', () => {
+  const userTurn = (seq: number, text: string): CasperEvent => ({
+    seq,
+    sessionId: 's1',
+    ts: new Date('2026-07-29T12:00:00Z').toISOString(),
+    payload: {
+      kind: 'turn_started',
+      prompt: [{ type: 'text', text }],
+    } as CasperEventPayload,
+  });
+
+  const toolCall = (seq: number, id: string): CasperEvent => ({
+    seq,
+    sessionId: 's1',
+    ts: new Date('2026-07-29T12:00:01Z').toISOString(),
+    payload: {
+      kind: 'session_update',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: id,
+        title: 'Remove the untracked screenshot',
+        kind: 'execute',
+        status: 'pending',
+      },
+    } as unknown as CasperEventPayload,
+  });
+
+  beforeEach(() => {
+    useStore.getState().clearActive();
+  });
+
+  it('applies a new event once', () => {
+    useStore.getState().applyEvent(userTurn(1, 'hello'));
+    const items = useStore.getState().items;
+    assert.equal(items.length, 1);
+    assert.equal(items[0]!.type, 'message');
+  });
+
+  it('ignores an event redelivered at the same seq', () => {
+    const e = userTurn(1, 'squash and push current changes');
+    useStore.getState().applyEvent(e);
+    useStore.getState().applyEvent(e);
+    assert.equal(useStore.getState().items.length, 1);
+  });
+
+  it('ignores a replayed burst below the high-water mark', () => {
+    useStore.getState().applyEvent(userTurn(1, 'first'));
+    useStore.getState().applyEvent(toolCall(2, 'tc-1'));
+    assert.equal(useStore.getState().items.length, 2);
+
+    // A second socket replaying the same range, as a woken phone used to do.
+    useStore.getState().applyEvent(userTurn(1, 'first'));
+    useStore.getState().applyEvent(toolCall(2, 'tc-1'));
+    assert.equal(useStore.getState().items.length, 2);
+  });
+
+  it('still applies events above the high-water mark after a replay', () => {
+    useStore.getState().applyEvent(userTurn(1, 'first'));
+    useStore.getState().applyEvent(userTurn(1, 'first'));
+    useStore.getState().applyEvent(toolCall(2, 'tc-1'));
+    assert.equal(useStore.getState().items.length, 2);
+  });
+
+  it('loadDetail seeds the high-water mark so replayed events are dropped', () => {
+    useStore.getState().loadDetail({
+      summary: { sessionId: 's1', title: 't', updatedAt: '', modelId: 'auto' },
+      transcript: [],
+      transcriptTotal: 0,
+      head: 5,
+      modes: [],
+      observability: emptyObservabilitySnapshot(),
+    } as unknown as SessionDetail);
+
+    // Everything up to head is already in the fetched transcript.
+    useStore.getState().applyEvent(userTurn(3, 'already in the transcript'));
+    assert.equal(useStore.getState().items.length, 0);
+
+    useStore.getState().applyEvent(userTurn(6, 'genuinely new'));
+    assert.equal(useStore.getState().items.length, 1);
   });
 });

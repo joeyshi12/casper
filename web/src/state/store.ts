@@ -51,6 +51,9 @@ interface CasperState {
   currentModeId?: string;
   currentModelId?: string;
   items: TranscriptItem[];
+  /** Highest event seq already folded into items, so a replayed or duplicated
+   *  event can't append a second copy of the same message or tool call. */
+  appliedSeq: number;
   /** Count of older transcript items not yet loaded (before the loaded window),
    *  for lazy load-on-scroll-up. More items exist while this is > 0. */
   remainingOlder: number;
@@ -84,6 +87,7 @@ export const useStore = create<CasperState>((set, get) => ({
   loadingSessionId: null,
   modes: [],
   items: [],
+  appliedSeq: 0,
   remainingOlder: 0,
   observability: emptyObservabilitySnapshot(),
   streamingText: '',
@@ -105,6 +109,9 @@ export const useStore = create<CasperState>((set, get) => ({
       currentModelId: d.summary.modelId,
       observability: d.observability,
       items: d.transcript,
+      // The fetched transcript already contains every event up to head, so
+      // anything replayed at or below it is a duplicate.
+      appliedSeq: d.head,
       remainingOlder: Math.max(0, d.transcriptTotal - d.transcript.length),
       streamingText: '',
       streamingThought: '',
@@ -125,6 +132,7 @@ export const useStore = create<CasperState>((set, get) => ({
       loadingSessionId: null,
       modes: [],
       items: [],
+      appliedSeq: 0,
       remainingOlder: 0,
       observability: emptyObservabilitySnapshot(),
       streamingText: '',
@@ -150,6 +158,13 @@ export const useStore = create<CasperState>((set, get) => ({
   applyEvent: (e) => {
     const state = get();
     const p = e.payload;
+
+    // Events are strictly ordered per session, so anything at or below the
+    // high-water mark has already been folded in. Replays overlap by design
+    // and a dropped connection can re-deliver, so drop duplicates here rather
+    // than trusting every transport path to be exactly-once.
+    if (e.seq <= state.appliedSeq) return;
+    set({ appliedSeq: e.seq });
 
     switch (p.kind) {
       case 'turn_started': {

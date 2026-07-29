@@ -47,8 +47,15 @@ export class SessionSocket {
     document.addEventListener('visibilitychange', this.onVisibility);
   }
 
+  // Reconnect only when there's no usable socket. A socket that's still
+  // CONNECTING is already on its way, so leave it alone - retrying here is
+  // what let a phone waking up (which fires 'online' and 'visibilitychange'
+  // back to back) end up with two live sockets.
   private eager = () => {
-    if (!this.closedByUser && this.ws?.readyState !== WebSocket.OPEN) this.connect();
+    if (this.closedByUser) return;
+    const state = this.ws?.readyState;
+    if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) return;
+    this.connect();
   };
 
   private onVisibility = () => {
@@ -65,6 +72,27 @@ export class SessionSocket {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+
+    // Drop any socket we already have before opening another. Waking a phone
+    // fires 'online' and 'visibilitychange' together, and the dying socket's
+    // own onclose schedules a retry, so connect() can be re-entered while a
+    // previous socket is still live. Each server connection keeps its own
+    // replay cursor and its own event subscription, so a leaked socket means
+    // every event is delivered twice - duplicate prompts, tool calls, and
+    // interleaved streaming text. Null the handlers first so the close we
+    // trigger here doesn't schedule yet another reconnect.
+    const stale = this.ws;
+    if (stale) {
+      this.ws = null;
+      stale.onopen = null;
+      stale.onmessage = null;
+      stale.onclose = null;
+      stale.onerror = null;
+      if (stale.readyState === WebSocket.OPEN || stale.readyState === WebSocket.CONNECTING) {
+        stale.close();
+      }
+    }
+
     this.handlers.onStatus(this.cursor > 0 ? 'reconnecting' : 'connecting');
 
     // No token in the URL: the same-origin session cookie authenticates the
@@ -78,12 +106,14 @@ export class SessionSocket {
     this.ws = ws;
 
     ws.onopen = () => {
+      if (this.ws !== ws) return;
       this.backoff = 500;
       this.handlers.onStatus('replaying');
       this.send({ type: 'hello', sessionId: this.sessionId, cursor: this.cursor });
     };
 
     ws.onmessage = (ev) => {
+      if (this.ws !== ws) return;
       const msg = JSON.parse(ev.data as string) as ServerMessage;
       switch (msg.type) {
         case 'event':
@@ -111,6 +141,7 @@ export class SessionSocket {
     };
 
     ws.onclose = (ev) => {
+      if (this.ws !== ws) return;
       if (this.closedByUser) {
         this.handlers.onStatus('closed');
         return;
@@ -128,7 +159,9 @@ export class SessionSocket {
       this.backoff = Math.min(this.backoff * 1.7, 10_000);
     };
 
-    ws.onerror = () => ws.close();
+    ws.onerror = () => {
+      if (this.ws === ws) ws.close();
+    };
   }
 
   private send(msg: ClientMessage): boolean {
@@ -161,6 +194,14 @@ export class SessionSocket {
     window.removeEventListener('online', this.eager);
     document.removeEventListener('visibilitychange', this.onVisibility);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.ws?.close();
+    const ws = this.ws;
+    this.ws = null;
+    if (ws) {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.close();
+    }
   }
 }
