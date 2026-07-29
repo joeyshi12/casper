@@ -21,7 +21,7 @@ import { bumpSessionToTop } from './sessions.js';
 export type ToolCallView = TranscriptToolCall;
 
 /** A locally-sent user message awaiting server acknowledgement. */
-export interface PendingMessage {
+interface PendingMessage {
   id: string;
   text: string;
   status: 'sending' | 'failed';
@@ -52,7 +52,7 @@ interface CasperState {
   currentModelId?: string;
   items: TranscriptItem[];
   /** Count of older transcript items not yet loaded (before the loaded window),
-   *  for lazy load-on-scroll-up. hasMore === remainingOlder > 0. */
+   *  for lazy load-on-scroll-up. More items exist while this is > 0. */
   remainingOlder: number;
   observability: ObservabilitySnapshot;
   streamingText: string; // in-flight assistant chunk not yet committed
@@ -71,7 +71,6 @@ interface CasperState {
   applyEvent: (e: CasperEvent) => void;
   addPending: (id: string, text: string) => void;
   markPendingFailed: (id: string) => void;
-  removePending: (id: string) => void;
   pushToast: (message: string, kind?: Toast['kind']) => void;
   dismissToast: (id: string) => void;
 }
@@ -141,8 +140,6 @@ export const useStore = create<CasperState>((set, get) => ({
         p.id === id ? { ...p, status: 'failed' as const } : p,
       ),
     })),
-  removePending: (id) =>
-    set((s) => ({ pending: s.pending.filter((p) => p.id !== id) })),
 
   pushToast: (message, kind = 'error') =>
     set((s) => ({

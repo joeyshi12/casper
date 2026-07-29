@@ -17,7 +17,7 @@ import { registerUploadRoutes } from './routes/uploads.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerWsGateway } from './ws/gateway.js';
 
-export interface CasperApp {
+interface CasperApp {
   app: FastifyInstance;
   manager: SessionManager;
 }

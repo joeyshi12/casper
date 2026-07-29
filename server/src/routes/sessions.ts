@@ -13,12 +13,10 @@ export function registerSessionRoutes(
   app: FastifyInstance,
   manager: SessionManager,
 ): void {
-  // List LIVE + DORMANT sessions.
   app.get('/api/sessions', async () => {
     return { sessions: await manager.listSessions() };
   });
 
-  // Create a new session.
   app.post('/api/sessions', async (req, reply) => {
     const body = (req.body ?? {}) as CreateSessionRequest;
     try {

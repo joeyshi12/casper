@@ -45,14 +45,12 @@ interface PreviewState {
   error: string | null;
 }
 
-/** Format bytes into human-readable size. */
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Get the appropriate icon component for a file based on extension. */
 function FileTypeIcon({ name }: { name: string }) {
   const ext = name.split('.').pop()?.toLowerCase();
   switch (ext) {
@@ -216,7 +214,6 @@ function TreeEntry({
       return;
     }
 
-    // If we haven't loaded children yet, fetch them.
     if (folder.children === null) {
       setFolder((f) => ({ ...f, loading: true }));
       try {
@@ -319,12 +316,10 @@ function FilePreview({
     window.open(api.downloadUrl(sessionId, preview.path), '_blank');
   };
 
-  // Close on backdrop click.
   const onBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose();
   };
 
-  // Close on Escape.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();

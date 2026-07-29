@@ -61,7 +61,6 @@ function Shell({ onLock }: { onLock: () => void }) {
       .then((r) => store.setAgents(r.agents, r.defaultAgentId))
       .catch(() => store.pushToast('Could not load agents.'));
     refreshSessions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const closeSocket = useCallback(() => {

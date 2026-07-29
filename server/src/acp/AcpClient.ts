@@ -19,13 +19,6 @@ interface Pending {
   timer?: NodeJS.Timeout;
 }
 
-export interface AcpClientEvents {
-  notification: (n: JsonRpcNotification) => void;
-  /** A request initiated by the agent toward the client (rare; we ack minimally). */
-  serverRequest: (r: JsonRpcRequest) => void;
-  parseError: (err: Error, line: string) => void;
-}
-
 // JSON-RPC 2.0 client over newline-delimited JSON on kiro-cli acp's stdio.
 // Never end the writable stream except on shutdown: kiro-cli exits as soon as
 // its stdin hits EOF.
@@ -117,13 +110,11 @@ export class AcpClient extends EventEmitter {
     });
   }
 
-  /** Send a fire-and-forget notification. */
   notify(method: string, params?: unknown): void {
     if (this.closed) return;
     this.write({ jsonrpc: '2.0', method, params });
   }
 
-  /** Respond to an agent-initiated request. */
   respond(id: JsonRpcId, result: unknown): void {
     if (this.closed) return;
     this.write({ jsonrpc: '2.0', id, result });

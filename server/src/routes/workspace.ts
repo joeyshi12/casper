@@ -18,7 +18,6 @@ const HEXDUMP_BYTES = 4096;
 const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024;
 const MAX_IMAGE_PREVIEW_BYTES = 20 * 1024 * 1024;
 
-/** 413 body for an over-cap preview. */
 function tooLargeForPreview(size: number, maxBytes: number): { error: string } {
   return {
     error: `File too large for preview (${(size / 1024 / 1024).toFixed(1)} MB, max ${maxBytes / 1024 / 1024} MB)`,
@@ -351,7 +350,6 @@ export function registerWorkspaceRoutes(
         }
       }
 
-      // For text/code files, return as UTF-8 text.
       reply.header('Content-Type', 'text/plain; charset=utf-8');
       reply.header('Content-Disposition', 'inline');
       reply.header('Content-Length', stat.size);

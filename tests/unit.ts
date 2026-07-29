@@ -40,7 +40,6 @@ import {
   stripAttachmentsLine,
 } from '@casper/shared';
 
-// A no-op logger for components that require one.
 function noopLogger() {
   const log = {
     info() {}, warn() {}, error() {}, debug() {}, trace() {}, fatal() {},
@@ -52,7 +51,6 @@ function noopLogger() {
 }
 
 describe('TurnState: observability fold across a full turn', () => {
-  // A representative stream of events across one full turn, then a second turn.
   const events: CasperEventPayload[] = [
     { kind: 'commands_available', params: { sessionId: 's', commands: [{ name: '/agent' }] } },
     { kind: 'mcp_health', params: { sessionId: 's', serverName: 'builder-mcp' }, ok: true },

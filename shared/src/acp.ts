@@ -55,17 +55,6 @@ export function isJsonRpcNotification(
   return !('id' in m) && 'method' in m;
 }
 
-// initialize
-
-export interface InitializeParams {
-  protocolVersion: number;
-  clientCapabilities: {
-    fs?: { readTextFile?: boolean; writeTextFile?: boolean };
-    terminal?: boolean;
-  };
-  clientInfo?: { name: string; version: string };
-}
-
 export interface AgentCapabilities {
   loadSession: boolean;
   promptCapabilities: {
@@ -126,18 +115,6 @@ export interface SessionLoadParams {
 
 export type SessionLoadResult = SessionNewResult;
 
-// session/set_mode, session/set_model
-
-export interface SessionSetModeParams {
-  sessionId: string;
-  modeId: string;
-}
-
-export interface SessionSetModelParams {
-  sessionId: string;
-  modelId: string;
-}
-
 // session/prompt
 
 export interface TextContentBlock {
@@ -168,10 +145,6 @@ export type StopReason =
 
 export interface SessionPromptResult {
   stopReason: StopReason;
-}
-
-export interface SessionCancelParams {
-  sessionId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -308,16 +281,6 @@ export interface KiroOauthRequestParams {
   url: string;
 }
 
-/**
- * `_kiro.dev/commands/execute` params. The command is a structured object -
- * the name has no leading slash (advertised "/compact", executed "compact")
- * and args is an object (empty for no-arg commands like compact/context).
- */
-export interface KiroCommandsExecuteParams {
-  sessionId: string;
-  command: { command: string; args: Record<string, unknown> };
-}
-
 // Well-known method names, so string literals never drift.
 export const ACP_METHODS = {
   initialize: 'initialize',
@@ -329,7 +292,6 @@ export const ACP_METHODS = {
   sessionSetModel: 'session/set_model',
   sessionUpdate: 'session/update',
   commandsExecute: '_kiro.dev/commands/execute',
-  commandsOptions: '_kiro.dev/commands/options',
 } as const;
 
 export const KIRO_NOTIFICATIONS = {

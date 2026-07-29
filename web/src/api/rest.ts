@@ -3,7 +3,6 @@ import type {
   CreateSessionRequest,
   DevicesResponse,
   DirListing,
-  HealthResponse,
   ModelsResponse,
   SessionDetail,
   SessionListResponse,
@@ -48,7 +47,6 @@ export function logout(): Promise<{ ok: boolean }> {
 }
 
 export const api = {
-  health: () => req<HealthResponse>('GET', '/api/health'),
   devices: () => req<DevicesResponse>('GET', '/api/devices'),
   revokeDevice: (id: string) => req<{ ok: boolean }>('DELETE', `/api/devices/${id}`),
   logoutAll: () => req<{ ok: boolean }>('POST', '/api/logout-all'),
@@ -72,10 +70,6 @@ export const api = {
   /** Re-point a session at a different working directory. */
   setSessionCwd: (id: string, cwd: string) =>
     req<{ ok: boolean; cwd: string }>('POST', `/api/sessions/${id}/cwd`, { cwd }),
-  setModel: (id: string, modelId: string) =>
-    req('POST', `/api/sessions/${id}/model`, { modelId }),
-  setMode: (id: string, modeId: string) =>
-    req('POST', `/api/sessions/${id}/mode`, { modeId }),
   /** List files/directories in a session's workspace. */
   tree: (id: string, relativePath = '') =>
     req<TreeResponse>(

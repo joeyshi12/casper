@@ -66,7 +66,6 @@ export function registerWsGateway(
         return;
       }
 
-      // Replay buffered events after the cursor.
       const { events, gap } = store.getSince(cursor);
       if (gap) {
         send(socket, {
@@ -79,7 +78,6 @@ export function registerWsGateway(
       }
       send(socket, { type: 'replay_complete', head: store.head() });
 
-      // Subscribe to live events.
       unsubscribe = manager.onEvent(sessionId, forward);
       ready = true;
     };

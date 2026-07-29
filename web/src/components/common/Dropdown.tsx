@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckIcon, ChevronIcon } from './icons.js';
 
-export interface DropdownOption {
+interface DropdownOption {
   value: string;
   label: string;
   /** Optional secondary text shown dim on the right (e.g. a credit rate). */
@@ -27,7 +27,6 @@ export function Dropdown({ label, value, options, onChange }: Props) {
 
   const selected = options.find((o) => o.value === value);
 
-  // Close on outside click.
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
@@ -39,7 +38,7 @@ export function Dropdown({ label, value, options, onChange }: Props) {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
 
-  // When opening, focus the current selection.
+  // When opening, start the keyboard-active row on the current selection.
   useEffect(() => {
     if (open) {
       const i = options.findIndex((o) => o.value === value);

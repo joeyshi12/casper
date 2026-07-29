@@ -47,7 +47,6 @@ Runs in the foreground so any init system - or 'nohup casper &' - can supervise 
 EOF
 }
 
-# True if a systemd user service named 'casper' is currently managing Casper.
 service_active() {
   command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet casper 2>/dev/null
 }
@@ -140,9 +139,7 @@ do_reset_token() {
   echo "  New token: $new_token"
 }
 
-# Print the current access token. Read-only: unlike reset-token this changes
-# nothing, so it's safe to run any time you've forgotten it or want to check it
-# against what's set in a browser.
+# Read-only: unlike reset-token, this doesn't touch .env or logged-in devices.
 do_token() {
   local env_file="$root/.env"
   [ -f "$env_file" ] || { echo "casper: no .env at $env_file; is Casper installed?" >&2; exit 1; }
@@ -172,7 +169,6 @@ if [ ! -f "$entry" ]; then
   exit 1
 fi
 
-# Load the install's .env (KEY=VALUE lines) into the environment.
 if [ -f "$root/.env" ]; then
   set -a
   # shellcheck disable=SC1090,SC1091

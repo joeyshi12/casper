@@ -11,7 +11,7 @@ const SESSION_COOKIE = 'casper.sid';
 const logins = new LoginStore(logger);
 
 /** Extract a bearer token from the Authorization header or ?token= query. */
-export function extractToken(req: {
+function extractToken(req: {
   headers: Record<string, unknown>;
   query?: unknown;
 }): string | undefined {

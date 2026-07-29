@@ -31,7 +31,7 @@ export function SearchModal({ sessions, onOpen, onClose }: Props) {
       .map((x) => x.s);
   }, [sessions, query]);
 
-  // Keep the active index in range as results change.
+  // Reset the keyboard selection to the top result whenever the query changes.
   useEffect(() => {
     setActive(0);
   }, [query]);

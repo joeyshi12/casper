@@ -22,7 +22,6 @@ const IMAGE_MIMES: Record<string, string> = {
 /** Max image file size (20 MB). */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
-/** Confine a path to the configured file root. */
 function confinedPath(input: string): string | null {
   return confineToRoot(config.fileRoot, input);
 }
@@ -110,7 +109,6 @@ export function registerFsRoutes(app: FastifyInstance): void {
         return { error: 'path parameter is required' };
       }
 
-      // Must be an absolute path.
       if (!path.isAbsolute(filePath)) {
         reply.code(400);
         return { error: 'path must be absolute' };
@@ -124,7 +122,6 @@ export function registerFsRoutes(app: FastifyInstance): void {
         return { error: 'Path outside allowed root' };
       }
 
-      // Validate extension is an image type.
       const ext = path.extname(resolved).toLowerCase();
       const mime = IMAGE_MIMES[ext];
       if (!mime) {
@@ -139,7 +136,6 @@ export function registerFsRoutes(app: FastifyInstance): void {
         return { error: 'File not found' };
       }
 
-      // Stat the file.
       let stat: Awaited<ReturnType<typeof fs.stat>>;
       try {
         stat = await fs.stat(real);

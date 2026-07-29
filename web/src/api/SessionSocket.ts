@@ -13,7 +13,7 @@ export type ConnStatus =
   | 'resyncing'
   | 'closed';
 
-export interface SessionSocketHandlers {
+interface SessionSocketHandlers {
   onEvent: (event: CasperEvent) => void;
   onStatus: (status: ConnStatus) => void;
   /** Cursor is stale - caller should refetch the full session, then call reset(head). */

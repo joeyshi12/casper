@@ -31,7 +31,6 @@ async function uniquePath(dir: string, name: string): Promise<string> {
   const stem = name.slice(0, name.length - ext.length);
   let candidate = name;
   let n = 1;
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       await fs.access(path.join(dir, candidate));

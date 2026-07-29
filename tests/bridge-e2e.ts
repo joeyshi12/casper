@@ -101,12 +101,10 @@ async function main() {
   try {
     await login();
 
-    // 1. Models
     const { models } = await api<ModelsResponse>('GET', '/api/models');
     assert(models.length > 0, `GET /api/models returned ${models.length} models`);
     assert(models.some((m) => m.modelId === 'auto'), 'model list includes "auto"');
 
-    // 2. Create session
     const detail = await api<SessionDetail>('POST', '/api/sessions', {
       modelId: 'claude-haiku-4.5',
     });
@@ -150,13 +148,11 @@ async function main() {
     ws2.close();
     const turnEnded = events.find((e) => e.payload.kind === 'turn_ended');
     assert(turnEnded, 'reconnect replayed the missed turn_ended event');
-    // Assert no gaps and strictly increasing seq beyond the cursor.
     const seqs = events.map((e) => e.seq);
     const monotonic = seqs.every((s, i) => i === 0 || s > seqs[i - 1]!);
     assert(monotonic, 'replayed events are strictly increasing (no dupes/out-of-order)');
     assert(seqs.every((s) => s > midCursor), 'replayed events are all after the stale cursor');
 
-    // 6. Verify credits were metered
     const after = await api<SessionDetail>('GET', `/api/sessions/${sid}`);
     assert(
       after.observability.creditsSpent > 0,
@@ -175,7 +171,6 @@ async function main() {
     );
     assert(userMsg, 'user prompt is present in the re-fetched transcript');
 
-    // 7. set_model round-trip
     await api('POST', `/api/sessions/${sid}/model`, { modelId: 'auto' });
     console.log('✅ set_model round-trip ok');
 

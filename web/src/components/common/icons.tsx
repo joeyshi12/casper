@@ -23,7 +23,6 @@ export function ChevronIcon({ size = 14, className }: IconProps) {
   );
 }
 
-/** X - close/dismiss. */
 export function CloseIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -125,7 +124,6 @@ export function PlusIcon({ size = 20, className }: IconProps) {
   );
 }
 
-/** Magnifying-glass search icon. */
 export function SearchIcon({ size = 20, className }: IconProps) {
   return (
     <svg
@@ -150,7 +148,6 @@ export function SearchIcon({ size = 20, className }: IconProps) {
 // File tree icons
 // ---------------------------------------------------------------------------
 
-/** Folder icon (closed). */
 export function FolderIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -170,7 +167,6 @@ export function FolderIcon({ size = 16, className }: IconProps) {
   );
 }
 
-/** Folder open icon. */
 export function FolderOpenIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -191,7 +187,6 @@ export function FolderOpenIcon({ size = 16, className }: IconProps) {
   );
 }
 
-/** Generic file icon. */
 export function FileIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -212,7 +207,6 @@ export function FileIcon({ size = 16, className }: IconProps) {
   );
 }
 
-/** Code file icon (file with angle brackets). */
 export function FileCodeIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -235,7 +229,6 @@ export function FileCodeIcon({ size = 16, className }: IconProps) {
   );
 }
 
-/** Config/gear file icon. */
 export function FileConfigIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -259,7 +252,6 @@ export function FileConfigIcon({ size = 16, className }: IconProps) {
   );
 }
 
-/** Text/document file icon. */
 export function FileTextIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -282,7 +274,6 @@ export function FileTextIcon({ size = 16, className }: IconProps) {
   );
 }
 
-/** Image file icon. */
 export function FileImageIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -305,7 +296,6 @@ export function FileImageIcon({ size = 16, className }: IconProps) {
   );
 }
 
-/** Style file icon (paintbrush). */
 export function FileStyleIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -329,7 +319,6 @@ export function FileStyleIcon({ size = 16, className }: IconProps) {
   );
 }
 
-/** Terminal/script file icon. */
 export function FileTerminalIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -352,7 +341,6 @@ export function FileTerminalIcon({ size = 16, className }: IconProps) {
   );
 }
 
-/** Download arrow icon. */
 export function DownloadIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -374,7 +362,6 @@ export function DownloadIcon({ size = 16, className }: IconProps) {
   );
 }
 
-/** Refresh/reload icon. */
 export function RefreshIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -395,7 +382,6 @@ export function RefreshIcon({ size = 16, className }: IconProps) {
   );
 }
 
-/** Folder/files panel toggle icon. */
 export function FilesIcon({ size = 16, className }: IconProps) {
   return (
     <svg

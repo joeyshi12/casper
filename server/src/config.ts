@@ -77,4 +77,3 @@ export const config = {
   maxUploadBytes: envInt('CASPER_MAX_UPLOAD_BYTES', 100 * 1024 * 1024),
 } as const;
 
-export type Config = typeof config;

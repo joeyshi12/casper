@@ -177,7 +177,6 @@ export interface HealthResponse {
 
 /** A single entry (file or directory) in the workspace tree listing. */
 export interface FileEntry {
-  /** File or directory name. */
   name: string;
   /** Path relative to the session's cwd. */
   path: string;
@@ -210,7 +209,6 @@ export interface UploadedFile {
   name: string;
   /** Path relative to the session cwd, e.g. .casper/uploads/report.pdf */
   path: string;
-  /** Size in bytes. */
   size: number;
   /** Detected MIME type (best effort). */
   mimeType: string;

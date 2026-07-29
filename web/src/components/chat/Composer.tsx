@@ -15,7 +15,7 @@ const IMAGE_TYPES = new Set([
   'image/svg+xml',
 ]);
 
-export interface Attachment {
+interface Attachment {
   id: string;
   file: File;
   /** True for images (shown as a thumbnail, inlined as an image block). */
@@ -216,7 +216,6 @@ export function Composer({ sessionId, onSend, onCancel, onCompact, connStatus }:
     });
   };
 
-  // Revoke any outstanding object URLs on unmount.
   useEffect(() => {
     return () => {
       setAttachments((prev) => {
@@ -226,7 +225,6 @@ export function Composer({ sessionId, onSend, onCancel, onCompact, connStatus }:
     };
   }, []);
 
-  // Close the + menu on any outside click.
   useEffect(() => {
     if (!menuOpen) return;
     const onDocClick = (e: MouseEvent) => {

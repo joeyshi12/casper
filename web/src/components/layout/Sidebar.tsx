@@ -58,7 +58,6 @@ export function Sidebar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
 
-  // Close any open row menu on an outside click.
   useEffect(() => {
     if (!menuId) return;
     const close = () => setMenuId(null);
@@ -66,7 +65,6 @@ export function Sidebar({
     return () => document.removeEventListener('click', close);
   }, [menuId]);
 
-  // Close the account menu on an outside click.
   useEffect(() => {
     if (!accountOpen) return;
     const close = () => setAccountOpen(false);

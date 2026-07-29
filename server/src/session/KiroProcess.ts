@@ -16,11 +16,10 @@ import { config } from '../config.js';
 import type { Logger } from '../util/logger.js';
 import { AcpClient } from '../acp/AcpClient.js';
 
-export interface KiroProcessOptions {
+interface KiroProcessOptions {
   cwd: string;
   agent?: string;
   model?: string;
-  effort?: string;
 }
 
 // Owns one kiro-cli acp child process and its ACP client. Its lifecycle is
@@ -30,7 +29,6 @@ export class KiroProcess extends EventEmitter {
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly log: Logger;
   private disposed = false;
-  private initialized = false;
 
   constructor(opts: KiroProcessOptions, log: Logger) {
     super();
@@ -39,7 +37,6 @@ export class KiroProcess extends EventEmitter {
     const args = ['acp', '--trust-all-tools'];
     if (opts.agent) args.push('--agent', opts.agent);
     if (opts.model) args.push('--model', opts.model);
-    if (opts.effort) args.push('--effort', opts.effort);
 
     this.log.info({ bin: config.kiroBin, args, cwd: opts.cwd }, 'spawning kiro-cli acp');
     this.child = spawn(config.kiroBin, args, {
@@ -100,7 +97,6 @@ export class KiroProcess extends EventEmitter {
       },
       clientInfo: { name: 'casper', version: '0.1.0' },
     });
-    this.initialized = true;
     return result;
   }
 
@@ -142,14 +138,6 @@ export class KiroProcess extends EventEmitter {
       sessionId,
       command: { command: command.replace(/^\//, ''), args: args ? { input: args } : {} },
     });
-  }
-
-  get isInitialized(): boolean {
-    return this.initialized;
-  }
-
-  get pid(): number | undefined {
-    return this.child.pid;
   }
 
   /** Cleanly shut down: close stdin (triggers kiro's graceful exit), then kill. */
