@@ -735,3 +735,52 @@ describe('hydrateTranscript: inline tool-result images are not shipped', () => {
     assert.ok(!json.includes('"png"'), 'no image payload in the hydrated transcript');
   });
 });
+
+describe('hydrateTranscript: malformed entries do not crash hydration', () => {
+  const sid = 'hydrate-malformed-test';
+  const file = path.join(config.kiroSessionsDir, `${sid}.jsonl`);
+
+  before(() => {
+    fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
+    const lines = [
+      // content isn't an array
+      { kind: 'AssistantMessage', data: { message_id: 'm0', content: 'not-an-array' } },
+      // null and non-object entries mixed in with a real block
+      {
+        kind: 'AssistantMessage',
+        data: {
+          message_id: 'm1',
+          content: [null, 42, 'str', { no_kind: true }, { kind: 'text', data: 'hello' }],
+        },
+      },
+      // toolUse without the id it is keyed by
+      {
+        kind: 'AssistantMessage',
+        data: { message_id: 'm2', content: [{ kind: 'toolUse', data: { name: 'shell' } }] },
+      },
+      // toolResult for a tool that was never announced
+      {
+        kind: 'ToolResults',
+        data: {
+          message_id: 'm3',
+          content: [{ kind: 'toolResult', data: { toolUseId: 'nope', content: [] } }],
+        },
+      },
+    ];
+    fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  });
+  after(() => fs.rmSync(file, { force: true }));
+
+  it('hydrates without throwing and keeps the valid text', async () => {
+    const items = await hydrateTranscript(sid);
+    const msg = items.find(
+      (i) => i.type === 'message' && (i as { message: { text: string } }).message.text === 'hello',
+    );
+    assert.ok(msg, 'the well-formed text block still hydrates');
+  });
+
+  it('skips a toolUse with no toolUseId', async () => {
+    const items = await hydrateTranscript(sid);
+    assert.equal(items.filter((i) => i.type === 'tool_call').length, 0);
+  });
+});

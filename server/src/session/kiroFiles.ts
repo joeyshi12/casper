@@ -46,9 +46,17 @@ interface KiroSessionJson {
   };
 }
 
-// A content block's `data` is a string for `text`, but an object for structured
-// kinds: `thinking` ({text, signature}), `toolUse` ({toolUseId, name, input}),
-// and `toolResult` ({toolUseId, status, content}).
+// A content block is always {kind, data}, but `data`'s shape depends on `kind`
+// and kiro emits kinds we don't model. Modelling that as a union with a
+// `kind: string` catch-all doesn't work: checking `kind === 'text'` leaves the
+// catch-all in play, so `data` widens back to `unknown` and every read needs a
+// cast. Keep the block itself loose and narrow it with the guards below, which
+// check at runtime instead of asserting.
+interface KiroContentBlock {
+  kind: string;
+  data: unknown;
+}
+
 interface KiroToolUseData {
   toolUseId: string;
   name?: string;
@@ -57,35 +65,59 @@ interface KiroToolUseData {
 interface KiroToolResultData {
   toolUseId: string;
   status?: string;
-  content?: unknown[];
+  content?: unknown;
 }
-type KiroContentBlock =
-  | { kind: 'text'; data: string }
-  | { kind: 'thinking'; data: { text?: string } }
-  | { kind: 'toolUse'; data: KiroToolUseData }
-  | { kind: 'toolResult'; data: KiroToolResultData }
-  | { kind: string; data: unknown };
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+function isContentBlock(v: unknown): v is KiroContentBlock {
+  return isRecord(v) && typeof v.kind === 'string';
+}
+
+/** The `data` of a `toolUse` block, or null if it isn't one (or lacks an id). */
+function toolUseData(b: KiroContentBlock): KiroToolUseData | null {
+  if (b.kind !== 'toolUse' || !isRecord(b.data)) return null;
+  const { toolUseId, name, input } = b.data;
+  if (typeof toolUseId !== 'string') return null;
+  return { toolUseId, name: typeof name === 'string' ? name : undefined, input };
+}
+
+/** The `data` of a `toolResult` block, or null if it isn't one. */
+function toolResultData(b: KiroContentBlock): KiroToolResultData | null {
+  if (b.kind !== 'toolResult' || !isRecord(b.data)) return null;
+  const { toolUseId, status, content } = b.data;
+  if (typeof toolUseId !== 'string') return null;
+  return { toolUseId, status: typeof status === 'string' ? status : undefined, content };
+}
 
 interface KiroJsonlEntry {
   kind: string;
   data: {
     message_id?: string;
-    content?: KiroContentBlock[];
+    /** Unvalidated: parsed straight from the file, so narrow with contentBlocks(). */
+    content?: unknown;
     meta?: { timestamp?: number };
     /** Present on `Compaction` entries: the conversation summary. */
     summary?: string;
   };
 }
 
+/** The well-formed {kind, data} blocks of an entry, skipping anything malformed. */
+function contentBlocks(content: unknown): KiroContentBlock[] {
+  return Array.isArray(content) ? content.filter(isContentBlock) : [];
+}
+
 // Extract plain text from a text/thinking content block.
 function blockText(c: KiroContentBlock): string {
   if (typeof c.data === 'string') return c.data;
-  const d = c.data as { text?: string } | null;
-  return d?.text ?? '';
+  if (isRecord(c.data) && typeof c.data.text === 'string') return c.data.text;
+  return '';
 }
 
 /**
- * Drop image blocks from a persisted tool result.
+ * The blocks of a persisted tool result that are worth sending, i.e. everything
+ * except inline images.
  *
  * kiro stores tool-result images inline as a raw byte array (data.source.data),
  * which costs several bytes of JSON per image byte - a tool call returning a few
@@ -95,8 +127,8 @@ function blockText(c: KiroContentBlock): string {
  * payload the UI has no code to display. Images the user should see come from
  * the file endpoints by path instead.
  */
-function withoutInlineImages(blocks: unknown[]): unknown[] {
-  return blocks.filter((b) => (b as { kind?: unknown } | null)?.kind !== 'image');
+function renderableBlocks(content: unknown): KiroContentBlock[] {
+  return contentBlocks(content).filter((b) => b.kind !== 'image');
 }
 
 function summarize(j: KiroSessionJson): SessionSummary {
@@ -212,7 +244,7 @@ export async function hydrateTranscript(sessionId: string): Promise<TranscriptIt
     } catch {
       continue;
     }
-    const content = entry.data.content ?? [];
+    const content = contentBlocks(entry.data.content);
     const textOf = (kind: string) =>
       content.filter((c) => c.kind === kind).map(blockText).join('');
     const baseId = entry.data.message_id ?? `${items.length}`;
@@ -235,8 +267,8 @@ export async function hydrateTranscript(sessionId: string): Promise<TranscriptIt
         pushMsg({ id: `a-${baseId}`, role: 'assistant', text, timestamp: ts });
 
       for (const c of content) {
-        if (c.kind !== 'toolUse') continue;
-        const d = c.data as KiroToolUseData;
+        const d = toolUseData(c);
+        if (!d) continue;
         // Completed by default; a later ToolResults entry may override the status.
         const tool: TranscriptToolCall = {
           id: d.toolUseId,
@@ -251,12 +283,12 @@ export async function hydrateTranscript(sessionId: string): Promise<TranscriptIt
       }
     } else if (entry.kind === 'ToolResults') {
       for (const c of content) {
-        if (c.kind !== 'toolResult') continue;
-        const d = c.data as KiroToolResultData;
+        const d = toolResultData(c);
+        if (!d) continue;
         const tool = toolsById.get(d.toolUseId);
         if (!tool) continue;
         tool.status = d.status === 'error' ? 'failed' : 'completed';
-        tool.content = withoutInlineImages(d.content ?? []);
+        tool.content = renderableBlocks(d.content);
       }
     } else if (entry.kind === 'Compaction') {
       // kiro appends a Compaction entry (it does not rewrite prior entries) whose
