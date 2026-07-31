@@ -16,6 +16,7 @@ import {
 } from '@casper/shared';
 
 import { bumpSessionToTop } from './sessions.js';
+import { classifyTurnFailure } from '../util/turnFailure.js';
 
 /** A rendered tool call in the transcript (shared shape). */
 export type ToolCallView = TranscriptToolCall;
@@ -25,13 +26,17 @@ interface PendingMessage {
   id: string;
   text: string;
   status: 'sending' | 'failed';
+  /** Why the send failed, when the server or socket told us. */
+  error?: string;
 }
 
-/** A transient notification shown in the corner (auto-dismissed). */
-export interface Toast {
-  id: string;
-  message: string;
-  kind: 'error' | 'info';
+/** A condition that outlives a single turn (bad credentials, missing binary), so
+ *  it stays pinned above the composer until it's resolved or dismissed. */
+interface SessionNotice {
+  title: string;
+  fix?: string;
+  /** The raw server message, kept so the notice can offer the real text. */
+  detail: string;
 }
 
 interface CasperState {
@@ -61,7 +66,7 @@ interface CasperState {
   streamingText: string; // in-flight assistant chunk not yet committed
   streamingThought: string; // in-flight reasoning chunk not yet committed
   pending: PendingMessage[]; // user messages sent locally, awaiting server echo
-  toasts: Toast[]; // transient corner notifications
+  sessionNotice: SessionNotice | null;
 
   // actions
   setSessions: (s: SessionSummary[]) => void;
@@ -73,9 +78,8 @@ interface CasperState {
   clearActive: () => void;
   applyEvent: (e: CasperEvent) => void;
   addPending: (id: string, text: string) => void;
-  markPendingFailed: (id: string) => void;
-  pushToast: (message: string, kind?: Toast['kind']) => void;
-  dismissToast: (id: string) => void;
+  markPendingFailed: (id: string, error?: string) => void;
+  dismissSessionNotice: () => void;
 }
 
 export const useStore = create<CasperState>((set, get) => ({
@@ -93,7 +97,7 @@ export const useStore = create<CasperState>((set, get) => ({
   streamingText: '',
   streamingThought: '',
   pending: [],
-  toasts: [],
+  sessionNotice: null,
 
   setSessions: (sessions) => set({ sessions }),
   setModels: (models) => set({ models }),
@@ -116,6 +120,7 @@ export const useStore = create<CasperState>((set, get) => ({
       streamingText: '',
       streamingThought: '',
       pending: [],
+      sessionNotice: null,
     }),
 
   // Prepend an older page (loaded on scroll-up). remainingOlder shrinks by the
@@ -138,22 +143,19 @@ export const useStore = create<CasperState>((set, get) => ({
       streamingText: '',
       streamingThought: '',
       pending: [],
+      sessionNotice: null,
     }),
+
+  dismissSessionNotice: () => set({ sessionNotice: null }),
 
   addPending: (id, text) =>
     set((s) => ({ pending: [...s.pending, { id, text, status: 'sending' }] })),
-  markPendingFailed: (id) =>
+  markPendingFailed: (id, error) =>
     set((s) => ({
       pending: s.pending.map((p) =>
-        p.id === id ? { ...p, status: 'failed' as const } : p,
+        p.id === id ? { ...p, status: 'failed' as const, error } : p,
       ),
     })),
-
-  pushToast: (message, kind = 'error') =>
-    set((s) => ({
-      toasts: [...s.toasts, { id: `t-${Date.now()}-${s.toasts.length}`, message, kind }],
-    })),
-  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
   applyEvent: (e) => {
     const state = get();
@@ -256,6 +258,9 @@ export const useStore = create<CasperState>((set, get) => ({
       case 'turn_ended': {
         set({
           items: commitStreaming(state, `s-${e.seq}`, e.ts),
+          // A turn got through, so whatever was blocking the session isn't
+          // blocking it any more.
+          sessionNotice: null,
           streamingText: '',
           streamingThought: '',
           observability: { ...state.observability, turnStatus: 'idle' },
@@ -264,19 +269,17 @@ export const useStore = create<CasperState>((set, get) => ({
       }
 
       case 'turn_error': {
+        const failure = classifyTurnFailure(p.message);
         set({
           items: [
             ...commitStreaming(state, `s-${e.seq}`, e.ts),
-            {
-              type: 'message',
-              message: {
-                id: `err-${e.seq}`,
-                role: 'assistant',
-                text: `⚠️ ${p.message}`,
-                timestamp: e.ts,
-              },
-            },
+            { type: 'turn_error', id: `err-${e.seq}`, message: p.message, timestamp: e.ts },
           ],
+          // Conditions that outlive the turn get pinned above the composer too,
+          // since the next send will hit the same wall.
+          sessionNotice: failure.sessionWide
+            ? { title: failure.title, fix: failure.fix, detail: p.message }
+            : state.sessionNotice,
           streamingText: '',
           streamingThought: '',
           observability: { ...state.observability, turnStatus: 'idle' },

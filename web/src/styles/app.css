@@ -681,6 +681,21 @@
   font-size: 11px;
   color: var(--n3);
 }
+/* The path being created is worth reading, unlike the static hint it replaces. */
+.cwd-will-create {
+  color: var(--frost);
+}
+.cwd-will-create code {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+.cwd-is-file {
+  color: var(--aurora-red);
+}
+.cwd-is-file code {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
 
 /* Working-directory autocomplete */
 .cwd-field {
@@ -974,17 +989,27 @@
   opacity: 0.55;
   border-color: var(--aurora-red);
 }
-.msg-retry {
-  display: none;
+/* Kept visible rather than revealed on hover: there is no hover on a phone and
+   the bubble is a div, so :focus-within never fired either - which left Retry
+   unreachable on touch. The reason belongs on screen anyway. */
+.msg-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
   margin-top: 6px;
+}
+.msg-failed-why {
+  font-size: 11px;
+  color: var(--aurora-red);
+  word-break: break-word;
+}
+.msg-retry {
   font-size: 12px;
   font-weight: 600;
   color: var(--aurora-red);
   padding: 2px 0;
-}
-.msg-pending.is-failed:hover .msg-retry,
-.msg-pending.is-failed:focus-within .msg-retry {
-  display: inline-block;
+  text-decoration: underline;
 }
 .msg-assistant {
   align-self: flex-start;
@@ -1127,6 +1152,143 @@
 }
 
 /* Markdown */
+/* Failed turn: a system event, styled off the compaction divider above so the
+   two read as the same class of thing, in red rather than accent. */
+.sysnote {
+  align-self: stretch;
+  width: 100%;
+  margin: 6px 0;
+}
+.sysnote-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sysnote-rule::before,
+.sysnote-rule::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--aurora-red);
+  opacity: 0.35;
+}
+.sysnote-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  background: var(--n1);
+  border: 1px solid var(--aurora-red);
+  color: var(--aurora-red);
+  font-size: 12px;
+  cursor: pointer;
+}
+.sysnote-head:hover {
+  background: var(--n2);
+}
+.sysnote-toggle {
+  color: var(--n4);
+}
+.sysnote-body {
+  max-width: 92%;
+  margin: 10px auto 0;
+  border-left: 2px solid var(--aurora-red);
+  padding: 2px 0 2px 12px;
+}
+.sysnote-fix {
+  font-size: 13px;
+  color: var(--n5);
+  margin: 0 0 10px;
+}
+/* The server's own words, kept monospaced and scrollable: a stderr tail has its
+   own line breaks and would be mangled by prose wrapping or markdown. */
+.sysnote-raw {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  background: var(--n-abyss);
+  border: 1px solid var(--n2);
+  border-radius: var(--r-sm);
+  padding: 9px 11px;
+  color: var(--n4);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0 0 10px;
+  max-height: 160px;
+  overflow: auto;
+}
+.sysnote-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.btn-sm {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  background: var(--n1);
+  border: 1px solid var(--n2);
+  color: var(--n5);
+}
+.btn-sm:hover {
+  background: var(--n2);
+}
+.btn-sm.is-danger {
+  border-color: var(--aurora-red);
+  color: var(--aurora-red);
+}
+
+/* A blocking condition that outlives the turn (bad credentials, missing binary).
+   Pinned above the composer because the next send will hit the same wall. */
+.notice-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  background: var(--n1);
+  border: 1px solid var(--aurora-red);
+  border-left-width: 3px;
+  border-radius: var(--r-md);
+  padding: 11px 13px;
+  margin-bottom: 8px;
+}
+.notice-icon {
+  color: var(--aurora-red);
+  flex: none;
+  line-height: 1.4;
+}
+.notice-text {
+  flex: 1;
+  min-width: 0;
+}
+.notice-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--n6);
+  margin: 0 0 2px;
+}
+.notice-sub {
+  font-size: 12.5px;
+  color: var(--n4);
+  margin: 0;
+  word-break: break-word;
+}
+.notice-x {
+  border: none;
+  background: none;
+  color: var(--n3);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  flex: none;
+}
+.notice-x:hover {
+  color: var(--n6);
+}
 .md {
   overflow-wrap: break-word;
   word-break: break-word;
@@ -2476,60 +2638,3 @@
   }
 }
 
-/* Toasts: transient corner notifications. */
-.toaster {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  z-index: 80;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: min(360px, calc(100vw - 40px));
-}
-.toast {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--r-md);
-  background: var(--n1);
-  border: 1px solid var(--n2);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  font-size: 13px;
-  color: var(--n6);
-  animation: toast-in 0.16s ease-out;
-}
-.toast-error {
-  border-left: 3px solid var(--aurora-red);
-}
-.toast-info {
-  border-left: 3px solid var(--frost);
-}
-.toast-msg {
-  flex: 1;
-  min-width: 0;
-  line-height: 1.4;
-}
-.toast-x {
-  border: none;
-  background: none;
-  color: var(--n3);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-}
-.toast-x:hover {
-  color: var(--n6);
-}
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}

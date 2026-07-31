@@ -8,9 +8,18 @@ import { Sidebar } from './components/layout/Sidebar.js';
 import { ChatPane } from './components/layout/ChatPane.js';
 import { NewSessionSheet } from './components/sessions/NewSessionSheet.js';
 import { TokenGate } from './components/common/TokenGate.js';
-import { Toaster } from './components/common/Toaster.js';
 
 type AuthState = 'checking' | 'gate' | 'ready';
+
+// Human names for the control actions the server acks, so a rejection reads as
+// "Model change failed: ..." rather than leaking the wire action name.
+const ACTION_LABEL: Record<string, string> = {
+  prompt: 'Message',
+  cancel: 'Stop',
+  set_mode: 'Agent change',
+  set_model: 'Model change',
+  exec_command: 'Command',
+};
 
 export function App() {
   // Start in 'checking' and probe the server: if a valid session cookie is
@@ -52,14 +61,16 @@ function Shell({ onLock }: { onLock: () => void }) {
   }, [store]);
 
   useEffect(() => {
+    // Quiet on failure: an empty picker is its own signal, and refreshSessions()
+    // below has always failed quietly too.
     api
       .models()
       .then((r) => store.setModels(r.models))
-      .catch(() => store.pushToast('Could not load models.'));
+      .catch(() => {});
     api
       .agents()
       .then((r) => store.setAgents(r.agents, r.defaultAgentId))
-      .catch(() => store.pushToast('Could not load agents.'));
+      .catch(() => {});
     refreshSessions();
   }, []);
 
@@ -92,9 +103,7 @@ function Shell({ onLock }: { onLock: () => void }) {
         // UI in "connecting" - reset and surface the error.
         setConnStatus('closed');
         useStore.getState().setLoadingSession(null);
-        useStore
-          .getState()
-          .pushToast(err instanceof Error ? err.message : 'Could not open session.');
+        console.error('open session failed:', err);
         return;
       }
       store.loadDetail(detail);
@@ -118,13 +127,27 @@ function Shell({ onLock }: { onLock: () => void }) {
             useStore.getState().loadDetail(fresh);
             socketRef.current?.reset(fresh.head);
           },
-          onAck: (action, ok) => {
-            // A rejected prompt (e.g. a turn already running) fails its bubble.
-            if (action === 'prompt' && !ok && lastSentRef.current) {
-              useStore.getState().markPendingFailed(lastSentRef.current);
+          onAck: (action, ok, error) => {
+            if (ok) return;
+            // The server explains every rejection (dispatch.ts sends the thrown
+            // message); don't drop it on the floor.
+            const reason = error ?? 'The server rejected the request.';
+            if (action === 'prompt') {
+              // The reason rides on the failed bubble, which is where the user
+              // is already looking.
+              if (lastSentRef.current) {
+                useStore.getState().markPendingFailed(lastSentRef.current, reason);
+              }
+              return;
             }
+            // set_model / set_mode / cancel / exec_command have no bubble to
+            // attach to, so this only reaches the console for now.
+            console.error(`${ACTION_LABEL[action] ?? action} rejected:`, reason);
           },
           onUnauthorized: handleUnauthorized,
+          onServerError: (message) => {
+            console.error('server error:', message);
+          },
         },
         detail.head,
       );
@@ -183,7 +206,7 @@ function Shell({ onLock }: { onLock: () => void }) {
       try {
         await api.deleteSession(id);
       } catch {
-        useStore.getState().pushToast('Could not delete session. Please try again.');
+        console.error('delete session failed');
         refreshSessions();
         return;
       }
@@ -202,7 +225,7 @@ function Shell({ onLock }: { onLock: () => void }) {
         ),
       }));
       await api.renameSession(id, title).catch(() => {
-        useStore.getState().pushToast('Could not rename session.');
+        console.error('rename session failed');
       });
       refreshSessions();
     },
@@ -211,11 +234,21 @@ function Shell({ onLock }: { onLock: () => void }) {
 
   // Send a prompt. The user bubble shows immediately as "sending"; the server's
   // turn_started echo clears it, and a delivery failure flags it for retry.
-  const sendMessage = useCallback((id: string, content: PromptContentBlock[]) => {
-    lastSentRef.current = id;
-    const delivered = socketRef.current?.prompt(content) ?? false;
-    if (!delivered) useStore.getState().markPendingFailed(id);
-  }, []);
+  const sendMessage = useCallback(
+    (id: string, content: PromptContentBlock[]) => {
+      lastSentRef.current = id;
+      const delivered = socketRef.current?.prompt(content) ?? false;
+      if (!delivered) {
+        // The socket wasn't open, so the server never saw this. Say so on the
+        // bubble itself rather than leaving it unexplained.
+        const reason = socketRef.current
+          ? 'Not connected to the server - reconnecting. Retry once the status dot is green.'
+          : 'No active session socket.';
+        useStore.getState().markPendingFailed(id, reason);
+      }
+    },
+    [],
+  );
 
   const send = useCallback(
     (content: PromptContentBlock[]) => {
@@ -240,12 +273,21 @@ function Shell({ onLock }: { onLock: () => void }) {
     (id: string, text: string) => {
       useStore.setState((prev) => ({
         pending: prev.pending.map((p) =>
-          p.id === id ? { ...p, status: 'sending' as const } : p,
+          p.id === id ? { ...p, status: 'sending' as const, error: undefined } : p,
         ),
       }));
       sendMessage(id, [{ type: 'text', text }]);
     },
     [sendMessage],
+  );
+
+  // Retry a turn that failed: send the same prompt again as a fresh message, so
+  // it gets its own pending bubble and its own failure reason if it fails twice.
+  const retryTurn = useCallback(
+    (text: string) => {
+      send([{ type: 'text', text }]);
+    },
+    [send],
   );
 
   const cancel = useCallback(() => {
@@ -330,6 +372,7 @@ function Shell({ onLock }: { onLock: () => void }) {
         onBack={backToList}
         onSend={send}
         onRetry={retrySend}
+        onRetryTurn={retryTurn}
         onCancel={cancel}
         onNew={() => setNewOpen(true)}
         onChangeModel={changeModel}
@@ -339,7 +382,6 @@ function Shell({ onLock }: { onLock: () => void }) {
       {newOpen && (
         <NewSessionSheet onCreate={createSession} onClose={() => setNewOpen(false)} />
       )}
-      <Toaster />
     </div>
   );
 }

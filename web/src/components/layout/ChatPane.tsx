@@ -24,6 +24,8 @@ interface Props {
   onBack: () => void;
   onSend: (content: PromptContentBlock[]) => void;
   onRetry: (id: string, text: string) => void;
+  /** Re-send a prompt after a failed turn. */
+  onRetryTurn: (text: string) => void;
   onCancel: () => void;
   onNew: () => void;
   onChangeModel: (modelId: string) => void;
@@ -43,6 +45,7 @@ export function ChatPane({
   onBack,
   onSend,
   onRetry,
+  onRetryTurn,
   onCancel,
   onNew,
   onChangeModel,
@@ -53,6 +56,8 @@ export function ChatPane({
   const currentModelId = useStore((s) => s.currentModelId);
   const title = useStore((s) => s.sessions.find((x) => x.sessionId === s.activeId)?.title);
   const activeId = useStore((s) => s.activeId);
+  const sessionNotice = useStore((s) => s.sessionNotice);
+  const dismissSessionNotice = useStore((s) => s.dismissSessionNotice);
   const [showTree, setShowTree] = useState(false);
 
   // Switching to a different session: its detail (transcript, mode, etc.) is
@@ -158,11 +163,29 @@ export function ChatPane({
         </header>
 
         <div className="chat-body">
-          <Transcript onRetry={onRetry} />
+          <Transcript onRetry={onRetry} onRetryTurn={onRetryTurn} />
         </div>
 
         {/* Prompt, then a single bar: config on the left, live stats on the right. */}
         <div className="composer-wrap">
+          {sessionNotice && (
+            <div className="notice-banner" role="alert">
+              <span className="notice-icon" aria-hidden>
+                ⚠
+              </span>
+              <div className="notice-text">
+                <p className="notice-title">{sessionNotice.title}</p>
+                {sessionNotice.fix && <p className="notice-sub">{sessionNotice.fix}</p>}
+              </div>
+              <button
+                className="notice-x"
+                onClick={dismissSessionNotice}
+                aria-label="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+          )}
           <Composer
             sessionId={activeId}
             onSend={onSend}

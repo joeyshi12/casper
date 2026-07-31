@@ -30,7 +30,7 @@ export function authDisabled(): boolean {
 }
 
 /** The raw session token from the request cookie, if present. */
-export function sessionToken(req: FastifyRequest): string | undefined {
+function sessionToken(req: FastifyRequest): string | undefined {
   return req.cookies?.[SESSION_COOKIE];
 }
 

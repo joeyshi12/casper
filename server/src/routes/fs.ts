@@ -43,6 +43,14 @@ export function registerFsRoutes(app: FastifyInstance): void {
       const dir = endsWithSep || !input ? resolved : path.dirname(resolved);
       const prefix = endsWithSep || !input ? '' : path.basename(resolved);
 
+      // What the path being typed currently is. Reported so the sheet can say
+      // the folder will be created - or that the path is a file, which
+      // resolveCwd() in SessionManager rejects. Same DEFAULT_CWD base as create.
+      const targetKind: DirListing['targetKind'] = await fs
+        .stat(resolved)
+        .then((s) => (s.isDirectory() ? ('directory' as const) : ('file' as const)))
+        .catch(() => 'missing' as const);
+
       // Confine the directory being listed to fileRoot so this can't be used to
       // enumerate arbitrary filesystem locations.
       if (confinedPath(dir) === null) {
@@ -54,7 +62,7 @@ export function registerFsRoutes(app: FastifyInstance): void {
       // or doesn't exist, return no suggestions rather than leaking anything.
       const realDir = await realConfineToRoot(config.fileRoot, dir);
       if (!realDir) {
-        return { dir, entries: [] };
+        return { dir, entries: [], target: resolved, targetKind };
       }
 
       let entries: string[] = [];
@@ -89,7 +97,7 @@ export function registerFsRoutes(app: FastifyInstance): void {
         entries = [];
       }
 
-      return { dir, entries };
+      return { dir, entries, target: resolved, targetKind };
     },
   );
 

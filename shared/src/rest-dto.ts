@@ -92,11 +92,15 @@ export interface TranscriptToolCall {
   content: unknown[];
 }
 
-/** A transcript entry: a message, an inline tool call, or a compaction marker. */
+/** A transcript entry: a message, an inline tool call, a compaction marker, or a
+ *  failed turn. A failure is its own type rather than an assistant message so it
+ *  isn't attributed to the model, and so its raw output can be rendered as-is
+ *  instead of going through the markdown renderer. */
 export type TranscriptItem =
   | { type: 'message'; message: TranscriptMessage }
   | { type: 'tool_call'; tool: TranscriptToolCall }
-  | { type: 'compaction'; id: string; summary: string; timestamp?: number };
+  | { type: 'compaction'; id: string; summary: string; timestamp?: number }
+  | { type: 'turn_error'; id: string; message: string; timestamp?: number };
 
 export interface SessionDetail {
   summary: SessionSummary;
@@ -148,6 +152,13 @@ export interface DirListing {
   dir: string;
   /** Absolute paths of matching subdirectories. */
   entries: string[];
+  /** Absolute path the input itself resolves to, which may not exist yet.
+   *  Resolved the same way session creation resolves it (against DEFAULT_CWD),
+   *  so the UI can show where a relative path will actually land. */
+  target: string;
+  /** What `target` currently is. 'missing' means creating a session there will
+   *  create the folder; 'file' means create will reject it. */
+  targetKind: 'directory' | 'file' | 'missing';
 }
 
 // A logged-in device (from GET /api/devices).

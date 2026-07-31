@@ -9,16 +9,20 @@ import { EventEmitter } from 'node:events';
 import type {
   CasperEvent,
   CasperEventPayload,
+  DirListing,
   SessionDetail,
   SessionSummary,
 } from '@casper/shared';
 import { emptyObservabilitySnapshot } from '@casper/shared';
+import Fastify from 'fastify';
 import { useStore } from '../web/src/state/store.js';
 import { config } from '../server/src/config.js';
 import { TurnState } from '../server/src/session/TurnState.js';
 import { SessionManager, Session } from '../server/src/session/SessionManager.js';
 import { EventStore } from '../server/src/session/EventStore.js';
 import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
+import { registerFsRoutes } from '../server/src/routes/fs.js';
+import { KiroProcess } from '../server/src/session/KiroProcess.js';
 import {
   confineToRoot,
   isValidSessionId,
@@ -30,6 +34,7 @@ import { bumpSessionToTop } from '../web/src/state/sessions.js';
 import { olderPageRequest } from '../web/src/state/pagination.js';
 import { lineDiff } from '../web/src/util/diff.js';
 import { lazyImageProps } from '../web/src/util/lazyImage.js';
+import { classifyTurnFailure } from '../web/src/util/turnFailure.js';
 import {
   classifyTool,
   toolLabel,
@@ -782,5 +787,238 @@ describe('hydrateTranscript: malformed entries do not crash hydration', () => {
   it('skips a toolUse with no toolUseId', async () => {
     const items = await hydrateTranscript(sid);
     assert.equal(items.filter((i) => i.type === 'tool_call').length, 0);
+  });
+});
+
+describe('GET /api/fs/dirs: reports what the typed path is', () => {
+  let root: string;
+  let app: Awaited<ReturnType<typeof buildFsApp>>;
+
+  const buildFsApp = async () => {
+    const instance = Fastify();
+    registerFsRoutes(instance);
+    await instance.ready();
+    return instance;
+  };
+
+  const dirsFor = async (p: string) => {
+    const res = await app.inject({ method: 'GET', url: '/api/fs/dirs', query: { path: p } });
+    assert.equal(res.statusCode, 200, `dirs(${p}) -> ${res.statusCode}`);
+    return res.json() as DirListing;
+  };
+
+  before(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-newcwd-'));
+    fs.mkdirSync(path.join(root, 'exists'));
+    fs.writeFileSync(path.join(root, 'a-file.txt'), 'x');
+    app = await buildFsApp();
+  });
+  after(async () => {
+    await app.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('an existing directory', async () => {
+    const r = await dirsFor(path.join(root, 'exists'));
+    assert.equal(r.targetKind, 'directory');
+    assert.equal(r.target, path.join(root, 'exists'));
+  });
+
+  it('a path that does not exist yet - the sheet says it will be created', async () => {
+    const missing = path.join(root, 'brand', 'new', 'folder');
+    const r = await dirsFor(missing);
+    assert.equal(r.targetKind, 'missing');
+    assert.equal(r.target, missing);
+  });
+
+  it('a file, which create rejects rather than creating', async () => {
+    const r = await dirsFor(path.join(root, 'a-file.txt'));
+    assert.equal(r.targetKind, 'file');
+  });
+
+  it('reports the resolved absolute path so relative input is unambiguous', async () => {
+    const r = await dirsFor('some-relative-name');
+    assert.equal(r.target, path.resolve(config.defaultCwd, 'some-relative-name'));
+  });
+});
+
+describe('createSession resolves a missing cwd by creating it', () => {
+  let root: string;
+  before(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-mkcwd-'));
+  });
+  after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it('setSessionCwd creates the folder, including missing parents', async () => {
+    const manager = new SessionManager(noopLogger());
+    const target = path.join(root, 'deep', 'nested', 'work');
+    assert.equal(fs.existsSync(target), false, 'starts absent');
+
+    // The session does not exist, so this rejects - but resolveCwd runs first,
+    // which is the step that creates the directory.
+    await manager.setSessionCwd('no-such-session', target).catch(() => {});
+
+    assert.equal(fs.existsSync(target), true, 'directory was created');
+    assert.equal(fs.statSync(target).isDirectory(), true);
+    manager.disposeAll();
+  });
+});
+
+describe('failures explain themselves', () => {
+  const bin = (script: string) => {
+    const p = path.join(os.tmpdir(), `casper-fakekiro-${Date.now()}-${Math.random()}.sh`);
+    fs.writeFileSync(p, `#!/usr/bin/env bash\n${script}\n`, { mode: 0o755 });
+    return p;
+  };
+
+  it('a dying kiro reports what it printed, not just an exit code', async () => {
+    const script = bin(`echo "Error: credentials have expired. Run 'kiro-cli login'." >&2\nexit 1`);
+    const prev = config.kiroBin;
+    config.kiroBin = script;
+    try {
+      const proc = new KiroProcess({ cwd: os.tmpdir() }, noopLogger());
+      const err = await proc.initialize().then(
+        () => null,
+        (e: Error) => e,
+      );
+      assert.ok(err, 'initialize rejects when the process dies');
+      assert.match(err.message, /exited with code 1/);
+      assert.match(err.message, /credentials have expired/);
+      // No ACP jargon: the reason reaches the user as a turn_error.
+      assert.ok(!err.message.includes('ACP client closed'));
+    } finally {
+      config.kiroBin = prev;
+      fs.rmSync(script, { force: true });
+    }
+  });
+
+  it('a silent exit reads cleanly, with no dangling separator', async () => {
+    const script = bin('exit 3');
+    const prev = config.kiroBin;
+    config.kiroBin = script;
+    try {
+      const proc = new KiroProcess({ cwd: os.tmpdir() }, noopLogger());
+      const err = await proc.initialize().then(
+        () => null,
+        (e: Error) => e,
+      );
+      assert.ok(err);
+      assert.equal(err.message, 'kiro-cli exited with code 3');
+    } finally {
+      config.kiroBin = prev;
+      fs.rmSync(script, { force: true });
+    }
+  });
+
+  it('a failed send keeps the reason on the message, and retry clears it', () => {
+    useStore.getState().clearActive();
+    useStore.getState().addPending('p1', 'hello');
+    useStore.getState().markPendingFailed('p1', 'A turn is already running for this session');
+
+    const failed = useStore.getState().pending.find((p) => p.id === 'p1');
+    assert.equal(failed?.status, 'failed');
+    assert.equal(failed?.error, 'A turn is already running for this session');
+
+    // What retrySend does: back to sending, and the stale reason is dropped.
+    useStore.setState((prev) => ({
+      pending: prev.pending.map((p) =>
+        p.id === 'p1' ? { ...p, status: 'sending' as const, error: undefined } : p,
+      ),
+    }));
+    const retried = useStore.getState().pending.find((p) => p.id === 'p1');
+    assert.equal(retried?.status, 'sending');
+    assert.equal(retried?.error, undefined);
+  });
+});
+
+describe('turn failures surface as system events, not assistant messages', () => {
+  const turnError = (seq: number, message: string): CasperEvent => ({
+    seq,
+    sessionId: 's1',
+    ts: new Date('2026-07-30T12:00:00Z').toISOString(),
+    payload: { kind: 'turn_error', message } as CasperEventPayload,
+  });
+
+  const turnEnded = (seq: number): CasperEvent => ({
+    seq,
+    sessionId: 's1',
+    ts: new Date('2026-07-30T12:00:01Z').toISOString(),
+    payload: { kind: 'turn_ended', stopReason: 'end_turn' } as unknown as CasperEventPayload,
+  });
+
+  beforeEach(() => useStore.getState().clearActive());
+
+  it('records a turn_error item rather than a fake assistant message', () => {
+    useStore.getState().applyEvent(turnError(1, 'kiro-cli exited with code 1'));
+    const items = useStore.getState().items;
+    assert.equal(items.length, 1);
+    assert.equal(items[0]!.type, 'turn_error');
+    // The old behaviour attributed this to the model; make sure that's gone.
+    assert.ok(!items.some((i) => i.type === 'message'));
+    assert.ok(!JSON.stringify(items).includes('⚠️'));
+  });
+
+  it('keeps the server text verbatim for the raw details block', () => {
+    const raw = "kiro-cli exited with code 1: Error: your credentials have expired. Run 'kiro-cli login'.";
+    useStore.getState().applyEvent(turnError(1, raw));
+    const item = useStore.getState().items[0]!;
+    assert.equal(item.type === 'turn_error' && item.message, raw);
+  });
+
+  it('pins a session notice for a session-wide failure', () => {
+    useStore.getState().applyEvent(turnError(1, 'Error: credentials have expired'));
+    const notice = useStore.getState().sessionNotice;
+    assert.ok(notice, 'notice is pinned');
+    assert.equal(notice.title, "Kiro isn't authenticated");
+    assert.match(notice.fix ?? '', /kiro-cli login/);
+  });
+
+  it('does not pin a notice for a one-off failure', () => {
+    useStore.getState().applyEvent(turnError(1, 'A turn is already running for this session'));
+    assert.equal(useStore.getState().sessionNotice, null);
+    // ...but it's still in the transcript.
+    assert.equal(useStore.getState().items[0]!.type, 'turn_error');
+  });
+
+  it('clears the notice once a turn gets through', () => {
+    useStore.getState().applyEvent(turnError(1, 'Error: credentials have expired'));
+    assert.ok(useStore.getState().sessionNotice);
+    useStore.getState().applyEvent(turnEnded(2));
+    assert.equal(useStore.getState().sessionNotice, null);
+  });
+
+  it('can be dismissed', () => {
+    useStore.getState().applyEvent(turnError(1, 'Error: credentials have expired'));
+    useStore.getState().dismissSessionNotice();
+    assert.equal(useStore.getState().sessionNotice, null);
+  });
+});
+
+describe('classifyTurnFailure', () => {
+  it('recognises expired credentials as session-wide, with the login remedy', () => {
+    const f = classifyTurnFailure(
+      "kiro-cli exited with code 1: Error: your credentials have expired. Run 'kiro-cli login'.",
+    );
+    assert.equal(f.title, "Kiro isn't authenticated");
+    assert.equal(f.sessionWide, true);
+    assert.match(f.fix ?? '', /kiro-cli login/);
+  });
+
+  it('recognises a missing binary as session-wide', () => {
+    const f = classifyTurnFailure('spawn kiro-cli ENOENT');
+    assert.equal(f.sessionWide, true);
+    assert.match(f.fix ?? '', /KIRO_BIN/);
+  });
+
+  it('treats a busy session as a one-off, not session-wide', () => {
+    const f = classifyTurnFailure('A turn is already running for this session');
+    assert.notEqual(f.sessionWide, true);
+  });
+
+  it('invents no advice for an unrecognised failure', () => {
+    const f = classifyTurnFailure('something entirely unexpected happened');
+    assert.equal(f.title, 'Turn failed');
+    assert.equal(f.fix, undefined);
+    assert.notEqual(f.sessionWide, true);
   });
 });

@@ -7,7 +7,6 @@ import {
   isJsonRpcResponse,
   type JsonRpcId,
   type JsonRpcMessage,
-  type JsonRpcNotification,
   type JsonRpcRequest,
 } from '@casper/shared';
 import type { Logger } from '../util/logger.js';
@@ -124,12 +123,17 @@ export class AcpClient extends EventEmitter {
     this.writable.write(JSON.stringify(msg) + '\n');
   }
 
-  /** Reject all pending requests; call when the child process exits. */
+  /**
+   * Reject all pending requests; call when the child process exits. The reason
+   * is passed through verbatim because it reaches the user as a turn_error -
+   * the caller supplies something readable, so don't bury it behind a prefix
+   * about ACP internals.
+   */
   fail(reason: string): void {
     this.closed = true;
     for (const [id, pending] of this.pending) {
       if (pending.timer) clearTimeout(pending.timer);
-      pending.reject(new Error(`ACP client closed: ${reason}`));
+      pending.reject(new Error(reason));
       this.pending.delete(id);
     }
   }

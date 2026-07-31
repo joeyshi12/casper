@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/rest.js';
+import type { DirListing } from '@casper/shared';
 
 interface Props {
   value: string;
@@ -25,23 +26,41 @@ export function CwdField({
 }: Props) {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  // The resolved absolute path and what it currently is, so the field can say a
+  // folder will be created (or that the path is a file). Kept separate from
+  // `suggestions` because it must survive losing focus - the notice matters most
+  // once typing stops.
+  const [target, setTarget] = useState<{ path: string; kind: DirListing['targetKind'] } | null>(
+    null,
+  );
   // Track the query we last requested so out-of-order responses are ignored.
   const queryRef = useRef('');
 
   useEffect(() => {
-    if (!showSuggestions) return;
     const q = value;
     queryRef.current = q;
     const t = setTimeout(() => {
       api
         .listDirs(q)
         .then((r) => {
-          if (queryRef.current === q) setSuggestions(r.entries);
+          if (queryRef.current !== q) return;
+          setSuggestions(r.entries);
+          setTarget({ path: r.target, kind: r.targetKind });
         })
-        .catch(() => setSuggestions([]));
+        .catch(() => {
+          if (queryRef.current !== q) return;
+          setSuggestions([]);
+          // Don't claim anything about a path we couldn't resolve (e.g. outside
+          // the allowed root, which create would reject anyway).
+          setTarget(null);
+        });
     }, 150);
     return () => clearTimeout(t);
-  }, [value, showSuggestions]);
+  }, [value]);
+
+  const typed = value.trim() !== '';
+  const willCreate = typed && target?.kind === 'missing';
+  const isFile = typed && target?.kind === 'file';
 
   return (
     <label className="picker cwd-field">
@@ -78,7 +97,17 @@ export function CwdField({
           ))}
         </div>
       )}
-      <span className="picker-hint">{hint}</span>
+      {willCreate && (
+        <span className="picker-hint cwd-will-create">
+          Doesn&apos;t exist yet - this folder will be created: <code>{target.path}</code>
+        </span>
+      )}
+      {isFile && (
+        <span className="picker-hint cwd-is-file">
+          That path is a file, not a folder: <code>{target.path}</code>
+        </span>
+      )}
+      {!willCreate && !isFile && <span className="picker-hint">{hint}</span>}
     </label>
   );
 }

@@ -6,6 +6,7 @@ import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { ToolCallCard } from './ToolCallCard.js';
 import { CompressIcon, Spinner } from '../common/icons.js';
 import { lazyImageProps } from '../../util/lazyImage.js';
+import { classifyTurnFailure } from '../../util/turnFailure.js';
 
 // Live media query (its .matches updates as the OS setting changes), so the
 // easing follow can snap instantly for users who ask for reduced motion.
@@ -16,6 +17,8 @@ const reduceMotion =
 
 interface Props {
   onRetry: (id: string, text: string) => void;
+  /** Re-send a prompt after a failed turn. */
+  onRetryTurn: (text: string) => void;
 }
 
 /**
@@ -27,7 +30,7 @@ interface Props {
  * Memoized: toggling unrelated ChatPane state (like the file panel) must not
  * re-render the whole transcript, which is expensive for long histories.
  */
-export const Transcript = memo(function Transcript({ onRetry }: Props) {
+export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Props) {
   const items = useStore((s) => s.items);
   const streamingText = useStore((s) => s.streamingText);
   const streamingThought = useStore((s) => s.streamingThought);
@@ -99,7 +102,7 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
         anchorRef.current = null;
         loadingOlderRef.current = false;
         setLoadingOlder(false);
-        useStore.getState().pushToast('Could not load earlier messages.');
+        console.error('could not load earlier transcript page');
       });
   };
 
@@ -258,6 +261,8 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
           )
         ) : item.type === 'tool_call' ? (
           <ToolCallCard key={item.tool.id} tool={item.tool} />
+        ) : item.type === 'turn_error' ? (
+          <TurnErrorBlock key={item.id} message={item.message} onRetry={onRetryTurn} />
         ) : (
           <CompactionBlock key={item.id} summary={item.summary} />
         ),
@@ -270,13 +275,12 @@ export const Transcript = memo(function Transcript({ onRetry }: Props) {
         >
           <div className="msg-user-text">{pm.text}</div>
           {pm.status === 'failed' && (
-            <button
-              className="msg-retry"
-              onClick={() => onRetry(pm.id, pm.text)}
-              title="Failed to send. Click to retry."
-            >
-              Retry
-            </button>
+            <div className="msg-failed">
+              <span className="msg-failed-why">{pm.error ?? 'Failed to send.'}</span>
+              <button className="msg-retry" onClick={() => onRetry(pm.id, pm.text)}>
+                Retry
+              </button>
+            </div>
           )}
         </div>
       ))}
@@ -364,6 +368,75 @@ function ThoughtBlock({ text, live = false }: { text: string; live?: boolean }) 
  * model now carries as context). Collapsed by default since these summaries are
  * long; click to reveal the full summary.
  */
+/**
+ * A failed turn, shown as a system event rather than something the assistant
+ * said. Collapsed to a single line by default - it borrows the compaction
+ * divider's shape so system events read alike - and expands to the cause, what
+ * to do about it, and the server's raw output.
+ */
+function TurnErrorBlock({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry?: (text: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const failure = classifyTurnFailure(message);
+  const lastPrompt = useStore((s) => {
+    // The prompt that produced this failure, so Retry can send it again.
+    for (let i = s.items.length - 1; i >= 0; i--) {
+      const it = s.items[i]!;
+      if (it.type === 'message' && it.message.role === 'user') return it.message.text;
+    }
+    return '';
+  });
+
+  const copy = () => {
+    void navigator.clipboard?.writeText(message).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => {},
+    );
+  };
+
+  return (
+    <div className="sysnote">
+      <div className="sysnote-rule">
+        <button
+          className="sysnote-head"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+        >
+          <span aria-hidden>⚠</span>
+          <span className="sysnote-label">{failure.title}</span>
+          <span className="sysnote-toggle">{open ? 'Hide details' : 'Show details'}</span>
+        </button>
+      </div>
+
+      {open && (
+        <div className="sysnote-body">
+          {failure.fix && <p className="sysnote-fix">{failure.fix}</p>}
+          <pre className="sysnote-raw">{message}</pre>
+          <div className="sysnote-actions">
+            {onRetry && lastPrompt && (
+              <button className="btn-sm is-danger" onClick={() => onRetry(lastPrompt)}>
+                Retry turn
+              </button>
+            )}
+            <button className="btn-sm" onClick={copy}>
+              {copied ? 'Copied' : 'Copy details'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CompactionBlock({ summary }: { summary: string }) {
   const [open, setOpen] = useState(false);
   return (

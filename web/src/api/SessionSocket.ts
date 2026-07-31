@@ -19,6 +19,9 @@ interface SessionSocketHandlers {
   /** Cursor is stale - caller should refetch the full session, then call reset(head). */
   onResync: () => void;
   onAck?: (action: string, ok: boolean, error?: string) => void;
+  /** A server-level error frame (bad request, session unavailable). Reported so
+   *  the user sees a reason instead of it only reaching the console. */
+  onServerError?: (message: string) => void;
   /** The server rejected the connection as unauthorized (expired/absent session). */
   onUnauthorized?: () => void;
 }
@@ -134,6 +137,7 @@ export class SessionSocket {
           break;
         case 'error':
           console.warn('ws error:', msg.message);
+          this.handlers.onServerError?.(msg.message);
           break;
         case 'pong':
           break;
