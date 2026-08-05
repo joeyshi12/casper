@@ -21,6 +21,7 @@ import { TurnState } from '../server/src/session/TurnState.js';
 import { SessionManager, Session } from '../server/src/session/SessionManager.js';
 import { EventStore } from '../server/src/session/EventStore.js';
 import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
+import { describeError } from '../server/src/acp/errors.js';
 import { registerFsRoutes } from '../server/src/routes/fs.js';
 import { KiroProcess } from '../server/src/session/KiroProcess.js';
 import {
@@ -1020,5 +1021,67 @@ describe('classifyTurnFailure', () => {
     assert.equal(f.title, 'Turn failed');
     assert.equal(f.fix, undefined);
     assert.notEqual(f.sessionWide, true);
+  });
+});
+
+describe('describeError (ACP error detail)', () => {
+  it('leads with data, the only part that says what went wrong', () => {
+    // Exactly what kiro answers a prompt for an unknown session with.
+    const got = describeError({
+      code: -32603,
+      message: 'Internal error',
+      data: 'No session found with id',
+    });
+    assert.equal(got, 'No session found with id (Internal error, code -32603)');
+  });
+
+  it('falls back to message when there is no data', () => {
+    assert.equal(
+      describeError({ code: -32601, message: 'Method not found' }),
+      'Method not found (code -32601)',
+    );
+  });
+
+  it('pulls the detail out of an object payload', () => {
+    const got = describeError({
+      code: -32603,
+      message: 'Internal error',
+      data: { message: 'model overloaded, retry later' },
+    });
+    assert.match(got, /model overloaded, retry later/);
+  });
+
+  it('tries the other keys agents use for the detail', () => {
+    const got = describeError({
+      code: -32603,
+      message: 'Internal error',
+      data: { reason: 'credentials expired' },
+    });
+    assert.match(got, /credentials expired/);
+  });
+
+  it('serialises an unrecognised object rather than dropping it', () => {
+    const got = describeError({
+      code: -32603,
+      message: 'Internal error',
+      data: { unexpected: 'shape', n: 7 },
+    });
+    assert.match(got, /unexpected/);
+    assert.match(got, /shape/);
+  });
+
+  it('ignores null data instead of printing it', () => {
+    const got = describeError({ code: -32603, message: 'Internal error', data: null });
+    assert.equal(got, 'Internal error (code -32603)');
+  });
+
+  it('bounds a huge payload so it cannot flood the transcript', () => {
+    const got = describeError({
+      code: -32603,
+      message: 'Internal error',
+      data: 'x'.repeat(5000),
+    });
+    assert.ok(got.length < 2200, `got ${got.length} chars`);
+    assert.match(got, /truncated/);
   });
 });

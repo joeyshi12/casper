@@ -10,6 +10,7 @@ import {
   type JsonRpcRequest,
 } from '@casper/shared';
 import type { Logger } from '../util/logger.js';
+import { describeError } from './errors.js';
 
 interface Pending {
   resolve: (value: unknown) => void;
@@ -60,11 +61,7 @@ export class AcpClient extends EventEmitter {
       this.pending.delete(id);
       if (pending.timer) clearTimeout(pending.timer);
       if (isJsonRpcError(msg)) {
-        pending.reject(
-          new Error(
-            `ACP ${pending.method} failed: ${msg.error.message} (code ${msg.error.code})`,
-          ),
-        );
+        pending.reject(new Error(`ACP ${pending.method} failed: ${describeError(msg.error)}`));
       } else {
         pending.resolve(msg.result);
       }

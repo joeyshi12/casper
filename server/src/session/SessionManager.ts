@@ -420,7 +420,15 @@ export class SessionManager {
       .then((res) => s.record({ kind: 'turn_ended', stopReason: res.stopReason }))
       .catch((err: Error) => {
         this.log.error({ err, sessionId: s.sessionId }, 'prompt turn failed');
-        s.record({ kind: 'turn_error', message: err.message });
+        // If the failure didn't explain itself, kiro's own output usually has
+        // something. Only appended when it isn't already in the message, so a
+        // self-explaining error doesn't get the same text twice.
+        const tail = proc.stderrTail();
+        const message =
+          tail && !err.message.includes(tail)
+            ? `${err.message}\n\nkiro-cli output:\n${tail}`
+            : err.message;
+        s.record({ kind: 'turn_error', message });
       })
       .finally(() => {
         s.running = false;

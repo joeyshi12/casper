@@ -152,6 +152,17 @@ export class KiroProcess extends EventEmitter {
 
   /** Cleanly shut down: close stdin (triggers kiro's graceful exit), then kill. */
   /**
+   * Recent stderr from kiro, for attaching to a failure.
+   *
+   * A failed request doesn't always carry its cause in the JSON-RPC error - when
+   * it doesn't, kiro has usually written something here. Shared across turns, so
+   * treat it as context rather than proof.
+   */
+  stderrTail(): string {
+    return this.recentStderr.join('\n').trim();
+  }
+
+  /**
    * Why the child died, in terms a user can act on. The exit code alone is
    * opaque, so append what kiro printed - that's where "credentials have
    * expired, run kiro-cli login" and friends show up.
