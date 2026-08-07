@@ -4,7 +4,7 @@ import { ATTACHMENTS_PREFIX } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 import { api } from '../../api/rest.js';
 import type { ConnStatus } from '../../api/SessionSocket.js';
-import { PlusIcon, PaperclipIcon, CompressIcon } from '../common/icons.js';
+import { PlusIcon } from '../common/icons.js';
 import { AgentPicker, ModelPicker } from '../controls/Pickers.js';
 import { ContextRing } from '../observability/ContextRing.js';
 
@@ -53,7 +53,6 @@ export function Composer({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
   const turnStatus = useStore((s) => s.observability.turnStatus);
   const compacting = useStore((s) => s.observability.compacting);
   const currentModeId = useStore((s) => s.currentModeId);
@@ -63,7 +62,6 @@ export function Composer({
   const live = connStatus === 'connected';
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
 
   const readFileAsBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -239,14 +237,6 @@ export function Composer({
     };
   }, []);
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [menuOpen]);
 
   const placeholder =
     connStatus === 'closed'
@@ -313,48 +303,17 @@ export function Composer({
           rows={1}
         />
         <div className="composer-actions">
-          <div className="composer-menu-wrap" ref={menuRef}>
-            <button
-              className="composer-plus"
-              onClick={() => setMenuOpen((o) => !o)}
-              disabled={!live || uploading}
-              title="Add"
-              aria-label="Add"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-            >
-              <PlusIcon size={18} />
-            </button>
-            {menuOpen && (
-              <div className="composer-menu" role="menu">
-                <button
-                  className="composer-menu-item"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    fileInputRef.current?.click();
-                  }}
-                >
-                  <PaperclipIcon size={16} className="composer-menu-icon" />
-                  <span className="composer-menu-label">Add photos &amp; files</span>
-                </button>
-                <button
-                  className="composer-menu-item"
-                  role="menuitem"
-                  disabled={!sessionId || running || cancelling || compacting}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onCompact();
-                  }}
-                >
-                  <CompressIcon size={16} className="composer-menu-icon" />
-                  <span className="composer-menu-label">Compact conversation</span>
-                </button>
-              </div>
-            )}
-          </div>
+          <button
+            className="composer-plus"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!live || uploading}
+            title="Add photos & files"
+            aria-label="Add photos and files"
+          >
+            <PlusIcon size={18} />
+          </button>
           <div className="composer-actions-right">
-            <ContextRing />
+            <ContextRing onCompact={onCompact} />
             <AgentPicker value={currentModeId} onChange={onChangeAgent} />
             <ModelPicker value={currentModelId} onChange={onChangeModel} />
             {running ? (

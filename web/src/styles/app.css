@@ -1891,52 +1891,6 @@
   color: var(--n3);
   cursor: not-allowed;
 }
-.composer-menu-wrap {
-  position: relative;
-  flex-shrink: 0;
-}
-.composer-menu {
-  position: absolute;
-  bottom: 42px;
-  left: 0;
-  z-index: 40;
-  min-width: 210px;
-  padding: 5px;
-  background: var(--n0);
-  border: 1px solid var(--n2);
-  border-radius: var(--r-md);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-  animation: fade-in 0.12s ease;
-}
-.composer-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  text-align: left;
-  padding: 9px 11px;
-  border-radius: var(--r-sm);
-  font-size: 13px;
-  color: var(--n5);
-  cursor: pointer;
-  background: none;
-  border: none;
-}
-.composer-menu-item:hover:not(:disabled) {
-  background: var(--n2);
-  color: var(--n6);
-}
-.composer-menu-item:disabled {
-  color: var(--n3);
-  cursor: not-allowed;
-}
-.composer-menu-icon {
-  flex-shrink: 0;
-  color: var(--n4);
-}
-.composer-menu-label {
-  white-space: nowrap;
-}
 .composer-input {
   width: 100%;
   resize: none;
@@ -2687,4 +2641,27 @@
   font-size: 11px;
   line-height: 1.45;
   color: var(--n4);
+}
+
+.ctx-pop-compact {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 7px 10px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: var(--r-sm);
+  background: var(--n2);
+  border: 1px solid var(--n3);
+  color: var(--n6);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.ctx-pop-compact:hover:not(:disabled) {
+  background: var(--n3);
+}
+.ctx-pop-compact:disabled {
+  opacity: 0.5;
+  cursor: default;
 }

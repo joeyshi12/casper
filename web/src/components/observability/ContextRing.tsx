@@ -22,9 +22,11 @@ const fmt = new Intl.NumberFormat();
  * selected model's window and labelled as approximate rather than presented as
  * exact counts.
  */
-export function ContextRing() {
+export function ContextRing({ onCompact }: { onCompact: () => void }) {
   const pct = useStore((s) => s.observability.contextUsagePercentage);
   const compacting = useStore((s) => s.observability.compacting);
+  const turnStatus = useStore((s) => s.observability.turnStatus);
+  const activeId = useStore((s) => s.activeId);
   const currentModelId = useStore((s) => s.currentModelId);
   const models = useStore((s) => s.models);
   const [open, setOpen] = useState(false);
@@ -109,11 +111,7 @@ export function ContextRing() {
             <dl className="ctx-pop-rows">
               <div className="ctx-pop-row">
                 <dt>Used</dt>
-                <dd>~{fmt.format(used ?? 0)} tokens</dd>
-              </div>
-              <div className="ctx-pop-row">
-                <dt>Remaining</dt>
-                <dd>~{fmt.format(window - (used ?? 0))} tokens</dd>
+                <dd>{fmt.format(used ?? 0)} tokens</dd>
               </div>
               <div className="ctx-pop-row">
                 <dt>Window</dt>
@@ -127,10 +125,19 @@ export function ContextRing() {
           )}
 
           <p className="ctx-pop-note">
-            {compacting
-              ? 'Compacting now - this will drop sharply when it finishes.'
-              : 'Compacting replaces earlier turns with a summary, freeing most of this.'}
+            Compacting replaces earlier turns with a summary, freeing most of this.
           </p>
+          <button
+            type="button"
+            className="ctx-pop-compact"
+            disabled={!activeId || compacting || turnStatus !== 'idle'}
+            onClick={() => {
+              setOpen(false);
+              onCompact();
+            }}
+          >
+            {compacting ? 'Compacting…' : 'Compact conversation'}
+          </button>
         </div>
       )}
     </div>
