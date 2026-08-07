@@ -1,40 +1,24 @@
 import { EventEmitter } from 'node:events';
-import fs from 'node:fs';
-import path from 'node:path';
 import type { CasperEvent, CasperEventPayload } from '@casper/shared';
 import { config } from '../config.js';
-import type { Logger } from '../util/logger.js';
 
-// Per-session append-only event log: a bounded in-memory ring buffer plus a
-// best-effort on-disk mirror. Every event gets a strictly increasing seq, so a
-// reconnecting client can replay from its last-seen seq via getSince().
+// Per-session event log: a bounded in-memory ring buffer. Every event gets a
+// strictly increasing seq, so a reconnecting client can replay from its
+// last-seen seq via getSince(). Deliberately memory-only - a client whose cursor
+// predates the buffer is told to resync and refetches the transcript instead.
 export class EventStore extends EventEmitter {
   private readonly sessionId: string;
   private readonly buffer: CasperEvent[] = [];
   private readonly capacity: number;
   private seq = 0;
-  private readonly log: Logger;
-  private diskStream?: fs.WriteStream;
 
-  constructor(sessionId: string, log: Logger) {
+  constructor(sessionId: string) {
     super();
     this.sessionId = sessionId;
     this.capacity = config.eventBufferSize;
-    this.log = log;
-    this.openDiskMirror();
   }
 
-  private openDiskMirror(): void {
-    try {
-      fs.mkdirSync(config.casperDataDir, { recursive: true });
-      const file = path.join(config.casperDataDir, `${this.sessionId}.events.jsonl`);
-      this.diskStream = fs.createWriteStream(file, { flags: 'a' });
-    } catch (err) {
-      this.log.warn({ err }, 'eventstore: could not open disk mirror');
-    }
-  }
-
-  /** Append an event, assign it the next seq, persist + fan out. */
+  /** Append an event, assign it the next seq, and fan it out. */
   append(payload: CasperEventPayload): CasperEvent {
     this.seq += 1;
     const event: CasperEvent = {
@@ -45,9 +29,6 @@ export class EventStore extends EventEmitter {
     };
     this.buffer.push(event);
     if (this.buffer.length > this.capacity) this.buffer.shift();
-    if (this.diskStream) {
-      this.diskStream.write(JSON.stringify(event) + '\n');
-    }
     this.emit('event', event);
     return event;
   }
@@ -82,7 +63,6 @@ export class EventStore extends EventEmitter {
   }
 
   dispose(): void {
-    this.diskStream?.end();
     this.removeAllListeners();
   }
 }

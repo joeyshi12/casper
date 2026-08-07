@@ -191,7 +191,6 @@ export async function deletePersistedSession(sessionId: string): Promise<void> {
     path.join(config.kiroSessionsDir, `${sessionId}.jsonl`),
     path.join(config.kiroSessionsDir, `${sessionId}.history`),
     path.join(config.kiroSessionsDir, sessionId),
-    path.join(config.casperDataDir, `${sessionId}.events.jsonl`),
   ];
   await Promise.all(targets.map((f) => fs.rm(f, { recursive: true, force: true })));
 }

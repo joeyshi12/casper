@@ -248,7 +248,7 @@ export class SessionManager {
       );
     }
 
-    const store = new EventStore(sessionId, this.log);
+    const store = new EventStore(sessionId);
     const s = new Session(sessionId, store, effectiveCwd);
     s.title = persisted.title;
     s.agentId = persisted.agentId;
@@ -375,7 +375,7 @@ export class SessionManager {
     const cwd = resolveCwd(opts.cwd);
     // Temporary local id until kiro assigns the real one during ensureProc.
     const tempId = `pending-${Date.now()}-${Math.floor(this.sessions.size)}`;
-    const store = new EventStore(tempId, this.log);
+    const store = new EventStore(tempId);
     const s = new Session(tempId, store, cwd);
     s.agentId = opts.agentId ?? config.defaultAgent;
     s.currentModeId = s.agentId;

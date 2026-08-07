@@ -247,19 +247,12 @@ describe('EventStore.getSince + SessionManager.wire replay gating', () => {
   before(() => {
     const log = noopLogger();
     const mgr = new SessionManager(log) as unknown as { wire(s: unknown, proc: unknown): void };
-    store = new EventStore('replay-regression-test', log);
+    store = new EventStore('replay-regression-test');
     session = new Session('replay-regression-test', store, '/tmp');
     proc = new EventEmitter();
     mgr.wire(session, proc);
   });
-  after(() => {
-    store.dispose();
-    try {
-      fs.rmSync(path.join(config.casperDataDir, 'replay-regression-test.events.jsonl'), { force: true });
-    } catch {
-      /* best effort */
-    }
-  });
+  after(() => store.dispose());
 
   // Empty-buffer cursor semantics (run first, before any events are appended).
   it('empty buffer accepts a fresh cursor', () => {
@@ -308,19 +301,12 @@ describe('SessionManager.replayHead (re-open mid-turn must not drop the prompt)'
   before(() => {
     const log = noopLogger();
     mgr = new SessionManager(log) as unknown as { replayHead(s: unknown, t: unknown): number };
-    store = new EventStore('replayhead-test', log);
+    store = new EventStore('replayhead-test');
     session = new Session('replayhead-test', store, '/tmp');
     session.running = true;
     evSeq = session.record({ kind: 'turn_started', prompt: [{ type: 'text', text: 'hello there' }] }).seq;
   });
-  after(() => {
-    store.dispose();
-    try {
-      fs.rmSync(path.join(config.casperDataDir, 'replayhead-test.events.jsonl'), { force: true });
-    } catch {
-      /* best effort */
-    }
-  });
+  after(() => store.dispose());
 
   it('rewinds to replay an in-flight turn missing from hydrate', () => {
     assert.equal(mgr.replayHead(session, []), evSeq - 1);
