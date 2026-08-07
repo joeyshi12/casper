@@ -21,8 +21,12 @@ type ToolKind =
 /**
  * Which specialized renderer handles a tool call. Prefer the canonical tool
  * name (kiro's _meta.kiro.toolName live, or the persisted name on hydrate),
- * which is identical across live and reload. Fall back to kind + input shape
- * only for older data that lacks a name.
+ * which is identical across live and reload.
+ *
+ * The kind + input heuristics below are not legacy: live ACP tool_call updates
+ * can arrive without _meta.kiro.toolName, and the tests pin live and hydrated
+ * output to the same result. Every persisted toolUse block carries a name
+ * (3285/3285 across the sessions here), so only the live path needs them.
  */
 export function classifyTool(tool: { name?: string; title?: string; kind?: string; input?: unknown }): ToolKind {
   switch (tool.name) {
@@ -79,9 +83,9 @@ export function classifyTool(tool: { name?: string; title?: string; kind?: strin
     return 'write';
   }
   if (k === 'execute' || tool.title === 'shell' || typeof inp.command === 'string') return 'shell';
-  // Name-less fallbacks for the web / introspect tools (older data without a
-  // name). `url` is unique to web_fetch; web_search vs introspect both carry a
-  // `query`, so lean on kind/title to disambiguate.
+  // Name-less fallbacks for the web / introspect tools. `url` is unique to
+  // web_fetch; web_search vs introspect both carry a `query`, so lean on
+  // kind/title to disambiguate.
   if (typeof inp.url === 'string') return 'webfetch';
   if (typeof inp.query === 'string' && (k === 'search' || tool.title === 'web_search')) return 'websearch';
   if (tool.title === 'introspect' || typeof inp.doc_path === 'string') return 'introspect';

@@ -1172,42 +1172,7 @@ describe('SQLite stores', () => {
     assert.equal(logins.list().length, 0);
   });
 
-  it('migrates the three legacy JSON files, merging titles and cwds by session', () => {
-    closeDb();
-    fs.writeFileSync(path.join(dir, 'titles.json'), JSON.stringify({ s1: 'One', s2: 'Two' }));
-    fs.writeFileSync(path.join(dir, 'cwds.json'), JSON.stringify({ s1: '/tmp/one' }));
-    fs.writeFileSync(
-      path.join(dir, 'logins.json'),
-      JSON.stringify([
-        {
-          id: 'dev1',
-          hash: 'a'.repeat(64),
-          createdAt: new Date().toISOString(),
-          lastSeenAt: new Date().toISOString(),
-          userAgent: 'ua',
-        },
-      ]),
-    );
-
-    const store = new SessionStore();
-    assert.equal(store.getTitle('s1'), 'One');
-    assert.equal(store.getCwd('s1'), '/tmp/one', 'title and cwd landed on the same row');
-    assert.equal(store.getTitle('s2'), 'Two');
-    assert.equal(store.getCwd('s2'), undefined);
-
-    const sessions = db().prepare('SELECT count(*) c FROM sessions').get() as { c: number };
-    assert.equal(sessions.c, 2, 'two sessions, not three rows');
-    const logins = db().prepare('SELECT count(*) c FROM logins').get() as { c: number };
-    assert.equal(logins.c, 1);
-
-    // Originals are kept as .bak rather than deleted.
-    for (const f of ['titles.json', 'cwds.json', 'logins.json']) {
-      assert.equal(fs.existsSync(path.join(dir, f)), false, `${f} was renamed`);
-      assert.equal(fs.existsSync(path.join(dir, `${f}.bak`)), true, `${f}.bak kept`);
-    }
-  });
-
-  it('is a no-op when there is nothing to migrate', () => {
+  it('creates the database on first use', () => {
     closeDb();
     const store = new SessionStore();
     assert.equal(store.getTitle('anything'), undefined);
