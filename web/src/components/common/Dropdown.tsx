@@ -9,8 +9,9 @@ interface DropdownOption {
 }
 
 interface Props {
-  /** Visible caps label. Omit for a bare value + chevron, as in the composer. */
-  label?: string;
+  /** Accessible name. Not rendered: the trigger shows only the current value,
+   *  so this is the only thing naming the control for a screen reader. */
+  ariaLabel: string;
   value?: string;
   options: DropdownOption[];
   onChange: (value: string) => void;
@@ -21,7 +22,7 @@ interface Props {
  * app, with a chevron trigger, a floating panel, checkmark on the current
  * option, and keyboard support (↑/↓/Enter/Esc).
  */
-export function Dropdown({ label, value, options, onChange }: Props) {
+export function Dropdown({ ariaLabel, value, options, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -84,11 +85,8 @@ export function Dropdown({ label, value, options, onChange }: Props) {
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         onKeyDown={onKeyDown}
-        // The label is the only text naming this control; without it the value
-        // alone ("Sonnet 5") doesn't say what it selects.
-        aria-label={label}
+        aria-label={ariaLabel}
       >
-        {label && <span className="dd-label">{label}</span>}
         <span className="dd-value">{selected?.label ?? value ?? 'Select…'}</span>
         <ChevronIcon size={13} className="dd-chevron" />
       </button>

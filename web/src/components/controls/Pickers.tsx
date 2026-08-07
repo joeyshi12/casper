@@ -11,7 +11,7 @@ export function ModelPicker({ value, onChange }: ModelPickerProps) {
   const models = useStore((s) => s.models);
   return (
     <Dropdown
-      label="Model"
+      ariaLabel="Model"
       value={value}
       onChange={onChange}
       options={models.map((m) => ({
@@ -39,7 +39,7 @@ export function AgentPicker({ value, onChange }: AgentPickerProps) {
   const list = sessionModes.length > 0 ? sessionModes : globalAgents;
   return (
     <Dropdown
-      label="Agent"
+      ariaLabel="Agent"
       value={value}
       onChange={onChange}
       options={list.map((m) => ({ value: m.id, label: m.name }))}

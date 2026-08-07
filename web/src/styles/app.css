@@ -765,14 +765,6 @@
   background: var(--n1);
   border-color: var(--n2);
 }
-.dd-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--n3);
-  flex-shrink: 0;
-}
 .dd-value {
   font-weight: 500;
   color: var(--n6);
