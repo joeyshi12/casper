@@ -2,8 +2,6 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import url from 'node:url';
-import { configFilePath, dataDirPath } from './paths.js';
 import { logger } from './util/logger.js';
 
 function env(name: string, fallback: string): string {
@@ -14,16 +12,17 @@ function env(name: string, fallback: string): string {
 const home = os.homedir();
 
 /**
- * Where the built web app lives, resolved against this module rather than the
- * process cwd - a global install runs from wherever the user happens to be, so a
- * cwd-relative path found nothing. The published bundle sits beside its web/
- * directory; a workspace build leaves the app in web/dist.
+ * User settings file: $XDG_CONFIG_HOME/casper/config.json, or ~/.config/casper.
+ *
+ * Config lives here rather than beside the install so it survives a package
+ * upgrade and works when Casper isn't a git clone at all. It can't hold
+ * CASPER_DATA_DIR (that says where data lives, and this file isn't in it) or
+ * CASPER_WEB_DIST (install layout, not a preference), so those stay env-only.
  */
-function defaultWebDist(): string {
-  const here = path.dirname(url.fileURLToPath(import.meta.url));
-  const bundled = path.join(here, 'web');
-  const workspace = path.resolve(here, '../../web/dist');
-  return fs.existsSync(bundled) ? bundled : workspace;
+function configFile(): string {
+  const xdg = process.env.XDG_CONFIG_HOME;
+  const base = xdg && xdg.trim() !== '' ? xdg : path.join(home, '.config');
+  return path.join(base, 'casper', 'config.json');
 }
 
 /** Recognised keys, so a typo is reported rather than silently ignored. */
@@ -67,7 +66,7 @@ export function parseConfigDoc(raw: string, onWarn: (msg: string, detail?: unkno
 }
 
 function loadConfigFile(): Record<string, unknown> {
-  const file = configFilePath();
+  const file = configFile();
   let raw: string;
   try {
     raw = fs.readFileSync(file, 'utf8');
@@ -183,14 +182,14 @@ export const config = {
   kiroSessionsDir: path.join(home, '.kiro', 'sessions', 'cli'),
   /** Where casper.db lives. Env-only: it says where data is, and the config
    *  file isn't there. */
-  casperDataDir: dataDirPath(),
+  casperDataDir: env('CASPER_DATA_DIR', path.join(home, '.casper')),
   /** Built web app to serve. Env-only: install layout, not a user preference. */
-  webDist: env('CASPER_WEB_DIST', defaultWebDist()),
+  webDist: env('CASPER_WEB_DIST', path.resolve(process.cwd(), '../web/dist')),
   /** Per-session in-memory event ring buffer size. */
   eventBufferSize: settingInt('EVENT_BUFFER_SIZE', 'eventBufferSize', 5000),
   /** Max size (bytes) for a single uploaded file. Default 100 MB. */
   maxUploadBytes: settingInt('CASPER_MAX_UPLOAD_BYTES', 'maxUploadBytes', 100 * 1024 * 1024),
   /** Absolute path of the settings file, for diagnostics. */
-  configFile: configFilePath(),
+  configFile: configFile(),
 } as const;
 

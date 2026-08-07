@@ -1,35 +1,13 @@
-import crypto from 'node:crypto';
 import fastifyCookie from '@fastify/cookie';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config.js';
 import { LoginStore } from '../session/logins.js';
-import { AttemptLimiter } from '../util/rateLimit.js';
 
 const SESSION_COOKIE = 'casper.sid';
 
 // One store for the process. Each login is a device; the cookie holds an opaque
 // random token, the store keeps only its hash.
 const logins = new LoginStore();
-
-// Ten wrong tokens per quarter hour: forgiving of a mistyped paste, useless for
-// guessing 24 random bytes. Keyed on the socket address, so behind a reverse proxy
-// (where every request appears to come from the proxy) this throttles the endpoint
-// as a whole rather than per client. That's still the protection that matters here,
-// since trusting X-Forwarded-For would let anyone claim a fresh address.
-const loginLimiter = new AttemptLimiter(10, 15 * 60 * 1000);
-
-/**
- * Compare secrets without leaking how much of the token matched.
- *
- * Hashed first because timingSafeEqual needs equal-length buffers, and comparing
- * the raw strings would reveal the token's length through the error alone.
- */
-function secretMatches(supplied: string | undefined, expected: string): boolean {
-  if (typeof supplied !== 'string') return false;
-  const a = crypto.createHash('sha256').update(supplied).digest();
-  const b = crypto.createHash('sha256').update(expected).digest();
-  return crypto.timingSafeEqual(a, b);
-}
 
 /** Extract a bearer token from the Authorization header or ?token= query. */
 function extractToken(req: {
@@ -90,20 +68,11 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
   // as an httpOnly cookie. The raw secret is never stored client-side.
   app.post('/api/login', async (req, reply) => {
     if (!authDisabled()) {
-      const limit = loginLimiter.check(req.ip);
-      if (!limit.allowed) {
-        return reply
-          .code(429)
-          .header('retry-after', String(limit.retryAfterSeconds))
-          .send({ error: `Too many attempts; try again in ${limit.retryAfterSeconds}s` });
-      }
       const body = (req.body ?? {}) as { token?: string };
       const supplied = body.token ?? extractToken(req);
-      if (!secretMatches(supplied, config.token)) {
-        loginLimiter.fail(req.ip);
+      if (supplied !== config.token) {
         return reply.code(401).send({ error: 'Invalid token' });
       }
-      loginLimiter.succeed(req.ip);
     }
     const ua = req.headers['user-agent'];
     const { token } = logins.create(typeof ua === 'string' ? ua : undefined);
