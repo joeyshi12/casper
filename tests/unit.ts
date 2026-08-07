@@ -20,6 +20,9 @@ import { config } from '../server/src/config.js';
 import { TurnState } from '../server/src/session/TurnState.js';
 import { SessionManager, Session } from '../server/src/session/SessionManager.js';
 import { EventStore } from '../server/src/session/EventStore.js';
+import { closeDb, db } from '../server/src/session/db.js';
+import { SessionStore } from '../server/src/session/sessionStore.js';
+import { LoginStore } from '../server/src/session/logins.js';
 import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
 import { describeError } from '../server/src/acp/errors.js';
 import { registerFsRoutes } from '../server/src/routes/fs.js';
@@ -1069,5 +1072,145 @@ describe('describeError (ACP error detail)', () => {
     });
     assert.ok(got.length < 2200, `got ${got.length} chars`);
     assert.match(got, /truncated/);
+  });
+});
+
+describe('SQLite stores', () => {
+  let dir: string;
+  const origDir = config.casperDataDir;
+
+  const useTempDir = () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-db-'));
+    (config as { casperDataDir: string }).casperDataDir = dir;
+    closeDb();
+  };
+
+  beforeEach(useTempDir);
+  after(() => {
+    closeDb();
+    (config as { casperDataDir: string }).casperDataDir = origDir;
+  });
+
+  it('keeps a title and a cwd for one session in a single row', () => {
+    const store = new SessionStore();
+    store.setTitle('s1', 'My session');
+    store.setCwd('s1', '/tmp/work');
+    assert.equal(store.getTitle('s1'), 'My session');
+    assert.equal(store.getCwd('s1'), '/tmp/work');
+    const rows = db().prepare('SELECT count(*) c FROM sessions').get() as { c: number };
+    assert.equal(rows.c, 1, 'one row, not one per field');
+  });
+
+  it('returns undefined for an override that was never set', () => {
+    const store = new SessionStore();
+    assert.equal(store.getTitle('nope'), undefined);
+    store.setTitle('s1', 'only a title');
+    assert.equal(store.getCwd('s1'), undefined, 'absent column reads as undefined, not null');
+  });
+
+  it('overwrites rather than duplicating on repeated sets', () => {
+    const store = new SessionStore();
+    store.setTitle('s1', 'first');
+    store.setTitle('s1', 'second');
+    assert.equal(store.getTitle('s1'), 'second');
+    const rows = db().prepare('SELECT count(*) c FROM sessions').get() as { c: number };
+    assert.equal(rows.c, 1);
+  });
+
+  it('remove clears both overrides at once', () => {
+    const store = new SessionStore();
+    store.setTitle('s1', 't');
+    store.setCwd('s1', '/tmp');
+    store.remove('s1');
+    assert.equal(store.getTitle('s1'), undefined);
+    assert.equal(store.getCwd('s1'), undefined);
+  });
+
+  it('a created login verifies by its raw token only', () => {
+    const logins = new LoginStore();
+    const { token, record } = logins.create('probe-agent');
+    const found = logins.verify(token);
+    assert.ok(found, 'the raw token verifies');
+    assert.equal(found.id, record.id);
+    assert.equal(logins.verify('some-other-token'), null);
+    assert.equal(logins.verify(undefined), null);
+  });
+
+  it('stores only the hash, never the token', () => {
+    const logins = new LoginStore();
+    const { token } = logins.create();
+    const rows = db().prepare('SELECT * FROM logins').all();
+    assert.ok(!JSON.stringify(rows).includes(token), 'raw token is absent from the table');
+  });
+
+  it('lists devices newest-first and marks the caller', () => {
+    const logins = new LoginStore();
+    logins.create('a');
+    const mine = logins.create('b');
+    const list = logins.list(mine.token);
+    assert.equal(list.length, 2);
+    assert.equal(list.filter((d) => d.current).length, 1);
+    assert.equal(list.find((d) => d.current)?.id, mine.record.id);
+  });
+
+  it('revokes one device by id and leaves the rest', () => {
+    const logins = new LoginStore();
+    const a = logins.create('a');
+    const b = logins.create('b');
+    assert.equal(logins.revokeId(a.record.id), true);
+    assert.equal(logins.revokeId('no-such-id'), false);
+    assert.equal(logins.verify(a.token), null);
+    assert.ok(logins.verify(b.token), 'the other device still works');
+  });
+
+  it('revokeAll logs everyone out', () => {
+    const logins = new LoginStore();
+    const a = logins.create();
+    logins.create();
+    logins.revokeAll();
+    assert.equal(logins.verify(a.token), null);
+    assert.equal(logins.list().length, 0);
+  });
+
+  it('migrates the three legacy JSON files, merging titles and cwds by session', () => {
+    closeDb();
+    fs.writeFileSync(path.join(dir, 'titles.json'), JSON.stringify({ s1: 'One', s2: 'Two' }));
+    fs.writeFileSync(path.join(dir, 'cwds.json'), JSON.stringify({ s1: '/tmp/one' }));
+    fs.writeFileSync(
+      path.join(dir, 'logins.json'),
+      JSON.stringify([
+        {
+          id: 'dev1',
+          hash: 'a'.repeat(64),
+          createdAt: new Date().toISOString(),
+          lastSeenAt: new Date().toISOString(),
+          userAgent: 'ua',
+        },
+      ]),
+    );
+
+    const store = new SessionStore();
+    assert.equal(store.getTitle('s1'), 'One');
+    assert.equal(store.getCwd('s1'), '/tmp/one', 'title and cwd landed on the same row');
+    assert.equal(store.getTitle('s2'), 'Two');
+    assert.equal(store.getCwd('s2'), undefined);
+
+    const sessions = db().prepare('SELECT count(*) c FROM sessions').get() as { c: number };
+    assert.equal(sessions.c, 2, 'two sessions, not three rows');
+    const logins = db().prepare('SELECT count(*) c FROM logins').get() as { c: number };
+    assert.equal(logins.c, 1);
+
+    // Originals are kept as .bak rather than deleted.
+    for (const f of ['titles.json', 'cwds.json', 'logins.json']) {
+      assert.equal(fs.existsSync(path.join(dir, f)), false, `${f} was renamed`);
+      assert.equal(fs.existsSync(path.join(dir, `${f}.bak`)), true, `${f}.bak kept`);
+    }
+  });
+
+  it('is a no-op when there is nothing to migrate', () => {
+    closeDb();
+    const store = new SessionStore();
+    assert.equal(store.getTitle('anything'), undefined);
+    assert.equal(fs.existsSync(path.join(dir, 'casper.db')), true);
   });
 });

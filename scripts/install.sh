@@ -24,11 +24,11 @@ die()  { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 # --- Preflight -------------------------------------------------------------
 command -v git  >/dev/null 2>&1 || die "git is required but not installed."
-command -v node >/dev/null 2>&1 || die "Node.js is required but not installed (need 18.20+)."
+command -v node >/dev/null 2>&1 || die "Node.js is required but not installed (need 24+)."
 command -v npm  >/dev/null 2>&1 || die "npm is required but not installed."
 
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-[ "$NODE_MAJOR" -ge 18 ] || die "Node 18.20+ required; found $(node -v)."
+[ "$NODE_MAJOR" -ge 24 ] || die "Node 24+ required (for the built-in node:sqlite); found $(node -v)."
 
 NODE_BIN="$(command -v node)"
 

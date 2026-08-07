@@ -28,7 +28,7 @@ On reconnect the client replays exactly what it missed.
 
 - [`kiro-cli`](https://kiro.dev) installed and authenticated (`kiro-cli login`) -
   Casper is a client for it, so nothing works without it.
-- Node.js 18.20+.
+- Node.js 24+ (Casper stores its state in SQLite via the built-in `node:sqlite`).
 - `git` and `npm`, if you use the one-line installer (it clones and builds from source).
 - systemd is **optional** - it's only used to auto-start Casper as a background
   service that survives reboots. Without it (or under a different init system),
@@ -36,7 +36,7 @@ On reconnect the client replays exactly what it missed.
 
 ## Develop
 
-Requires Node 18.20+ and an authenticated `kiro-cli` on `PATH`.
+Requires Node 24+ and an authenticated `kiro-cli` on `PATH`.
 
 ```bash
 npm install

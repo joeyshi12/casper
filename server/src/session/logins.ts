@@ -1,8 +1,6 @@
-import { createHash, randomBytes } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { config } from '../config.js';
-import type { Logger } from '../util/logger.js';
+import { db } from './db.js';
 
 /** A logged-in device. The cookie holds the raw token; we store only its hash. */
 export interface LoginRecord {
@@ -26,69 +24,48 @@ export interface DeviceInfo {
   current: boolean;
 }
 
-// Only persist a lastSeen bump if it advanced by at least this much, so an
-// active device doesn't rewrite the file on every request.
+// Only write a lastSeen bump if it advanced by at least this much, so an active
+// device doesn't touch the database on every request.
 const LAST_SEEN_WRITE_INTERVAL_MS = 60_000;
 
 function sha256(s: string): string {
   return createHash('sha256').update(s).digest('hex');
 }
 
+/** A row from `logins`, read defensively - the driver hands back loose values. */
+type Row = Record<string, unknown>;
+
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+const toRecord = (r: Row): LoginRecord => ({
+  id: str(r.id),
+  hash: str(r.hash),
+  createdAt: str(r.created_at),
+  lastSeenAt: str(r.last_seen_at),
+  userAgent: typeof r.user_agent === 'string' ? r.user_agent : undefined,
+});
+
 /**
- * Persistent device-login store (~/.casper/logins.json). Each login gets an
- * opaque random token (the cookie value); the server keeps only its hash keyed
- * by hash, so a leaked file can't be used to authenticate. Enables per-device
- * revocation, a device list, and log-out-everywhere - and survives restarts,
+ * Device logins, in the `logins` table.
+ *
+ * Each login gets an opaque random token (the cookie value) and only its hash is
+ * stored, so the database can't be used to authenticate. That enables per-device
+ * revocation, a device list, and log-out-everywhere, and it survives restarts -
  * which a random per-process signing secret did not.
  */
 export class LoginStore {
-  private byHash = new Map<string, LoginRecord>();
-  private readonly file: string;
-  private readonly log: Logger;
-
-  constructor(log: Logger) {
-    this.log = log;
-    this.file = path.join(config.casperDataDir, 'logins.json');
-    this.load();
-  }
-
-  private load(): void {
-    try {
-      const arr = JSON.parse(fs.readFileSync(this.file, 'utf8')) as LoginRecord[];
-      for (const r of arr) this.byHash.set(r.hash, r);
-    } catch {
-      this.byHash.clear();
-    }
+  constructor() {
     this.pruneExpired();
-  }
-
-  private persist(): void {
-    try {
-      fs.mkdirSync(config.casperDataDir, { recursive: true });
-      fs.writeFileSync(this.file, JSON.stringify([...this.byHash.values()], null, 2));
-    } catch (err) {
-      this.log.warn({ err }, 'logins: could not persist');
-    }
   }
 
   private ttlMs(): number {
     return config.sessionTtlSeconds * 1000;
   }
 
-  private isExpired(r: LoginRecord, now: number): boolean {
-    return now - Date.parse(r.lastSeenAt) > this.ttlMs();
-  }
-
-  // Drop expired records. Returns true if anything was removed.
-  private pruneExpired(now = Date.now()): boolean {
-    let changed = false;
-    for (const [hash, r] of this.byHash) {
-      if (this.isExpired(r, now)) {
-        this.byHash.delete(hash);
-        changed = true;
-      }
-    }
-    return changed;
+  /** Drop logins whose last activity is older than the TTL. */
+  private pruneExpired(now = Date.now()): void {
+    const cutoff = new Date(now - this.ttlMs()).toISOString();
+    db().prepare('DELETE FROM logins WHERE last_seen_at < ?').run(cutoff);
   }
 
   /** Create a login. Returns the raw token to set as the cookie value. */
@@ -102,68 +79,73 @@ export class LoginStore {
       lastSeenAt: nowIso,
       userAgent,
     };
-    this.byHash.set(record.hash, record);
-    this.persist();
+    db()
+      .prepare(
+        `INSERT INTO logins (id, hash, created_at, last_seen_at, user_agent)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(record.id, record.hash, nowIso, nowIso, userAgent ?? null);
     return { token, record };
   }
 
   /**
    * Verify a raw token. Returns the record (sliding its expiry forward) or null
-   * if unknown/expired. Persists the lastSeen bump at most once a minute.
+   * if unknown/expired. Writes the lastSeen bump at most once a minute.
    */
   verify(token: string | undefined): LoginRecord | null {
     if (!token) return null;
     const now = Date.now();
-    const record = this.byHash.get(sha256(token));
-    if (!record) return null;
-    if (this.isExpired(record, now)) {
-      this.byHash.delete(record.hash);
-      this.persist();
+    const row = db().prepare('SELECT * FROM logins WHERE hash = ?').get(sha256(token));
+    if (!row) return null;
+    const record = toRecord(row);
+
+    if (now - Date.parse(record.lastSeenAt) > this.ttlMs()) {
+      db().prepare('DELETE FROM logins WHERE id = ?').run(record.id);
       return null;
     }
     if (now - Date.parse(record.lastSeenAt) >= LAST_SEEN_WRITE_INTERVAL_MS) {
-      record.lastSeenAt = new Date().toISOString();
-      this.persist();
+      record.lastSeenAt = new Date(now).toISOString();
+      db()
+        .prepare('UPDATE logins SET last_seen_at = ? WHERE id = ?')
+        .run(record.lastSeenAt, record.id);
     }
     return record;
   }
 
   /** List all active devices, marking the one owning `currentToken`. */
   list(currentToken?: string): DeviceInfo[] {
-    if (this.pruneExpired()) this.persist();
+    this.pruneExpired();
     const currentHash = currentToken ? sha256(currentToken) : undefined;
-    return [...this.byHash.values()]
-      .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt))
-      .map((r) => ({
-        id: r.id,
-        createdAt: r.createdAt,
-        lastSeenAt: r.lastSeenAt,
-        userAgent: r.userAgent,
-        current: r.hash === currentHash,
-      }));
+    const rows = db().prepare('SELECT * FROM logins ORDER BY last_seen_at DESC').all();
+    return rows.map(toRecord).map((r) => ({
+      id: r.id,
+      createdAt: r.createdAt,
+      lastSeenAt: r.lastSeenAt,
+      userAgent: r.userAgent,
+      current: currentHash !== undefined && sameHash(r.hash, currentHash),
+    }));
   }
 
   /** Revoke the device holding this token (used on logout). */
   revokeToken(token: string | undefined): void {
     if (!token) return;
-    if (this.byHash.delete(sha256(token))) this.persist();
+    db().prepare('DELETE FROM logins WHERE hash = ?').run(sha256(token));
   }
 
-  /** Revoke a device by its public id. */
+  /** Revoke a device by its public id. Returns false if there was no such device. */
   revokeId(id: string): boolean {
-    for (const [hash, r] of this.byHash) {
-      if (r.id === id) {
-        this.byHash.delete(hash);
-        this.persist();
-        return true;
-      }
-    }
-    return false;
+    const res = db().prepare('DELETE FROM logins WHERE id = ?').run(id);
+    return res.changes > 0;
   }
 
   /** Log out every device. */
   revokeAll(): void {
-    this.byHash.clear();
-    this.persist();
+    db().prepare('DELETE FROM logins').run();
   }
+}
+
+/** Compare two hex hashes without leaking position through timing. */
+function sameHash(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
 }

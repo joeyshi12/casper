@@ -33,8 +33,7 @@ import {
   listPersistedSessions,
   readPersistedSession,
 } from './kiroFiles.js';
-import { TitleStore } from './titles.js';
-import { CwdStore } from './cwds.js';
+import { SessionStore } from './sessionStore.js';
 
 // Resolve a working directory for a new session, normalized to an absolute path
 // (relative input is resolved against DEFAULT_CWD). If the directory doesn't
@@ -151,18 +150,15 @@ const TRANSCRIPT_PAGE_SIZE = 80;
 export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly log: Logger;
-  private readonly titles: TitleStore;
-  private readonly cwds: CwdStore;
+  private readonly store = new SessionStore();
 
   constructor(log: Logger) {
     this.log = log;
-    this.titles = new TitleStore(log);
-    this.cwds = new CwdStore(log);
   }
 
   /** Set a user title override for a session. */
   renameSession(sessionId: string, title: string): void {
-    this.titles.set(sessionId, title);
+    this.store.setTitle(sessionId, title);
     const s = this.sessions.get(sessionId);
     if (s) s.title = title.trim() || s.title;
   }
@@ -186,7 +182,7 @@ export class SessionManager {
     // Confirm the session exists before recording an override for it.
     const s = await this.ensureOpen(sessionId);
 
-    this.cwds.set(sessionId, resolved);
+    this.store.setCwd(sessionId, resolved);
     if (s.cwd !== resolved) {
       s.cwd = resolved;
       // The child was started in the old directory; drop it so the next prompt
@@ -236,7 +232,7 @@ export class SessionManager {
     // A session's cwd is persisted by kiro at creation. If the user re-pointed
     // the session (original folder moved or deleted), the Casper-side override
     // wins.
-    const effectiveCwd = this.cwds.get(sessionId) ?? persisted.cwd;
+    const effectiveCwd = this.store.getCwd(sessionId) ?? persisted.cwd;
 
     // Confine the persisted cwd to fileRoot. A session created before this
     // boundary existed - or one created directly by kiro-cli - could carry an
@@ -396,7 +392,7 @@ export class SessionManager {
     // first turn). Stored as a Casper title override; the user can rename.
     const folder = path.basename(s.cwd);
     if (folder) {
-      this.titles.set(s.sessionId, folder);
+      this.store.setTitle(s.sessionId, folder);
       s.title = folder;
     }
 
@@ -475,8 +471,8 @@ export class SessionManager {
     for (const p of persisted) {
       byId.set(p.sessionId, {
         ...p,
-        title: this.titles.get(p.sessionId) ?? p.title,
-        cwd: this.cwds.get(p.sessionId) ?? p.cwd,
+        title: this.store.getTitle(p.sessionId) ?? p.title,
+        cwd: this.store.getCwd(p.sessionId) ?? p.cwd,
       });
     }
     for (const s of this.sessions.values()) {
@@ -484,7 +480,7 @@ export class SessionManager {
       const base = byId.get(s.sessionId);
       byId.set(s.sessionId, {
         sessionId: s.sessionId,
-        title: this.titles.get(s.sessionId) ?? base?.title ?? s.title,
+        title: this.store.getTitle(s.sessionId) ?? base?.title ?? s.title,
         cwd: s.cwd,
         createdAt: base?.createdAt ?? s.createdAt,
         updatedAt: base?.updatedAt ?? s.updatedAt,
@@ -510,8 +506,8 @@ export class SessionManager {
     return {
       summary: {
         ...persisted,
-        title: this.titles.get(sessionId) ?? persisted.title,
-        cwd: this.cwds.get(sessionId) ?? persisted.cwd,
+        title: this.store.getTitle(sessionId) ?? persisted.title,
+        cwd: this.store.getCwd(sessionId) ?? persisted.cwd,
       },
       modes: [],
       currentModeId: persisted.agentId,
@@ -553,7 +549,7 @@ export class SessionManager {
     return {
       summary: {
         sessionId: s.sessionId,
-        title: this.titles.get(s.sessionId) ?? (firstText?.slice(0, 60) || s.title),
+        title: this.store.getTitle(s.sessionId) ?? (firstText?.slice(0, 60) || s.title),
         cwd: s.cwd,
         createdAt: s.createdAt,
         updatedAt: s.updatedAt,
@@ -636,8 +632,7 @@ export class SessionManager {
       s.running = false;
     }
     this.evict(sessionId);
-    this.titles.remove(sessionId);
-    this.cwds.remove(sessionId);
+    this.store.remove(sessionId);
     await deletePersistedSession(sessionId);
     // kiro-cli spawns a wrapped kiro-cli-chat that flushes the session file on
     // its own shutdown, which can land just after our delete. Sweep once more

@@ -2,13 +2,12 @@ import fastifyCookie from '@fastify/cookie';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config.js';
 import { LoginStore } from '../session/logins.js';
-import { logger } from '../util/logger.js';
 
 const SESSION_COOKIE = 'casper.sid';
 
 // One store for the process. Each login is a device; the cookie holds an opaque
 // random token, the store keeps only its hash.
-const logins = new LoginStore(logger);
+const logins = new LoginStore();
 
 /** Extract a bearer token from the Authorization header or ?token= query. */
 function extractToken(req: {
