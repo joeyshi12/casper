@@ -2592,6 +2592,21 @@
   border: 1px solid var(--n2);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
 }
+/* On a phone the ring sits inboard of the selectors and the send button, so a
+   panel anchored to it runs off the left edge. Anchor to the controls row
+   instead - its right edge is the composer's - and let the panel shrink on very
+   narrow screens. */
+@media (max-width: 768px) {
+  .composer-actions {
+    position: relative;
+  }
+  .ctx {
+    position: static;
+  }
+  .ctx-pop {
+    width: min(250px, calc(100vw - 2 * var(--gutter)));
+  }
+}
 .ctx-pop-head {
   display: flex;
   align-items: baseline;
