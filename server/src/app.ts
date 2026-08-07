@@ -61,9 +61,15 @@ export async function buildApp(): Promise<CasperApp> {
 
   // Serve the built web app in production (single origin, no CORS needed).
   if (fs.existsSync(config.webDist)) {
+    // Note the absence of `wildcard: false`. That option registers one route per
+    // file found at registration time, so every asset produced by a later rebuild
+    // 404s until the server restarts - while index.html keeps being served fresh
+    // from disk, because its route already exists. The result is a current shell
+    // requesting scripts the router refuses to serve, which reads like a caching
+    // bug and isn't one. The wildcard route resolves paths per request instead, and
+    // still falls through to the handler below for anything that isn't a file.
     await app.register(fastifyStatic, {
       root: config.webDist,
-      wildcard: false,
     });
     // SPA fallback: serve index.html for client-side routes only. API/WS and
     // anything that looks like a static asset (under /assets/ or with a file

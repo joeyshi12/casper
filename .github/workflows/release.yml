@@ -11,12 +11,14 @@ on:
   # Allows re-running for the current version if a push was missed.
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.v.outputs.changed }}
+      current: ${{ steps.v.outputs.current }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -71,3 +73,60 @@ jobs:
             --title "$tag" \
             --target "$GITHUB_SHA" \
             --generate-notes
+
+  # Publishing is separate from the GitHub release so a failed publish leaves the
+  # tag intact and can be retried with workflow_dispatch.
+  #
+  # Authenticates with the NPM_TOKEN secret, which means CI can make the very first
+  # publish too - npm's trusted publishing can only be configured for a package that
+  # already exists, so it can't bootstrap one. The token needs to publish without an
+  # OTP prompt: use a granular access token with write access to this package, or a
+  # classic Automation token. id-token: write is still required, because that's what
+  # signs the provenance attestation.
+  publish:
+    needs: release
+    if: needs.release.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC credential + provenance signature
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          # Writes the .npmrc that reads NODE_AUTH_TOKEN. Without registry-url there
+          # is no auth line at all and the publish fails with ENEEDAUTH.
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Check the token is present
+        # Fail with something readable instead of an ENEEDAUTH after a full build.
+        run: |
+          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "NPM_TOKEN is not set. Add it under Settings > Secrets and variables > Actions." >&2
+            exit 1
+          fi
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          version="${{ needs.release.outputs.current }}"
+          name="$(node -p "require('./package.json').name")"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version is already published; nothing to do."
+            exit 0
+          fi
+          # prepack builds the bundle and the web app, so this ships a fresh dist.
+          # --provenance needs id-token: write above and a repository field that
+          # matches this repo, which package.json has.
+          npm publish --provenance
