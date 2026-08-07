@@ -115,24 +115,37 @@ do_reset_token() {
   mv "$tmp" "$env_file"
   echo "casper: wrote a new CASPER_TOKEN to $env_file"
 
-  # Device logins live in CASPER_DATA_DIR/logins.json (default ~/.casper).
-  local data_dir
+  # Device logins live in the sqlite database under CASPER_DATA_DIR (~/.casper).
+  local data_dir node_bin
   data_dir="$(grep '^CASPER_DATA_DIR=' "$env_file" | tail -n1 | cut -d= -f2- || true)"
   data_dir="${data_dir:-$HOME/.casper}"
-  local logins="$data_dir/logins.json"
+  # .env isn't sourced on this path, so read CASPER_NODE from it directly.
+  node_bin="${CASPER_NODE:-$(grep '^CASPER_NODE=' "$env_file" | tail -n1 | cut -d= -f2- || true)}"
+  node_bin="${node_bin:-node}"
 
+  if [ -f "$data_dir/casper.db" ]; then
+    if "$node_bin" -e '
+        const { DatabaseSync } = require("node:sqlite");
+        const db = new DatabaseSync(process.argv[1]);
+        db.exec("DELETE FROM logins");
+        db.close();
+      ' "$data_dir/casper.db"; then
+      # LoginStore reads the table per request, so this takes effect at once - no
+      # need to stop the server first.
+      echo "casper: revoked all device sessions."
+    else
+      echo "casper: could not clear device logins in $data_dir/casper.db" >&2
+      echo "        The new token is set, but existing devices may still be signed in." >&2
+    fi
+  fi
+
+  # The token itself is only read at startup, so a running server needs a restart
+  # before the new one is accepted.
   if service_active; then
-    # Stop first so the running process can't rewrite logins.json from memory,
-    # then clear sessions and start fresh with the new token.
-    systemctl --user stop casper
-    rm -f "$logins"
-    systemctl --user start casper
-    echo "casper: rotated the token, revoked all device sessions, and restarted."
+    systemctl --user restart casper
+    echo "casper: rotated the token and restarted."
   else
-    rm -f "$logins"
-    echo "casper: rotated the token and removed $logins."
-    echo "        Restart Casper now to complete revocation (a running instance"
-    echo "        may rewrite that file until it is restarted)."
+    echo "casper: rotated the token. Restart Casper to start accepting it."
   fi
 
   echo
@@ -181,7 +194,7 @@ fi
 # fall back to whatever `node` is on PATH for interactive use.
 node_bin="${CASPER_NODE:-node}"
 if ! command -v "$node_bin" >/dev/null 2>&1; then
-  printf 'casper: node not found (%s). Install Node 18.20+ or set CASPER_NODE.\n' "$node_bin" >&2
+  printf 'casper: node not found (%s). Install Node 24+ or set CASPER_NODE.\n' "$node_bin" >&2
   exit 1
 fi
 

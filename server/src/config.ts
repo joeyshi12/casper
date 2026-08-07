@@ -9,7 +9,7 @@ function env(name: string, fallback: string): string {
   return v === undefined || v === '' ? fallback : v;
 }
 
-const home0 = os.homedir();
+const home = os.homedir();
 
 /**
  * User settings file: $XDG_CONFIG_HOME/casper/config.json, or ~/.config/casper.
@@ -21,7 +21,7 @@ const home0 = os.homedir();
  */
 function configFile(): string {
   const xdg = process.env.XDG_CONFIG_HOME;
-  const base = xdg && xdg.trim() !== '' ? xdg : path.join(home0, '.config');
+  const base = xdg && xdg.trim() !== '' ? xdg : path.join(home, '.config');
   return path.join(base, 'casper', 'config.json');
 }
 
@@ -157,8 +157,6 @@ function resolveKiroBin(explicit: string, home: string): string {
   }
   return explicit;
 }
-
-const home = os.homedir();
 
 export const config = {
   host: setting('HOST', 'host', '0.0.0.0'),

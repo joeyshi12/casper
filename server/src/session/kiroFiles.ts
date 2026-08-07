@@ -182,7 +182,7 @@ export async function listPersistedSessions(log: Logger): Promise<SessionSummary
 }
 
 // Delete a session's on-disk files: kiro's <id>.{json,jsonl,history}, kiro's
-// per-session <id>/ directory (tasks, etc.), and Casper's event mirror.
+// per-session <id>/ directory (tasks, etc.).
 // Missing paths are ignored.
 export async function deletePersistedSession(sessionId: string): Promise<void> {
   if (!isValidSessionId(sessionId)) return;

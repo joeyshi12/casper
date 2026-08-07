@@ -1,15 +1,11 @@
 import { db } from './db.js';
 
 /**
- * Per-session overrides Casper layers over kiro's own session files: a title the
- * user renamed to, and a working directory they re-pointed at.
+ * Per-session overrides Casper layers over kiro's own session files: a renamed
+ * title and a re-pointed working directory, one row each.
  *
- * Both are keyed by session id and were previously two separate JSON files, which
- * meant every read site had to consult two stores and every delete had to
- * remember both. One row per session instead, so a new override is a column.
- *
- * Overrides only, so an absent row (or a NULL column) means "whatever kiro says",
- * which is why the getters return undefined rather than a default.
+ * These are overrides only, so an absent row or NULL column means "whatever kiro
+ * says" - hence undefined rather than a default from the getters.
  */
 export class SessionStore {
   getTitle(sessionId: string): string | undefined {

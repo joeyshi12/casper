@@ -1,14 +1,10 @@
 /**
- * Props for an inline transcript image that should only load when scrolled near.
+ * Props for a transcript image that should only load when scrolled near.
  *
- * loading="lazy" alone isn't enough: the browser only defers images it believes
- * are offscreen, and an <img> with no width/height is zero pixels tall until its
- * bytes arrive. A transcript full of unsized images therefore stacks inside the
- * viewport and every one of them is fetched at once, which also starves the
- * session's own requests for connection slots. The stylesheet gives an image
- * without [data-loaded] a placeholder box so the ones further down the
- * transcript are genuinely out of view; this marks each image once its bytes
- * land so the box gives way to the real dimensions.
+ * loading="lazy" alone isn't enough: an <img> with no dimensions is zero pixels
+ * tall until its bytes arrive, so every image stacks inside the viewport and all
+ * of them fetch at once. The stylesheet holds a placeholder box while an image
+ * lacks [data-loaded]; this sets it once the bytes land.
  */
 export const lazyImageProps = {
   loading: 'lazy' as const,

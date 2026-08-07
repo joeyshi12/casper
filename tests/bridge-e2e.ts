@@ -218,7 +218,7 @@ async function main() {
 
     console.log('\n🎉 Bridge E2E passed.');
   } finally {
-    // Clean up the throwaway session (memory + kiro files + event mirror).
+    // Clean up the throwaway session (memory + kiro files).
     if (createdSid) await api('DELETE', `/api/sessions/${createdSid}`).catch(() => {});
     manager.disposeAll();
     await app.close();

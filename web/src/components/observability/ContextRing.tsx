@@ -52,8 +52,10 @@ export function ContextRing({ onCompact }: { onCompact: () => void }) {
   const color = colorFor(clamped);
   const dash = (clamped / 100) * CIRCUMFERENCE;
 
-  const window = models.find((m) => m.modelId === currentModelId)?.contextWindowTokens;
-  const used = window ? Math.round((clamped / 100) * window) : undefined;
+  // Not `window`: that shadows the DOM global in a component that may later
+  // need it.
+  const windowTokens = models.find((m) => m.modelId === currentModelId)?.contextWindowTokens;
+  const used = windowTokens ? Math.round((clamped / 100) * windowTokens) : undefined;
 
   return (
     <div className="ctx" ref={rootRef}>
@@ -107,7 +109,7 @@ export function ContextRing({ onCompact }: { onCompact: () => void }) {
             />
           </div>
 
-          {window ? (
+          {windowTokens ? (
             <dl className="ctx-pop-rows">
               <div className="ctx-pop-row">
                 <dt>Used</dt>
@@ -115,7 +117,7 @@ export function ContextRing({ onCompact }: { onCompact: () => void }) {
               </div>
               <div className="ctx-pop-row">
                 <dt>Window</dt>
-                <dd>{fmt.format(window)} tokens</dd>
+                <dd>{fmt.format(windowTokens)} tokens</dd>
               </div>
             </dl>
           ) : (
