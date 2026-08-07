@@ -105,7 +105,9 @@ export class KiroProcess extends EventEmitter {
         fs: { readTextFile: false, writeTextFile: false },
         terminal: false,
       },
-      clientInfo: { name: 'casper', version: '0.1.0' },
+      // Informational only - kiro logs it and nothing reads it back, so it isn't
+      // worth wiring to package.json.
+      clientInfo: { name: 'casper', version: '0.5.0' },
     });
     return result;
   }
