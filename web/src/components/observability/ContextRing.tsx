@@ -124,9 +124,6 @@ export function ContextRing({ onCompact }: { onCompact: () => void }) {
             </p>
           )}
 
-          <p className="ctx-pop-note">
-            Compacting replaces earlier turns with a summary, freeing most of this.
-          </p>
           <button
             type="button"
             className="ctx-pop-compact"
