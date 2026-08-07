@@ -9,7 +9,8 @@ interface DropdownOption {
 }
 
 interface Props {
-  label: string;
+  /** Visible caps label. Omit for a bare value + chevron, as in the composer. */
+  label?: string;
   value?: string;
   options: DropdownOption[];
   onChange: (value: string) => void;
@@ -83,8 +84,11 @@ export function Dropdown({ label, value, options, onChange }: Props) {
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         onKeyDown={onKeyDown}
+        // The label is the only text naming this control; without it the value
+        // alone ("Sonnet 5") doesn't say what it selects.
+        aria-label={label}
       >
-        <span className="dd-label">{label}</span>
+        {label && <span className="dd-label">{label}</span>}
         <span className="dd-value">{selected?.label ?? value ?? 'Select…'}</span>
         <ChevronIcon size={13} className="dd-chevron" />
       </button>

@@ -5,6 +5,8 @@ import { useStore } from '../../state/store.js';
 import { api } from '../../api/rest.js';
 import type { ConnStatus } from '../../api/SessionSocket.js';
 import { PlusIcon, PaperclipIcon, CompressIcon } from '../common/icons.js';
+import { AgentPicker, ModelPicker } from '../controls/Pickers.js';
+import { ContextRing } from '../observability/ContextRing.js';
 
 /** Image MIME types that can be inlined as ACP image content blocks. */
 const IMAGE_TYPES = new Set([
@@ -31,12 +33,22 @@ interface Props {
   onCancel: () => void;
   /** Trigger a /compact of the conversation to reduce context size. */
   onCompact: () => void;
+  onChangeModel: (modelId: string) => void;
+  onChangeAgent: (modeId: string) => void;
   /** Live socket status - drives the placeholder and whether prompts can send. */
   connStatus: ConnStatus;
 }
 
 /** ChatGPT-style input: + attach inside, paste, auto-grow, upload-on-send. */
-export function Composer({ sessionId, onSend, onCancel, onCompact, connStatus }: Props) {
+export function Composer({
+  sessionId,
+  onSend,
+  onCancel,
+  onCompact,
+  onChangeModel,
+  onChangeAgent,
+  connStatus,
+}: Props) {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -44,6 +56,8 @@ export function Composer({ sessionId, onSend, onCancel, onCompact, connStatus }:
   const [menuOpen, setMenuOpen] = useState(false);
   const turnStatus = useStore((s) => s.observability.turnStatus);
   const compacting = useStore((s) => s.observability.compacting);
+  const currentModeId = useStore((s) => s.currentModeId);
+  const currentModelId = useStore((s) => s.currentModelId);
   const running = turnStatus === 'running';
   const cancelling = turnStatus === 'cancelling';
   const live = connStatus === 'connected';
@@ -287,47 +301,7 @@ export function Composer({ sessionId, onSend, onCancel, onCompact, connStatus }:
           ))}
         </div>
       )}
-      <div className="composer-input-box">
-        <div className="composer-menu-wrap" ref={menuRef}>
-          <button
-            className="composer-plus"
-            onClick={() => setMenuOpen((o) => !o)}
-            disabled={!live || uploading}
-            title="Add"
-            aria-label="Add"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-          >
-            <PlusIcon size={18} />
-          </button>
-          {menuOpen && (
-            <div className="composer-menu" role="menu">
-              <button
-                className="composer-menu-item"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false);
-                  fileInputRef.current?.click();
-                }}
-              >
-                <PaperclipIcon size={16} className="composer-menu-icon" />
-                <span className="composer-menu-label">Add photos &amp; files</span>
-              </button>
-              <button
-                className="composer-menu-item"
-                role="menuitem"
-                disabled={!sessionId || running || cancelling || compacting}
-                onClick={() => {
-                  setMenuOpen(false);
-                  onCompact();
-                }}
-              >
-                <CompressIcon size={16} className="composer-menu-icon" />
-                <span className="composer-menu-label">Compact conversation</span>
-              </button>
-            </div>
-          )}
-        </div>
+      <div className="composer-box">
         <textarea
           ref={textareaRef}
           className="composer-input"
@@ -338,19 +312,66 @@ export function Composer({ sessionId, onSend, onCancel, onCompact, connStatus }:
           placeholder={placeholder}
           rows={1}
         />
-        {running ? (
-          <button className="composer-btn composer-stop" onClick={onCancel}>
-            Stop
-          </button>
-        ) : cancelling ? (
-          <button className="composer-btn composer-stop" disabled>
-            Stopping…
-          </button>
-        ) : (
-          <button className="composer-btn composer-send" onClick={submit} disabled={!canSend}>
-            {uploading ? '…' : 'Send'}
-          </button>
-        )}
+        <div className="composer-actions">
+          <div className="composer-menu-wrap" ref={menuRef}>
+            <button
+              className="composer-plus"
+              onClick={() => setMenuOpen((o) => !o)}
+              disabled={!live || uploading}
+              title="Add"
+              aria-label="Add"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+            >
+              <PlusIcon size={18} />
+            </button>
+            {menuOpen && (
+              <div className="composer-menu" role="menu">
+                <button
+                  className="composer-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    fileInputRef.current?.click();
+                  }}
+                >
+                  <PaperclipIcon size={16} className="composer-menu-icon" />
+                  <span className="composer-menu-label">Add photos &amp; files</span>
+                </button>
+                <button
+                  className="composer-menu-item"
+                  role="menuitem"
+                  disabled={!sessionId || running || cancelling || compacting}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onCompact();
+                  }}
+                >
+                  <CompressIcon size={16} className="composer-menu-icon" />
+                  <span className="composer-menu-label">Compact conversation</span>
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="composer-actions-right">
+            <ContextRing />
+            <AgentPicker value={currentModeId} onChange={onChangeAgent} />
+            <ModelPicker value={currentModelId} onChange={onChangeModel} />
+            {running ? (
+              <button className="composer-btn composer-stop" onClick={onCancel}>
+                Stop
+              </button>
+            ) : cancelling ? (
+              <button className="composer-btn composer-stop" disabled>
+                Stopping…
+              </button>
+            ) : (
+              <button className="composer-btn composer-send" onClick={submit} disabled={!canSend}>
+                {uploading ? '…' : 'Send'}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
       <input
         ref={fileInputRef}

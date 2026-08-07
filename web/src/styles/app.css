@@ -44,13 +44,7 @@
   .layout:not(.has-active) .chatpane {
     display: none;
   }
-  /* Prevent selectors and stats from overlapping on small screens. */
-  .composer-bar {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
   }
-}
 /* Desktop: the back arrow is redundant next to a permanent sidebar. */
 @media (min-width: 769px) {
   .backbtn {
@@ -738,6 +732,18 @@
   position: relative;
   min-width: 0;
 }
+/* Inside the composer the selectors are secondary to the message, so they stay
+   quiet until pointed at. */
+.composer-actions-right .dd-trigger {
+  padding: 4px 6px;
+  font-size: 13px;
+  color: var(--n4);
+  gap: 4px;
+}
+.composer-actions-right .dd-trigger:hover,
+.composer-actions-right .dd-trigger.is-open {
+  color: var(--n6);
+}
 .dd-trigger {
   display: inline-flex;
   align-items: center;
@@ -801,7 +807,8 @@
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
   animation: dd-in 0.12s ease;
 }
-.composer-bar .dd-panel {
+/* The composer sits at the bottom of the viewport, so its menus open upward. */
+.composer-actions-right .dd-panel {
   top: auto;
   bottom: calc(100% + 6px);
 }
@@ -1812,57 +1819,7 @@
   height: 240px;
 }
 
-/* Observability */
-/* Live stats - the right-hand side of the single bar below the prompt. */
-.obs {
-  flex-shrink: 0;
-}
-.obs-strip {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-.obs-stat {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.obs-value {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--n5);
-}
-.obs-credits {
-  color: var(--aurora-yellow);
-}
-.obs-key {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--n3);
-}
 
-/* Slim context meter - aligns on the baseline. */
-.meter {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-.meter-track {
-  width: 46px;
-  height: 4px;
-  border-radius: var(--r-pill);
-  background: var(--n1);
-  overflow: hidden;
-}
-.meter-fill {
-  display: block;
-  height: 100%;
-  border-radius: var(--r-pill);
-  transition: width 0.5s ease, background 0.3s;
-}
 
 /* Composer */
 /* Prompt input, then the agent/model config row, then the live stats strip. */
@@ -1871,46 +1828,45 @@
   border-top: 1px solid var(--n1);
   background: var(--n-abyss);
 }
-/* One bar below the prompt: config (agent/model) on the left, live stats on
-   the right. When the bar wraps to two rows, both rows left-align. */
-.composer-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  padding: 0 var(--chat-inset) calc(10px + var(--safe-bottom));
-}
-.composer-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  min-width: 0;
-  /* Must stay visible: an overflow scroll container clips the absolutely
-     positioned dropdown panel, which made the selectors look broken. */
-  overflow: visible;
-}
 .composer {
-  /* Same column as the transcript so the prompt lines up with the messages. */
-  padding: 12px var(--chat-inset) 8px;
+  /* Same column as the transcript so the prompt lines up with the messages. The
+     bottom inset clears the iOS home indicator, which the removed stats bar
+     used to carry. */
+  padding: 12px var(--chat-inset) calc(10px + var(--safe-bottom));
 }
 .composer-error {
   font-size: 12px;
   color: var(--aurora-red);
   padding: 0 2px 6px;
 }
-.composer-input-box {
+.composer-box {
   display: flex;
-  align-items: flex-end;
-  gap: 0;
+  flex-direction: column;
+  gap: 2px;
   background: var(--n1);
   border: 1px solid var(--n2);
-  border-radius: var(--r-md);
-  padding: 6px 6px 6px 4px;
+  border-radius: var(--r-lg);
+  padding: 8px 8px 6px;
   transition: border-color 0.12s;
 }
-.composer-input-box:focus-within {
+/* Controls sit inside the box under the text: add on the left, everything that
+   describes or sends the message on the right. */
+.composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.composer-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  /* The dropdown panels are absolutely positioned; an overflow container here
+     would clip them. */
+  overflow: visible;
+}
+.composer-box:focus-within {
   border-color: var(--frost-deep);
 }
 .composer-plus {
@@ -1982,7 +1938,7 @@
   white-space: nowrap;
 }
 .composer-input {
-  flex: 1;
+  width: 100%;
   resize: none;
   min-height: 34px;
   max-height: 200px;
@@ -2641,3 +2597,94 @@
   }
 }
 
+
+/* Context-window usage: a ring in the composer controls, numbers behind a click. */
+.ctx {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.ctx-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  color: var(--n4);
+  transition: background 0.12s;
+}
+.ctx-btn:hover {
+  background: var(--n2);
+}
+.ctx-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 250px;
+  padding: 12px;
+  border-radius: var(--r-md);
+  background: var(--n1);
+  border: 1px solid var(--n2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+.ctx-pop-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ctx-pop-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--n6);
+}
+.ctx-pop-pct {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.ctx-pop-bar {
+  height: 4px;
+  margin: 9px 0 11px;
+  border-radius: 999px;
+  background: var(--n2);
+  overflow: hidden;
+}
+.ctx-pop-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+.ctx-pop-rows {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ctx-pop-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+.ctx-pop-row dt {
+  color: var(--n4);
+}
+.ctx-pop-row dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--n5);
+}
+.ctx-pop-note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--n4);
+}

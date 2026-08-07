@@ -5,8 +5,6 @@ import type { ConnStatus } from '../../api/SessionSocket.js';
 import { Transcript } from '../chat/Transcript.js';
 import { FileTree } from '../chat/FileTree.js';
 import { Composer } from '../chat/Composer.js';
-import { ObservabilityPanel } from '../observability/ObservabilityPanel.js';
-import { ModelPicker, AgentPicker } from '../controls/Pickers.js';
 import { ConnDot } from '../common/ConnBanner.js';
 import { Spinner, FilesIcon } from '../common/icons.js';
 
@@ -52,8 +50,6 @@ export function ChatPane({
   onChangeAgent,
   onCompact,
 }: Props) {
-  const currentModeId = useStore((s) => s.currentModeId);
-  const currentModelId = useStore((s) => s.currentModelId);
   const title = useStore((s) => s.sessions.find((x) => x.sessionId === s.activeId)?.title);
   const activeId = useStore((s) => s.activeId);
   const sessionNotice = useStore((s) => s.sessionNotice);
@@ -191,15 +187,10 @@ export function ChatPane({
             onSend={onSend}
             onCancel={onCancel}
             onCompact={onCompact}
+            onChangeModel={onChangeModel}
+            onChangeAgent={onChangeAgent}
             connStatus={connStatus}
           />
-          <div className="composer-bar">
-            <div className="composer-tools">
-              <AgentPicker value={currentModeId} onChange={onChangeAgent} />
-              <ModelPicker value={currentModelId} onChange={onChangeModel} />
-            </div>
-            <ObservabilityPanel />
-          </div>
         </div>
       </div>
 
