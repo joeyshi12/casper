@@ -58,6 +58,19 @@ function open(): DatabaseSync {
   return d;
 }
 
+/**
+ * Rename a migrated file aside without destroying an earlier backup.
+ *
+ * A pre-SQLite build left running alongside this one can recreate these files, so
+ * the migration may fire more than once; plain renameSync would then overwrite the
+ * first backup with the second file.
+ */
+function setAside(file: string): void {
+  let target = `${file}.bak`;
+  for (let n = 2; fs.existsSync(target); n++) target = `${file}.bak.${n}`;
+  fs.renameSync(file, target);
+}
+
 /** Read a legacy JSON file, or null if it's absent or unparseable. */
 function readJson(file: string): unknown {
   try {
@@ -92,7 +105,7 @@ function importLegacyJson(d: DatabaseSync): void {
        ON CONFLICT(session_id) DO UPDATE SET ${column} = excluded.${column}`,
     );
     for (const [sessionId, value] of rows) stmt.run(sessionId, value as string);
-    fs.renameSync(file, `${file}.bak`);
+    setAside(file);
     logger.info({ file, rows: rows.length }, 'migrated legacy store into sqlite');
   }
 
@@ -117,7 +130,7 @@ function importLegacyJson(d: DatabaseSync): void {
       );
       n++;
     }
-    fs.renameSync(loginFile, `${loginFile}.bak`);
+    setAside(loginFile);
     logger.info({ file: loginFile, rows: n }, 'migrated legacy store into sqlite');
   }
 }
