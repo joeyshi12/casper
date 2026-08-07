@@ -903,7 +903,9 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--gutter);
+  /* Centred reading column; the scroll area itself stays full width so the
+     scrollbar and the wheel target remain at the pane edge. */
+  padding: var(--gutter) var(--chat-inset);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1877,7 +1879,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px 12px;
-  padding: 0 var(--gutter) calc(10px + var(--safe-bottom));
+  padding: 0 var(--chat-inset) calc(10px + var(--safe-bottom));
 }
 .composer-tools {
   display: flex;
@@ -1890,7 +1892,8 @@
   overflow: visible;
 }
 .composer {
-  padding: 12px var(--gutter) 8px;
+  /* Same column as the transcript so the prompt lines up with the messages. */
+  padding: 12px var(--chat-inset) 8px;
 }
 .composer-error {
   font-size: 12px;

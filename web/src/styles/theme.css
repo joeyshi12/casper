@@ -43,6 +43,16 @@
   /* Fixed layout metrics - used to keep everything aligned. */
   --header-h: 56px;
   --gutter: 16px;
+
+  /* Reading width for the conversation. Long lines are hard to track across, so
+     the transcript and the composer share this cap and sit centred in whatever
+     space the chat column has. */
+  --chat-max: 800px;
+  /* Horizontal inset that produces that cap: normal gutter until the column is
+     wider than --chat-max, then whatever it takes to centre the content. The
+     percentage resolves against the containing block, so this collapses to
+     --gutter on narrow screens and when the file panel is open. */
+  --chat-inset: max(var(--gutter), (100% - var(--chat-max)) / 2);
 }
 
 * {
