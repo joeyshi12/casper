@@ -16,7 +16,7 @@ import type {
 import { emptyObservabilitySnapshot } from '@casper/shared';
 import Fastify from 'fastify';
 import { useStore } from '../web/src/state/store.js';
-import { config } from '../server/src/config.js';
+import { config, parseConfigDoc, pickInt, pickString } from '../server/src/config.js';
 import { TurnState } from '../server/src/session/TurnState.js';
 import { SessionManager, Session } from '../server/src/session/SessionManager.js';
 import { EventStore } from '../server/src/session/EventStore.js';
@@ -1212,5 +1212,64 @@ describe('SQLite stores', () => {
     const store = new SessionStore();
     assert.equal(store.getTitle('anything'), undefined);
     assert.equal(fs.existsSync(path.join(dir, 'casper.db')), true);
+  });
+});
+
+describe('config file precedence', () => {
+  it('takes a value from the file when the env var is absent', () => {
+    assert.equal(pickString(undefined, 'from-file', 'default'), 'from-file');
+    assert.equal(pickInt(undefined, 9999, 4319), 9999);
+  });
+
+  it('lets the environment override the file', () => {
+    assert.equal(pickString('from-env', 'from-file', 'default'), 'from-env');
+    assert.equal(pickInt('1234', 9999, 4319), 1234);
+  });
+
+  it('treats an empty env var as unset, so the file still applies', () => {
+    assert.equal(pickString('', 'from-file', 'default'), 'from-file');
+    assert.equal(pickInt('', 9999, 4319), 9999);
+  });
+
+  it('falls back to the default when neither is present', () => {
+    assert.equal(pickString(undefined, undefined, 'default'), 'default');
+    assert.equal(pickInt(undefined, undefined, 4319), 4319);
+  });
+
+  it('accepts a numeric setting written as a JSON string', () => {
+    assert.equal(pickInt(undefined, '8080', 4319), 8080);
+  });
+
+  it('ignores a file value of the wrong type', () => {
+    assert.equal(pickString(undefined, 42, 'default'), 'default');
+    assert.equal(pickInt(undefined, 'not a number', 4319), 4319);
+    assert.equal(pickInt(undefined, {}, 4319), 4319);
+  });
+
+  it('parses an object of settings', () => {
+    assert.deepEqual(parseConfigDoc('{"port":9999}'), { port: 9999 });
+  });
+
+  it('yields nothing for malformed JSON rather than throwing', () => {
+    const warnings: string[] = [];
+    assert.deepEqual(parseConfigDoc('not json', (m) => warnings.push(m)), {});
+    assert.match(warnings[0] ?? '', /invalid JSON/);
+  });
+
+  it('rejects a JSON array, which is the wrong shape', () => {
+    const warnings: string[] = [];
+    assert.deepEqual(parseConfigDoc('[1,2,3]', (m) => warnings.push(m)), {});
+    assert.match(warnings[0] ?? '', /expected a JSON object/);
+  });
+
+  it('keeps known keys and reports a typo alongside them', () => {
+    const warnings: string[] = [];
+    const doc = parseConfigDoc('{"prot":1111,"host":"127.0.0.1"}', (m) => warnings.push(m));
+    assert.equal(doc.host, '127.0.0.1');
+    assert.match(warnings[0] ?? '', /unrecognised keys/);
+  });
+
+  it('points at the settings file it reads, for diagnostics', () => {
+    assert.match(config.configFile, /casper\/config\.json$/);
   });
 });

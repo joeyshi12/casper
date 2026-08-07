@@ -46,7 +46,33 @@ npm run dev                  # server + web dev servers together
 
 Open the printed URL and paste your `CASPER_TOKEN`.
 
-## Configuration (`.env`)
+## Configuration
+
+Settings resolve **environment variable → config file → default**, so an env var
+always wins and the file is optional.
+
+The file is `~/.config/casper/config.json` (or `$XDG_CONFIG_HOME/casper/`), using
+camelCase keys. It lives outside the install directory so it survives updates:
+
+```json
+{
+  "port": 4319,
+  "defaultCwd": "/home/you/projects",
+  "fileRoot": "/home/you",
+  "defaultAgent": "casper"
+}
+```
+
+A missing, malformed, or wrongly-shaped file is ignored with a warning rather
+than failing startup, and unrecognised keys are reported so a typo doesn't pass
+silently. `chmod 600` it if you put `token` there.
+
+`CASPER_DATA_DIR` and `CASPER_WEB_DIST` are environment-only: the first says
+where data lives (so it can't be read from inside it), and the second is install
+layout rather than a preference.
+
+### Reference
+
 
 | Var | Default | Purpose |
 |-----|---------|---------|
