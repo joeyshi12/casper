@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Casper uninstaller. Stops and removes the systemd user service and deletes the
 # install directory. By default it leaves your session data (~/.casper) alone;
-# pass --purge to remove that too.
+# pass --purge to remove that and the saved settings too.
 #
 #   ~/.local/share/casper/scripts/uninstall.sh [--purge]
 #   curl -fsSL <uninstall-url> | bash
@@ -63,15 +63,22 @@ else
   say "No install directory at $DIR"
 fi
 
-# --- Optionally remove session data ---------------------------------------
+# --- Optionally remove session data and settings --------------------------
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/casper"
 if [ "$PURGE" -eq 1 ]; then
   if [ -d "$DATA_DIR" ]; then
     say "Purging session data $DATA_DIR"
     rm -rf "$DATA_DIR"
     ok "Session data removed"
   fi
+  # The config file holds the access token, so purge has to take it as well.
+  if [ -d "$CONFIG_DIR" ]; then
+    say "Purging settings $CONFIG_DIR"
+    rm -rf "$CONFIG_DIR"
+    ok "Settings removed"
+  fi
 else
-  printf '\033[33m! Kept session data at %s (run with --purge to remove it).\033[0m\n' "$DATA_DIR"
+  printf '\033[33m! Kept session data at %s and settings at %s (run with --purge to remove them).\033[0m\n' "$DATA_DIR" "$CONFIG_DIR"
 fi
 
 printf '\n\033[32m👻 Casper has been uninstalled.\033[0m\n'

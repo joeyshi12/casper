@@ -57,6 +57,19 @@ service_active() {
 # Defined as a function so its body is fully parsed into memory before it runs -
 # `git reset` rewrites files under $root (including this script), and a function
 # already parsed is unaffected by the file changing mid-execution.
+# Settings live in the config file; only install layout and the runtime mode stay
+# in .env. Both token subcommands and the server read the same file.
+config_file() {
+  printf '%s/casper/config.json' "${XDG_CONFIG_HOME:-$HOME/.config}"
+}
+
+# The runner's node. .env isn't sourced on the subcommand paths, so read it there.
+resolve_node() {
+  local n="${CASPER_NODE:-}"
+  [ -n "$n" ] || n="$(grep '^CASPER_NODE=' "$root/.env" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+  printf '%s' "${n:-node}"
+}
+
 do_update() {
   command -v git >/dev/null 2>&1 || { echo "casper: git is required to update" >&2; exit 1; }
   command -v npm >/dev/null 2>&1 || { echo "casper: npm is required to update" >&2; exit 1; }
@@ -90,8 +103,9 @@ do_update() {
 # session, so old cookies stop working. Restarts the service if it's running
 # (required for the new token to take effect).
 do_reset_token() {
-  local env_file="$root/.env"
-  [ -f "$env_file" ] || { echo "casper: no .env at $env_file; is Casper installed?" >&2; exit 1; }
+  local cfg node_bin
+  cfg="$(config_file)"
+  node_bin="$(resolve_node)"
 
   local new_token=""
   for arg in "$@"; do
@@ -103,25 +117,32 @@ do_reset_token() {
   # 24 random bytes as hex (matches the installer's token strength).
   [ -n "$new_token" ] || new_token="$(od -An -tx1 -N 24 /dev/urandom | tr -d ' \n')"
 
-  # Rewrite the CASPER_TOKEN line in place (append if absent). ENVIRON avoids any
-  # interpretation of the token value; a same-dir temp keeps the swap atomic.
-  local tmp; tmp="$(mktemp "${env_file}.XXXXXX")"
-  CASPER_NEW_TOKEN="$new_token" awk '
-    /^CASPER_TOKEN=/ { print "CASPER_TOKEN=" ENVIRON["CASPER_NEW_TOKEN"]; found=1; next }
-    { print }
-    END { if (!found) print "CASPER_TOKEN=" ENVIRON["CASPER_NEW_TOKEN"] }
-  ' "$env_file" > "$tmp"
-  chmod 600 "$tmp" 2>/dev/null || true
-  mv "$tmp" "$env_file"
-  echo "casper: wrote a new CASPER_TOKEN to $env_file"
+  # Merge the new token into the config file, preserving every other setting and
+  # writing via a same-dir temp so the swap is atomic and never leaves a partial
+  # file. The token arrives by env so its value is never parsed as code.
+  if ! CASPER_NEW_TOKEN="$new_token" "$node_bin" -e '
+      const fs = require("fs"), path = require("path");
+      const file = process.argv[1];
+      let cfg = {};
+      try { cfg = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+      if (typeof cfg !== "object" || cfg === null || Array.isArray(cfg)) cfg = {};
+      cfg.token = process.env.CASPER_NEW_TOKEN;
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const tmp = file + "." + process.pid + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+      fs.renameSync(tmp, file);
+    ' "$cfg"; then
+    echo "casper: could not write the new token to $cfg" >&2
+    exit 1
+  fi
+  echo "casper: wrote a new token to $cfg"
 
   # Device logins live in the sqlite database under CASPER_DATA_DIR (~/.casper).
-  local data_dir node_bin
-  data_dir="$(grep '^CASPER_DATA_DIR=' "$env_file" | tail -n1 | cut -d= -f2- || true)"
+  # Same precedence the server uses - environment first, then .env, then default -
+  # so a caller pointing at another data dir isn't silently sent to the real one.
+  local data_dir
+  data_dir="${CASPER_DATA_DIR:-$(grep '^CASPER_DATA_DIR=' "$root/.env" 2>/dev/null | tail -n1 | cut -d= -f2- || true)}"
   data_dir="${data_dir:-$HOME/.casper}"
-  # .env isn't sourced on this path, so read CASPER_NODE from it directly.
-  node_bin="${CASPER_NODE:-$(grep '^CASPER_NODE=' "$env_file" | tail -n1 | cut -d= -f2- || true)}"
-  node_bin="${node_bin:-node}"
 
   if [ -f "$data_dir/casper.db" ]; then
     if "$node_bin" -e '
@@ -154,13 +175,20 @@ do_reset_token() {
 
 # Read-only: unlike reset-token, this doesn't touch .env or logged-in devices.
 do_token() {
-  local env_file="$root/.env"
-  [ -f "$env_file" ] || { echo "casper: no .env at $env_file; is Casper installed?" >&2; exit 1; }
+  local cfg node_bin
+  cfg="$(config_file)"
+  node_bin="$(resolve_node)"
+  [ -f "$cfg" ] || { echo "casper: no config at $cfg; is Casper installed?" >&2; exit 1; }
 
   local current
-  current="$(grep '^CASPER_TOKEN=' "$env_file" | tail -n1 | cut -d= -f2-)"
+  current="$("$node_bin" -e '
+    const fs = require("fs");
+    let t = "";
+    try { t = (JSON.parse(fs.readFileSync(process.argv[1], "utf8")).token ?? ""); } catch {}
+    process.stdout.write(String(t));
+  ' "$cfg")"
   if [ -z "$current" ]; then
-    echo "casper: CASPER_TOKEN is empty in $env_file - authentication is disabled." >&2
+    echo "casper: no token in $cfg - authentication is disabled." >&2
     exit 1
   fi
   echo "$current"

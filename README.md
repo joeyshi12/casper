@@ -40,19 +40,16 @@ Requires Node 24+ and an authenticated `kiro-cli` on `PATH`.
 
 ```bash
 npm install
-cp .env.example .env         # set CASPER_TOKEN to a random secret
-npm run dev                  # server + web dev servers together
+CASPER_TOKEN=dev npm run dev   # server + web dev servers together
 ```
 
-Open the printed URL and paste your `CASPER_TOKEN`.
+Open the printed URL and paste that token.
 
 ## Configuration
 
-Settings resolve **environment variable → config file → default**, so an env var
-always wins and the file is optional.
-
-The file is `~/.config/casper/config.json` (or `$XDG_CONFIG_HOME/casper/`), using
-camelCase keys. It lives outside the install directory so it survives updates:
+Casper is configured from `~/.config/casper/config.json` (or
+`$XDG_CONFIG_HOME/casper/`), using camelCase keys. It lives outside the install
+directory so it survives updates, and the installer writes it for you:
 
 ```json
 {
@@ -63,30 +60,36 @@ camelCase keys. It lives outside the install directory so it survives updates:
 }
 ```
 
-A missing, malformed, or wrongly-shaped file is ignored with a warning rather
-than failing startup, and unrecognised keys are reported so a typo doesn't pass
-silently. `chmod 600` it if you put `token` there.
+It holds the access token, so it's written `chmod 600`. A missing, malformed, or
+wrongly-shaped file is ignored with a warning rather than failing startup, and
+unrecognised keys are reported so a typo doesn't pass silently.
 
-`CASPER_DATA_DIR` and `CASPER_WEB_DIST` are environment-only: the first says
-where data lives (so it can't be read from inside it), and the second is install
-layout rather than a preference.
+Every setting can also be given as an **environment variable, which takes
+precedence** over the file - convenient for containers, one-off runs, and tests.
+Three are environment-only and live in `.env` in the install directory:
+`CASPER_DATA_DIR` (it says where data lives, so it can't be read from inside it),
+`CASPER_WEB_DIST` (install layout), and `CASPER_NODE` (the binary the `casper`
+runner execs). Setting anything else in both places is just a way to confuse
+yourself, since the environment silently wins.
 
 ### Reference
 
 
-| Var | Default | Purpose |
-|-----|---------|---------|
-| `HOST` | `0.0.0.0` | Bind address |
-| `PORT` | `4319` | Server port |
-| `CASPER_TOKEN` | _(empty)_ | Shared secret entered once at login; server exchanges it for a per-device session cookie. **Set before exposing.** Run `casper token` to print the current value. |
-| `CASPER_SESSION_TTL_SECONDS` | `604800` | Device-login lifetime (slid forward on activity). |
-| `KIRO_BIN` | `kiro-cli` | Path to the kiro-cli binary |
-| `DEFAULT_CWD` | cwd | Default working directory for new sessions |
-| `CASPER_FILE_ROOT` | `/` | Filesystem root that file-serving endpoints are confined to; requests resolving outside it are rejected. Defaults to `/` (the whole filesystem the server can read); set a narrower path (e.g. `$HOME`) to restrict file browsing. |
-| `MAX_LIVE_SESSIONS` | `6` | Max concurrent live kiro processes |
-| `DEFAULT_AGENT` | `kiro_default` | Default agent for new sessions |
-| `CASPER_WEB_DIST` | `../web/dist` | Built web app to serve (set to an absolute path in prod) |
-| `CASPER_NODE` | `node` | Explicit Node binary for the `casper` runner (the installer records the resolved path so the service starts under a minimal PATH). |
+Environment variable, matching config key, and default:
+
+| Var | Config key | Default | Purpose |
+|-----|------------|---------|---------|
+| `HOST` | `host` | `0.0.0.0` | Bind address |
+| `PORT` | `port` | `4319` | Server port |
+| `CASPER_TOKEN` | `token` | _(empty)_ | Shared secret entered once at login; server exchanges it for a per-device session cookie. **Set before exposing.** Run `casper token` to print the current value. |
+| `CASPER_SESSION_TTL_SECONDS` | `sessionTtlSeconds` | `604800` | Device-login lifetime (slid forward on activity). |
+| `KIRO_BIN` | `kiroBin` | `kiro-cli` | Path to the kiro-cli binary |
+| `DEFAULT_CWD` | `defaultCwd` | cwd | Default working directory for new sessions |
+| `CASPER_FILE_ROOT` | `fileRoot` | `/` | Filesystem root that file-serving endpoints are confined to; requests resolving outside it are rejected. Defaults to `/` (the whole filesystem the server can read); set a narrower path (e.g. `$HOME`) to restrict file browsing. |
+| `MAX_LIVE_SESSIONS` | `maxLiveSessions` | `6` | Max concurrent live kiro processes |
+| `DEFAULT_AGENT` | `defaultAgent` | `kiro_default` | Default agent for new sessions |
+| `CASPER_WEB_DIST` | _(env only)_ | `../web/dist` | Built web app to serve (set to an absolute path in prod) |
+| `CASPER_NODE` | _(env only)_ | `node` | Explicit Node binary for the `casper` runner (the installer records the resolved path so the service starts under a minimal PATH). |
 
 ## Install
 
@@ -109,14 +112,14 @@ Background it however your setup prefers: your init system, `nohup casper &`,
 or tmux.
 
 Your access token prints once in a bordered block - copy it before scrolling.
-If you lose it, run `casper token`, or read `CASPER_TOKEN` directly from
-`~/.local/share/casper/.env`.
+If you lose it, run `casper token`, or read `token` from
+`~/.config/casper/config.json`.
 
 **Update:** `casper update` pulls the latest version, rebuilds, and restarts
 the service if one is running. Your token is preserved.
 
 **Uninstall:** `~/.local/share/casper/scripts/uninstall.sh` (add `--purge` to
-also delete saved sessions and logins).
+also delete saved sessions, logins, and your settings).
 
 **HTTPS** (recommended beyond your LAN): put a TLS-terminating reverse proxy
 in front, pointed at `http://127.0.0.1:4319`, forwarding WebSocket upgrades

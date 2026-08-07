@@ -86,23 +86,52 @@ fi
 
 # --- Configure -------------------------------------------------------------
 ENV_FILE="$DIR/.env"
-if [ -f "$ENV_FILE" ] && grep -q '^CASPER_TOKEN=' "$ENV_FILE"; then
-  TOKEN="$(grep '^CASPER_TOKEN=' "$ENV_FILE" | head -n1 | cut -d= -f2-)"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/casper"
+CONFIG_FILE="$CONFIG_DIR/config.json"
+mkdir -p "$CONFIG_DIR"
+
+# Settings live in the config file, which sits outside the install directory so an
+# update can't clobber it. Only install layout and the runtime mode go in .env.
+# Reuse an existing token so re-running the installer doesn't sign every device out.
+TOKEN="$(CONFIG_FILE="$CONFIG_FILE" node -e '
+  const fs = require("fs");
+  let t = "";
+  try { t = JSON.parse(fs.readFileSync(process.env.CONFIG_FILE, "utf8")).token || ""; } catch {}
+  process.stdout.write(t);
+')"
+if [ -n "$TOKEN" ]; then
   say "Keeping existing access token"
 else
   TOKEN="$(node -e 'console.log(require("crypto").randomBytes(24).toString("hex"))')"
   say "Generated a new access token"
 fi
 
+# Merge rather than overwrite, so hand-edited settings survive a re-install.
+CONFIG_FILE="$CONFIG_FILE" NEW_TOKEN="$TOKEN" NEW_PORT="$PORT" NEW_AGENT="$AGENT_NAME" node -e '
+  const fs = require("fs"), path = require("path");
+  const file = process.env.CONFIG_FILE;
+  let cfg = {};
+  try { cfg = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+  if (typeof cfg !== "object" || cfg === null || Array.isArray(cfg)) cfg = {};
+  cfg.host ??= "0.0.0.0";
+  cfg.port = Number(process.env.NEW_PORT);
+  cfg.token = process.env.NEW_TOKEN;
+  cfg.defaultAgent = process.env.NEW_AGENT;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = file + "." + process.pid + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+  fs.renameSync(tmp, file);
+'
+ok "Wrote $CONFIG_FILE"
+
 cat > "$ENV_FILE" <<EOF
-HOST=0.0.0.0
-PORT=$PORT
-CASPER_TOKEN=$TOKEN
+# Install layout and runtime mode only; every other setting lives in
+# $CONFIG_FILE
 CASPER_WEB_DIST=$DIR/web/dist
 CASPER_NODE=$NODE_BIN
 NODE_ENV=production
-DEFAULT_AGENT=$AGENT_NAME
 EOF
+chmod 600 "$ENV_FILE" 2>/dev/null || true
 ok "Wrote $ENV_FILE"
 
 # --- casper command --------------------------------------------------------
