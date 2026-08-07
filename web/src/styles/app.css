@@ -799,10 +799,14 @@
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
   animation: dd-in 0.12s ease;
 }
-/* The composer sits at the bottom of the viewport, so its menus open upward. */
+/* The selectors sit in the bottom-right corner, so their menus open up and to
+   the left - anchored to the trigger's right edge rather than its left, which
+   would push them off the pane. */
 .composer-actions-right .dd-panel {
   top: auto;
   bottom: calc(100% + 6px);
+  left: auto;
+  right: 0;
 }
 .dd-option {
   display: flex;
