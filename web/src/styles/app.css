@@ -1899,15 +1899,23 @@
 .composer-input::placeholder {
   color: var(--n3);
 }
+/* Icon-only, so a square target rather than a text pill. */
 .composer-btn {
-  font-family: var(--font-body);
-  font-weight: 600;
-  font-size: 14px;
-  height: 34px;
-  padding: 0 14px;
-  border-radius: var(--r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-md);
   flex-shrink: 0;
-  transition: filter 0.12s;
+  cursor: pointer;
+  margin-left: 2px;
+  transition: filter 0.12s, background 0.12s;
+}
+.composer-btn:disabled {
+  cursor: default;
 }
 .composer-btn:hover:not(:disabled) {
   filter: brightness(1.08);

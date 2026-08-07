@@ -4,7 +4,7 @@ import { ATTACHMENTS_PREFIX } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 import { api } from '../../api/rest.js';
 import type { ConnStatus } from '../../api/SessionSocket.js';
-import { PlusIcon } from '../common/icons.js';
+import { PlusIcon, ArrowUpIcon, StopIcon, Spinner } from '../common/icons.js';
 import { AgentPicker, ModelPicker } from '../controls/Pickers.js';
 import { ContextRing } from '../observability/ContextRing.js';
 
@@ -317,16 +317,32 @@ export function Composer({
             <AgentPicker value={currentModeId} onChange={onChangeAgent} />
             <ModelPicker value={currentModelId} onChange={onChangeModel} />
             {running ? (
-              <button className="composer-btn composer-stop" onClick={onCancel}>
-                Stop
+              <button
+                className="composer-btn composer-stop"
+                onClick={onCancel}
+                title="Stop"
+                aria-label="Stop"
+              >
+                <StopIcon size={15} />
               </button>
             ) : cancelling ? (
-              <button className="composer-btn composer-stop" disabled>
-                Stopping…
+              <button
+                className="composer-btn composer-stop"
+                disabled
+                title="Stopping…"
+                aria-label="Stopping"
+              >
+                <StopIcon size={15} />
               </button>
             ) : (
-              <button className="composer-btn composer-send" onClick={submit} disabled={!canSend}>
-                {uploading ? '…' : 'Send'}
+              <button
+                className="composer-btn composer-send"
+                onClick={submit}
+                disabled={!canSend}
+                title={uploading ? 'Uploading…' : 'Send'}
+                aria-label={uploading ? 'Uploading' : 'Send'}
+              >
+                {uploading ? <Spinner size={15} /> : <ArrowUpIcon size={17} />}
               </button>
             )}
           </div>
