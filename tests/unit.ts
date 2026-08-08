@@ -1180,6 +1180,24 @@ describe('SQLite stores', () => {
   });
 });
 
+describe('static file serving', () => {
+  it('serves a file that appeared after registration', async () => {
+    // wildcard: false snapshots the route table at registration, so a rebuild's new
+    // hashed assets 404 until restart even though index.html points straight at them.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-static-'));
+    fs.mkdirSync(path.join(root, 'assets'));
+    const app = Fastify();
+    const fastifyStatic = (await import('@fastify/static')).default;
+    await app.register(fastifyStatic, { root });
+    await app.ready();
+
+    fs.writeFileSync(path.join(root, 'assets', 'after-start.js'), 'x');
+    const res = await app.inject({ method: 'GET', url: '/assets/after-start.js' });
+    assert.equal(res.statusCode, 200);
+    await app.close();
+  });
+});
+
 describe('config file precedence', () => {
   it('takes a value from the file when the env var is absent', () => {
     assert.equal(pickString(undefined, 'from-file', 'default'), 'from-file');

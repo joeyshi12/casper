@@ -63,7 +63,6 @@ export async function buildApp(): Promise<CasperApp> {
   if (fs.existsSync(config.webDist)) {
     await app.register(fastifyStatic, {
       root: config.webDist,
-      wildcard: false,
     });
     // SPA fallback: serve index.html for client-side routes only. API/WS and
     // anything that looks like a static asset (under /assets/ or with a file
