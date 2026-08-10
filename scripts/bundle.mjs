@@ -53,6 +53,16 @@ if (!fs.existsSync(agentSrc)) throw new Error(`missing ${agentSrc}`);
 fs.mkdirSync(path.join(outDir, 'agents'), { recursive: true });
 fs.copyFileSync(agentSrc, path.join(outDir, 'agents/casper.json'));
 
+// npm picks up README and LICENSE from the package directory only, and both live at
+// the repo root - without copying them in, the npm page has no readme and the tarball
+// ships no licence. Generated, so they're gitignored inside server/.
+const pkgDir = path.join(root, 'server');
+for (const file of ['README.md', 'LICENSE']) {
+  const from = path.join(root, file);
+  if (!fs.existsSync(from)) throw new Error(`missing ${from}`);
+  fs.copyFileSync(from, path.join(pkgDir, file));
+}
+
 // Fail loudly rather than publishing a bundle that still needs the workspace.
 const imports = Object.values(result.metafile.outputs)[0].imports.map((i) => i.path);
 const leaked = imports.filter((i) => i.startsWith('@casper/'));

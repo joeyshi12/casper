@@ -7,3 +7,7 @@ build/
 .casper/
 web/dev-dist/
 *.tsbuildinfo
+
+# copied into the package at build time so npm ships them
+server/README.md
+server/LICENSE
