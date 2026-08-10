@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write # to dispatch the publish workflow below
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -72,3 +73,20 @@ jobs:
             --title "$tag" \
             --target "$GITHUB_SHA" \
             --generate-notes
+
+      # The release event can't start publish.yml: GitHub suppresses workflow runs from
+      # events raised by GITHUB_TOKEN. workflow_dispatch is one of the two documented
+      # exceptions, so dispatching it explicitly works with no PAT and no extra secret,
+      # and keeps publish.yml's filename - which is what npm's trusted publisher is
+      # registered against.
+      - name: Publish to npm
+        # Same condition as the release step, not "a release was just created": if a tag
+        # exists but never reached npm, re-running this workflow should still publish it.
+        # publish.yml skips when the version is already on the registry, so dispatching
+        # it more than once is harmless.
+        if: steps.v.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run publish.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
+          echo "dispatched publish.yml for v${{ steps.v.outputs.current }}"

@@ -10,10 +10,9 @@ name: Publish
 # is updated:
 #   npm trust github --file publish.yml --repo joeyshi12/casper --allow-publish
 #
-# Note on the release trigger: a release cut by release.yml will NOT start this
-# workflow, because events raised by GITHUB_TOKEN don't trigger further runs. It
-# fires for a release created by hand in the UI; otherwise run it from the Actions
-# tab.
+# Triggers: release.yml dispatches this after cutting a release, since a release event
+# raised by GITHUB_TOKEN can't start a workflow but workflow_dispatch can. The release
+# trigger below covers a release created by hand in the UI.
 on:
   workflow_dispatch:
   release:
