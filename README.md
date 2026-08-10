@@ -1,5 +1,5 @@
 <p align="center">
-<img src="/assets/banner.svg" alt="Casper banner" width="100%"/>
+<img src="https://raw.githubusercontent.com/joeyshi12/casper/main/assets/banner.svg" alt="Casper banner" width="100%"/>
 </p>
 
 <p align="center">
