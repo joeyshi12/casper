@@ -1,6 +1,6 @@
 {
   "name": "@joeyshi12/casper",
-  "version": "0.1.1",
+  "version": "0.6.0",
   "description": "Web client for kiro-cli over the Agent Client Protocol",
   "license": "MIT",
   "author": "Joey Shi",
@@ -56,6 +56,7 @@
   "devDependencies": {
     "@casper/shared": "*",
     "@types/node": "^24.13.3",
-    "@types/ws": "^8.5.13"
+    "@types/ws": "^8.5.13",
+    "commander": "15.0.0"
   }
 }

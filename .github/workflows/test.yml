@@ -17,8 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The `casper` package targets Node >=18.20, but the test script uses
-        # `node --import`, which needs Node >=20.6 - so CI runs on current LTS lines.
+        # The package requires Node >=24 for node:sqlite; 26 catches breakage on the
+        # line users will move to next.
         node-version: [24.x, 26.x]
     steps:
       - name: Checkout

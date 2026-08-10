@@ -1,13 +1,6 @@
-import { webcrypto } from 'node:crypto';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
-
-// Node 18.20 doesn't expose globalThis.crypto, which vite-plugin-pwa's
-// service-worker minifier (serialize-javascript) needs. Polyfill it.
-if (!globalThis.crypto) {
-  (globalThis as { crypto: Crypto }).crypto = webcrypto as Crypto;
-}
 
 const SERVER_TARGET = process.env.CASPER_SERVER ?? 'http://127.0.0.1:4319';
 

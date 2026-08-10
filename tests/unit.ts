@@ -22,6 +22,8 @@ import { readSettings, updateSettings } from '../server/src/cli/settings.js';
 import { AttemptLimiter } from '../server/src/util/rateLimit.js';
 import { configFilePath, dataDirPath } from '../server/src/paths.js';
 import { installAgentFile } from '../server/src/cli/agentFile.js';
+import type { Command } from 'commander';
+import { buildProgram } from '../server/src/cli/program.js';
 import { TurnState } from '../server/src/session/TurnState.js';
 import { SessionManager, Session } from '../server/src/session/SessionManager.js';
 import { EventStore } from '../server/src/session/EventStore.js';
@@ -1288,6 +1290,55 @@ describe('login attempt limiter', () => {
     l.fail('fresh', WINDOW + 1);
     const size = (l as unknown as { hits: Map<string, unknown> }).hits.size;
     assert.equal(size, 1);
+  });
+});
+
+describe('cli argument validation', () => {
+  // `casper reset-token --dry-run` used to adopt "--dry-run" as the new token and
+  // revoke every session - the destructive act the flag was meant to avoid.
+  function parse(args: string[]): string | undefined {
+    const program = buildProgram();
+    // Neither override propagates to subcommands, and without them a subcommand error
+    // calls process.exit and takes the test runner down with it.
+    const quiet = (cmd: Command): void => {
+      cmd.exitOverride();
+      cmd.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+      cmd.commands.forEach(quiet);
+    };
+    quiet(program);
+    try {
+      program.parse(['node', 'casper', ...args]);
+      return undefined;
+    } catch (err) {
+      return (err as Error).message;
+    }
+  }
+
+  it('rejects an unknown option instead of treating it as a value', () => {
+    assert.match(String(parse(['reset-token', '--dry-run'])), /unknown option/);
+  });
+
+  it('rejects unknown options on commands that take none', () => {
+    assert.match(String(parse(['token', '--json'])), /unknown option/);
+  });
+
+  it('rejects extra positional arguments', () => {
+    assert.match(String(parse(['reset-token', 'a', 'b'])), /too many arguments/);
+  });
+
+  it('rejects an unknown command', () => {
+    assert.match(String(parse(['frobnicate'])), /unknown command/);
+  });
+
+  it('rejects an unknown service subcommand', () => {
+    assert.match(String(parse(['service', 'bogus'])), /unknown command/);
+  });
+
+  it('declares every command the help promises', () => {
+    const names = buildProgram()
+      .commands.map((c) => c.name())
+      .sort();
+    assert.deepEqual(names, ['doctor', 'reset-token', 'service', 'start', 'token']);
   });
 });
 

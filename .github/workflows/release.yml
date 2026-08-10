@@ -1,13 +1,13 @@
 name: Release
 
-# Create a GitHub release whenever the version in package.json changes on main.
+# Create a GitHub release whenever the published package's version changes on main.
 # The tag/release is v<version>. Idempotent: skips if that release already
 # exists, and only fires when the version field actually changed (not on every
-# package.json edit).
+# edit to that file).
 on:
   push:
     branches: [main]
-    paths: ['package.json']
+    paths: ['server/package.json']
   # Allows re-running for the current version if a push was missed.
   workflow_dispatch:
 
@@ -25,7 +25,9 @@ jobs:
       - name: Detect version change
         id: v
         run: |
-          current="$(node -p "require('./package.json').version")"
+          # server/package.json is the only version that exists: the root is private
+          # and carries none, so this is what npm publishes and what tags follow.
+          current="$(node -p "require('./server/package.json').version")"
 
           # Compare against the commit the branch was at BEFORE this push - not
           # HEAD~1. A push can contain several commits, and the bump is often not
@@ -40,8 +42,8 @@ jobs:
           fi
 
           previous=""
-          if [ -n "$base" ] && git cat-file -e "$base:package.json" 2>/dev/null; then
-            git show "$base:package.json" > /tmp/prev-package.json
+          if [ -n "$base" ] && git cat-file -e "$base:server/package.json" 2>/dev/null; then
+            git show "$base:server/package.json" > /tmp/prev-package.json
             previous="$(node -p "require('/tmp/prev-package.json').version || ''")"
           fi
 
@@ -52,7 +54,7 @@ jobs:
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "package.json version: ${previous:-<none>} -> $current (base: ${base:-<none>})"
+          echo "server/package.json version: ${previous:-<none>} -> $current (base: ${base:-<none>})"
 
       # Manual runs release the current version even if it didn't change in a push.
       - name: Create release

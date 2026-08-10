@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json && cross-env NODE_OPTIONS=--experimental-global-webcrypto vite build",
+    "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json"
   },
@@ -26,7 +26,6 @@
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
-    "cross-env": "^7.0.3",
     "vite": "^6.0.5",
     "vite-plugin-pwa": "^0.21.1"
   }
