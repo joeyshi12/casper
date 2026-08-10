@@ -18,18 +18,18 @@ exactly what it missed.
 - **Sessions** you can create, search, rename and delete. Live ones run in a
   bounded process pool; idle ones go dormant and resume on demand.
 - **Per-session model and agent**, from the live model list and kiro's agents.
-- **Rich rendering** - Markdown, Mermaid, syntax-highlighted code, and MCP tool
+- **Rich rendering** of Markdown, Mermaid, syntax-highlighted code, and MCP tool
   calls with their status, input and output.
 - **File browser** for the session's workspace, with previews for text, images
   and PDFs.
-- **Observability** - credits spent, context-window usage, turn duration.
-- **PWA** - installable, responsive, reconnects when the network returns.
+- **Observability** for credits spent, context-window usage and turn duration.
+- **PWA** that installs to a home screen and reconnects when the network returns.
 
 ## Install
 
-Needs Node 24+ (Casper keeps its state in SQLite via the built-in `node:sqlite`)
-and [`kiro-cli`](https://kiro.dev) installed and logged in — Casper is a client
-for it, so nothing works without it.
+Needs Node 24+, since Casper keeps its state in SQLite via the built-in
+`node:sqlite`. It also needs [`kiro-cli`](https://kiro.dev) installed and logged in.
+Casper is a client for it, so nothing works without it.
 
 ```bash
 npm install -g @joeyshi12/casper
@@ -45,8 +45,8 @@ To survive reboots, install the systemd user service:
 casper service install
 ```
 
-systemd is optional. Without it, start Casper however you prefer — your own init
-system, `nohup casper &`, tmux.
+systemd is optional. Without it, run `casper` from your own init system, under
+`nohup`, or in tmux.
 
 | Command | |
 |---|---|
@@ -113,14 +113,14 @@ lengthy turns. PWA install and reliable reconnects need HTTPS.
 
 ## Security
 
-Casper launches kiro with `--trust-all-tools`, so unattended runs never block on
-approvals — the agent can run commands and write files without asking. Treat access
-to Casper as equivalent to a shell on the machine.
+Casper launches kiro with `--trust-all-tools` so unattended runs never block on
+approvals. The agent can run commands and write files without asking, so treat
+access to Casper as equivalent to a shell on the machine.
 
 The token is 24 random bytes, generated for you and exchanged at login for a
-per-device cookie; only its hash is stored. Comparison is constant-time, `/api/login`
-allows ten failures per quarter hour per address before answering 429, and the
-settings file and database are `0600`.
+per-device cookie; only its hash is stored. Comparison is constant-time, and
+`/api/login` allows ten failures per quarter hour per address before answering 429.
+The settings file and the database are both `0600`.
 
 ## Develop
 
