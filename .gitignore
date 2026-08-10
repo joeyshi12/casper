@@ -8,6 +8,9 @@ build/
 web/dev-dist/
 *.tsbuildinfo
 
+# npm pack output, if it lands here instead of a temp dir
+*.tgz
+
 # copied into the package at build time so npm ships them
 server/README.md
 server/LICENSE
