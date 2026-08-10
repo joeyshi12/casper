@@ -3,7 +3,8 @@ import { config } from './config.js';
 import { logger } from './util/logger.js';
 import { isWithinRoot } from './util/paths.js';
 
-async function main() {
+/** Start the HTTP/WebSocket server and block until a signal stops it. */
+export async function serve(): Promise<void> {
   // Fail fast on a misconfiguration where the default working directory sits
   // outside the file-access boundary - otherwise the directory picker and
   // session creation silently break (403 / throw) for every request.
@@ -35,8 +36,3 @@ async function main() {
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 }
-
-main().catch((err) => {
-  logger.error({ err }, 'fatal startup error');
-  process.exit(1);
-});

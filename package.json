@@ -15,16 +15,17 @@
   "scripts": {
     "build:shared": "npm run build --workspace @casper/shared",
     "dev": "npm run build:shared && concurrently -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "npm run dev --workspace @casper/server",
+    "dev:server": "npm run dev --workspace @joeyshi12/casper",
     "dev:web": "npm run dev --workspace @casper/web",
-    "build": "npm run build:shared && npm run build --workspace @casper/server && npm run build --workspace @casper/web",
-    "start": "npm run start --workspace @casper/server",
+    "build": "npm run build:shared && npm run build --workspace @casper/web && node scripts/bundle.mjs",
+    "start": "npm run start --workspace @joeyshi12/casper",
     "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present",
     "test": "npm run build:shared && node --import tsx --test tests/unit.ts",
     "e2e": "npm run build:shared && tsx tests/bridge-e2e.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
+    "esbuild": "0.25.0",
     "tsx": "^4.19.2",
     "typescript": "5.9.3"
   }

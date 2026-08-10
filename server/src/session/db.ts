@@ -45,11 +45,27 @@ export function closeDb(): void {
 }
 
 function open(): DatabaseSync {
-  fs.mkdirSync(config.casperDataDir, { recursive: true });
-  const d = new DatabaseSync(path.join(config.casperDataDir, 'casper.db'));
+  fs.mkdirSync(config.casperDataDir, { recursive: true, mode: 0o700 });
+  const file = path.join(config.casperDataDir, 'casper.db');
+  const d = new DatabaseSync(file);
   // WAL so a reader never blocks the writer; both are this one process, but it
   // also survives an unclean shutdown better than a rewritten JSON file did.
   d.exec('PRAGMA journal_mode = WAL');
   d.exec(SCHEMA);
+  // The logins table holds the hashes the auth cookie is checked against, so the
+  // file has no business being world-readable. sqlite creates it with the process
+  // umask, and mkdir's mode doesn't apply to an existing directory, so both are set
+  // explicitly and on every open - that also repairs a database created earlier.
+  restrict(config.casperDataDir, 0o700);
+  for (const f of [file, `${file}-wal`, `${file}-shm`]) restrict(f, 0o600);
   return d;
+}
+
+/** Narrow a path's mode, ignoring a missing file or a filesystem that refuses. */
+function restrict(target: string, mode: number): void {
+  try {
+    if ((fs.statSync(target).mode & 0o777) !== mode) fs.chmodSync(target, mode);
+  } catch {
+    // absent (the -wal only appears once written to) or not ours to change
+  }
 }

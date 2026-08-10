@@ -11,12 +11,11 @@ on:
   # Allows re-running for the current version if a push was missed.
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4

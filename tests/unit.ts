@@ -2,6 +2,7 @@
 // Run with: npm test   (Node's built-in test runner via tsx)
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,6 +18,10 @@ import { emptyObservabilitySnapshot } from '@casper/shared';
 import Fastify from 'fastify';
 import { useStore } from '../web/src/state/store.js';
 import { config, parseConfigDoc, pickInt, pickString } from '../server/src/config.js';
+import { readSettings, updateSettings } from '../server/src/cli/settings.js';
+import { AttemptLimiter } from '../server/src/util/rateLimit.js';
+import { configFilePath, dataDirPath } from '../server/src/paths.js';
+import { installAgentFile } from '../server/src/cli/agentFile.js';
 import { TurnState } from '../server/src/session/TurnState.js';
 import { SessionManager, Session } from '../server/src/session/SessionManager.js';
 import { EventStore } from '../server/src/session/EventStore.js';
@@ -1195,6 +1200,186 @@ describe('static file serving', () => {
     const res = await app.inject({ method: 'GET', url: '/assets/after-start.js' });
     assert.equal(res.statusCode, 200);
     await app.close();
+  });
+});
+
+describe('pre-settings paths', () => {
+  // bootstrap writes the first-run token through these helpers, while the server
+  // reads it through config. If they ever disagree the token lands somewhere the
+  // server doesn't look, and it starts with authentication silently disabled -
+  // which is exactly the bug this pairing fixed.
+  it('resolves the same settings file the config reads', () => {
+    assert.equal(configFilePath(), config.configFile);
+  });
+
+  it('resolves the same data directory the config reads', () => {
+    assert.equal(dataDirPath(), config.casperDataDir);
+  });
+
+  it('honours XDG_CONFIG_HOME', () => {
+    const saved = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = '/tmp/xdg-probe';
+    try {
+      assert.equal(configFilePath(), '/tmp/xdg-probe/casper/config.json');
+    } finally {
+      if (saved === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = saved;
+    }
+  });
+
+  it('treats a blank XDG_CONFIG_HOME as unset rather than resolving from nothing', () => {
+    const saved = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = '   ';
+    try {
+      assert.match(configFilePath(), /\/\.config\/casper\/config\.json$/);
+    } finally {
+      if (saved === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = saved;
+    }
+  });
+});
+
+describe('login attempt limiter', () => {
+  const WINDOW = 60_000;
+
+  it('allows attempts up to the limit', () => {
+    const l = new AttemptLimiter(3, WINDOW);
+    for (let i = 0; i < 3; i++) {
+      assert.equal(l.check('ip', 0).allowed, true);
+      l.fail('ip', 0);
+    }
+    assert.equal(l.check('ip', 0).allowed, false);
+  });
+
+  it('reports how long to wait', () => {
+    const l = new AttemptLimiter(1, WINDOW);
+    l.fail('ip', 0);
+    const d = l.check('ip', 30_000);
+    assert.equal(d.allowed, false);
+    if (!d.allowed) assert.equal(d.retryAfterSeconds, 30);
+  });
+
+  it('forgives once the window passes', () => {
+    const l = new AttemptLimiter(1, WINDOW);
+    l.fail('ip', 0);
+    assert.equal(l.check('ip', WINDOW - 1).allowed, false);
+    assert.equal(l.check('ip', WINDOW).allowed, true);
+  });
+
+  it('keeps keys separate, so one client cannot lock out another', () => {
+    const l = new AttemptLimiter(1, WINDOW);
+    l.fail('a', 0);
+    assert.equal(l.check('a', 0).allowed, false);
+    assert.equal(l.check('b', 0).allowed, true);
+  });
+
+  it('clears the count on success', () => {
+    const l = new AttemptLimiter(2, WINDOW);
+    l.fail('ip', 0);
+    l.succeed('ip');
+    l.fail('ip', 0);
+    assert.equal(l.check('ip', 0).allowed, true);
+  });
+
+  it('does not grow without bound as addresses come and go', () => {
+    const l = new AttemptLimiter(1, WINDOW);
+    for (let i = 0; i < 500; i++) l.fail(`ip-${i}`, 0);
+    // One live key after the window rolls over: the rest are pruned on access.
+    l.fail('fresh', WINDOW + 1);
+    const size = (l as unknown as { hits: Map<string, unknown> }).hits.size;
+    assert.equal(size, 1);
+  });
+});
+
+describe('cli settings file', () => {
+  let dir: string;
+  let file: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-set-'));
+    file = path.join(dir, 'config.json');
+  });
+
+  it('merges into the existing file instead of replacing it', () => {
+    fs.writeFileSync(file, JSON.stringify({ port: 4319, defaultAgent: 'casper' }));
+    updateSettings(file, { token: 'abc' });
+    assert.deepEqual(readSettings(file), { port: 4319, defaultAgent: 'casper', token: 'abc' });
+  });
+
+  it('writes 0600, since the file holds the token', () => {
+    updateSettings(file, { token: 'abc' });
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  });
+
+  it('creates the directory when it is missing', () => {
+    const nested = path.join(dir, 'a', 'b', 'config.json');
+    updateSettings(nested, { token: 'abc' });
+    assert.equal(readSettings(nested).token, 'abc');
+  });
+
+  it('leaves no temp file behind', () => {
+    updateSettings(file, { token: 'abc' });
+    assert.deepEqual(
+      fs.readdirSync(dir).filter((f) => f.includes('tmp')),
+      [],
+    );
+  });
+
+  it('treats a malformed or non-object file as empty rather than throwing', () => {
+    fs.writeFileSync(file, 'not json at all');
+    assert.deepEqual(readSettings(file), {});
+    fs.writeFileSync(file, '[1,2,3]');
+    assert.deepEqual(readSettings(file), {});
+  });
+});
+
+describe('cli agent file', () => {
+  let home: string;
+  let data: string;
+  let target: string;
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-home-'));
+    data = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-agentdata-'));
+    target = path.join(home, '.kiro', 'agents', 'casper.json');
+  });
+
+  it('installs a real file, not a symlink - npm would leave a link dangling', () => {
+    const r = installAgentFile(home, data);
+    assert.equal(r.action, 'installed');
+    assert.ok(fs.existsSync(target));
+    assert.equal(fs.lstatSync(target).isSymbolicLink(), false);
+  });
+
+  it('is a no-op on the second run', () => {
+    installAgentFile(home, data);
+    assert.equal(installAgentFile(home, data).action, 'unchanged');
+  });
+
+  it('keeps a file the user edited', () => {
+    installAgentFile(home, data);
+    fs.writeFileSync(target, '{"name":"casper","description":"mine"}');
+    assert.equal(installAgentFile(home, data).action, 'kept-yours');
+    assert.match(fs.readFileSync(target, 'utf8'), /mine/);
+  });
+
+  it('refreshes an unmodified copy when the shipped file changes', () => {
+    installAgentFile(home, data);
+    // Same effect as a new version shipping: the stamp no longer matches the file
+    // we would write, but it does match what is on disk.
+    const stamp = path.join(data, 'agent-stamp');
+    fs.writeFileSync(target, 'superseded contents');
+    fs.writeFileSync(
+      stamp,
+      `${crypto.createHash('sha256').update('superseded contents').digest('hex')}\n`,
+    );
+    assert.equal(installAgentFile(home, data).action, 'updated');
+    assert.notEqual(fs.readFileSync(target, 'utf8'), 'superseded contents');
+  });
+
+  it('replaces a symlink left by the old shell installer', () => {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.symlinkSync('/nonexistent/casper.json', target);
+    assert.equal(installAgentFile(home, data).action, 'updated');
+    assert.equal(fs.lstatSync(target).isSymbolicLink(), false);
   });
 });
 

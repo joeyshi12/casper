@@ -29,10 +29,53 @@ On reconnect the client replays exactly what it missed.
 - [`kiro-cli`](https://kiro.dev) installed and authenticated (`kiro-cli login`) -
   Casper is a client for it, so nothing works without it.
 - Node.js 24+ (Casper stores its state in SQLite via the built-in `node:sqlite`).
-- `git` and `npm`, if you use the one-line installer (it clones and builds from source).
 - systemd is **optional** - it's only used to auto-start Casper as a background
   service that survives reboots. Without it (or under a different init system),
   you run Casper with the `casper` command.
+
+## Install
+
+```bash
+npm install -g @joeyshi12/casper
+casper                    # runs in the foreground; Ctrl-C to stop
+```
+
+The first run generates your access token, prints it in a bordered block, and
+installs the `casper` agent for kiro. Open the printed URL and paste the token.
+
+To keep it running across reboots:
+
+```bash
+casper service install    # systemd user service, started immediately
+```
+
+Without systemd, background it however your setup prefers - your init system,
+`nohup casper &`, or tmux.
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `casper` | Run the server in the foreground |
+| `casper token` | Print the access token |
+| `casper reset-token [value]` | Set a new token and sign every device out |
+| `casper doctor` | Check kiro-cli, settings, data directory and web app |
+| `casper service install` | Run Casper as a systemd user service |
+| `casper service uninstall` | Remove the service (settings and sessions kept) |
+| `casper service status` | Show the service status |
+
+**Update:** `npm install -g @joeyshi12/casper@latest`, then
+`casper service install` again if you use the service - the unit records the
+resolved node and package paths, and both move on upgrade. Your token and sessions
+are preserved.
+
+**Uninstall:**
+
+```bash
+casper service uninstall           # if you installed the service
+npm uninstall -g @joeyshi12/casper
+rm -rf ~/.casper ~/.config/casper  # only if you also want sessions and settings gone
+```
 
 ## Develop
 
@@ -66,11 +109,10 @@ unrecognised keys are reported so a typo doesn't pass silently.
 
 Every setting can also be given as an **environment variable, which takes
 precedence** over the file - convenient for containers, one-off runs, and tests.
-Three are environment-only and live in `.env` in the install directory:
-`CASPER_DATA_DIR` (it says where data lives, so it can't be read from inside it),
-`CASPER_WEB_DIST` (install layout), and `CASPER_NODE` (the binary the `casper`
-runner execs). Setting anything else in both places is just a way to confuse
-yourself, since the environment silently wins.
+Two are environment-only: `CASPER_DATA_DIR` (it says where data lives, so it can't
+be read from inside it) and `CASPER_WEB_DIST` (install layout, not a preference).
+Setting anything else in both places is just a way to confuse yourself, since the
+environment silently wins.
 
 ### Reference
 
@@ -89,37 +131,6 @@ Environment variable, matching config key, and default:
 | `MAX_LIVE_SESSIONS` | `maxLiveSessions` | `6` | Max concurrent live kiro processes |
 | `DEFAULT_AGENT` | `defaultAgent` | `kiro_default` | Default agent for new sessions |
 | `CASPER_WEB_DIST` | _(env only)_ | `../web/dist` | Built web app to serve (set to an absolute path in prod) |
-| `CASPER_NODE` | _(env only)_ | `node` | Explicit Node binary for the `casper` runner (the installer records the resolved path so the service starts under a minimal PATH). |
-
-## Install
-
-Make sure `kiro-cli` is installed and logged in (`kiro-cli login`), then run:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/joeyshi12/casper/refs/heads/main/scripts/install.sh | bash
-```
-
-This builds Casper and puts a `casper` command on your `PATH`. Where user
-systemd is available it also starts Casper as a background service that
-survives reboots - it's already running, so open the URL the installer
-printed. Without systemd, start it yourself:
-
-```bash
-casper           # runs in the foreground (Ctrl-C to stop)
-```
-
-Background it however your setup prefers: your init system, `nohup casper &`,
-or tmux.
-
-Your access token prints once in a bordered block - copy it before scrolling.
-If you lose it, run `casper token`, or read `token` from
-`~/.config/casper/config.json`.
-
-**Update:** `casper update` pulls the latest version, rebuilds, and restarts
-the service if one is running. Your token is preserved.
-
-**Uninstall:** `~/.local/share/casper/scripts/uninstall.sh` (add `--purge` to
-also delete saved sessions, logins, and your settings).
 
 **HTTPS** (recommended beyond your LAN): put a TLS-terminating reverse proxy
 in front, pointed at `http://127.0.0.1:4319`, forwarding WebSocket upgrades
@@ -136,5 +147,11 @@ npm run e2e     # full server: prompt, disconnect mid-turn, reconnect, replay
 ## Security
 
 Casper launches kiro with `--trust-all-tools` so unattended runs never block on
-approvals - the agent can run commands and write files without confirmation.
-Always set `CASPER_TOKEN` and put the server behind HTTPS before exposing it.
+approvals - the agent can run commands and write files without confirmation. Treat
+access to Casper as equivalent to a shell on the machine, and put it behind HTTPS
+before exposing it.
+
+The token is generated for you (24 random bytes) and exchanged at login for a
+per-device cookie; only its hash is stored. Comparison is constant-time, and
+`/api/login` allows ten failures per quarter hour per address before answering 429.
+Settings and the database are written `0600`.

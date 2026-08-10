@@ -1,0 +1,49 @@
+name: Publish
+
+# Publishes @joeyshi12/casper (the server workspace) to npm.
+#
+# Authenticated by npm trusted publishing: npm accepts the OIDC id-token minted for
+# this workflow, so there is no NPM_TOKEN to store, leak or rotate. Provenance is
+# attested automatically for public repos, which is why nothing passes --provenance.
+#
+# The trust registration names this file, so renaming it stops publishing until npm
+# is updated:
+#   npm trust github --file publish.yml --repo joeyshi12/casper --allow-publish
+#
+# Note on the release trigger: a release cut by release.yml will NOT start this
+# workflow, because events raised by GITHUB_TOKEN don't trigger further runs. It
+# fires for a release created by hand in the UI; otherwise run it from the Actions
+# tab.
+on:
+  workflow_dispatch:
+  release:
+    types: [created]
+
+permissions:
+  id-token: write # the credential, and the provenance signature
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          # Node 24 for npm >= 11.5.1. Node 22 ships npm 10.9.8, which predates
+          # trusted publishing and fails with ENEEDAUTH.
+          node-version: '24'
+          # Without registry-url there is no auth line and npm never attempts the
+          # OIDC exchange.
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npm test
+
+      # The root is private, so publishing has to target the workspace.
+      - run: npm publish --workspace @joeyshi12/casper
