@@ -1,6 +1,6 @@
 {
   "name": "@joeyshi12/casper",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Web client for kiro-cli over the Agent Client Protocol",
   "license": "MIT",
   "author": "Joey Shi",
