@@ -1,47 +1,46 @@
-import type { Highlighter } from 'shiki';
-
 /**
- * A single Shiki highlighter, created with NO languages. Grammars are loaded
- * lazily per language on first use (see highlightToHtml), so the browser only
- * fetches the handful of language chunks actually rendered instead of the
- * ~30 we support (each grammar is a separate, sometimes large, JS chunk).
+ * Shiki's tokenizer is synchronous and costs roughly 9ms per KB, so highlighting
+ * on the main thread freezes the app on anything sizeable. It runs in a worker
+ * instead; callers already treat null as "render plain text".
  */
-let highlighterPromise: Promise<Highlighter> | null = null;
+const MAX_HIGHLIGHT_CHARS = 256 * 1024;
 
-function base(): Promise<Highlighter> {
-  if (!highlighterPromise) {
-    highlighterPromise = import('shiki').then(({ createHighlighter: create }) =>
-      create({ themes: ['dracula'], langs: [] }),
-    );
-  }
-  return highlighterPromise;
+let worker: Worker | null = null;
+let seq = 0;
+const pending = new Map<number, (html: string | null) => void>();
+
+function settle(id: number, html: string | null): void {
+  pending.get(id)?.(html);
+  pending.delete(id);
 }
 
-const loaded = new Set<string>();
-const failed = new Set<string>();
-
-/**
- * Highlight code to HTML with the dracula theme, loading the grammar on demand.
- * Falls back to plain text when the language is unknown/unsupported. Returns
- * null only if highlighting fails entirely (caller renders raw text).
- */
-export async function highlightToHtml(code: string, lang: string): Promise<string | null> {
+function getWorker(): Worker | null {
+  if (worker) return worker;
   try {
-    const hl = await base();
-    let useLang = 'text';
-    if (lang && lang !== 'text' && !failed.has(lang)) {
-      if (!loaded.has(lang)) {
-        try {
-          await hl.loadLanguage(lang as Parameters<Highlighter['loadLanguage']>[0]);
-          loaded.add(lang);
-        } catch {
-          failed.add(lang); // unknown grammar; render as plain text
-        }
-      }
-      if (hl.getLoadedLanguages().includes(lang)) useLang = lang;
-    }
-    return hl.codeToHtml(code, { lang: useLang, theme: 'dracula' });
+    worker = new Worker(new URL('./highlightWorker.ts', import.meta.url), { type: 'module' });
+    worker.addEventListener('message', (e: MessageEvent<{ id: number; html: string | null }>) =>
+      settle(e.data.id, e.data.html),
+    );
+    // A dead worker must not leave callers hanging on a promise.
+    worker.addEventListener('error', () => {
+      for (const id of [...pending.keys()]) settle(id, null);
+      worker = null;
+    });
   } catch {
     return null;
   }
+  return worker;
+}
+
+/** Highlighted HTML, or null when the caller should render the code as plain text. */
+export async function highlightToHtml(code: string, lang: string): Promise<string | null> {
+  // Past this size the colour isn't worth seconds of a core, even off-thread.
+  if (code.length > MAX_HIGHLIGHT_CHARS) return null;
+  const w = getWorker();
+  if (!w) return null;
+  const id = ++seq;
+  return new Promise((resolve) => {
+    pending.set(id, resolve);
+    w.postMessage({ id, code, lang });
+  });
 }

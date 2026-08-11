@@ -127,6 +127,10 @@
 .srow-open {
   flex: 1;
   min-width: 0;
+  display: block;
+  /* An anchor now, so opt out of the global link colour and underline. */
+  color: inherit;
+  text-decoration: none;
   text-align: left;
   /* Reserve room on the right so the title truncates before the ⋮ menu
      instead of running the full width of the row. */
@@ -2483,6 +2487,20 @@
 
 /* Rendered HTML. White background regardless of theme: the page brings its own
    styling and most pages assume a light canvas. */
+.fpreview-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 56px 0;
+  color: var(--frost);
+}
+
+.fpreview-md {
+  /* Cap the measure so prose stays readable when the preview goes fullscreen. */
+  max-width: 78ch;
+  margin: 0 auto;
+}
+
 .fpreview-html {
   display: block;
   width: 100%;

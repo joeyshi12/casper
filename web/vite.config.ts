@@ -31,6 +31,11 @@ export default defineConfig({
       },
     }),
   ],
+  worker: {
+    // The worker imports shiki and its grammars dynamically, and the default iife
+    // format can't code-split.
+    format: 'es',
+  },
   build: {
     chunkSizeWarningLimit: 1600, // mermaid + shiki are lazy-loaded, not in the initial bundle
   },

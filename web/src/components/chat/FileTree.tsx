@@ -24,6 +24,7 @@ import {
   ShrinkIcon,
   Spinner,
 } from '../common/icons.js';
+import { MarkdownRenderer } from './MarkdownRenderer.js';
 
 interface FileTreeProps {
   sessionId: string;
@@ -43,9 +44,7 @@ interface PreviewState {
   name: string;
   content: string | null;
   highlightedHtml: string | null;
-  isImage: boolean;
-  isPdf: boolean;
-  isHtml: boolean;
+  kind: PreviewKind;
   loading: boolean;
   error: string | null;
 }
@@ -122,18 +121,19 @@ function FileTypeIcon({ name }: { name: string }) {
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif']);
 
-function isImageFile(name: string): boolean {
-  const ext = name.split('.').pop()?.toLowerCase() ?? '';
-  return IMAGE_EXTS.has(ext);
-}
+/** 'html' and 'markdown' have a rendered form, so they get the source toggle. */
+type PreviewKind = 'image' | 'pdf' | 'html' | 'markdown' | 'text';
 
-function isPdfFile(name: string): boolean {
-  return name.toLowerCase().endsWith('.pdf');
-}
-
-function isHtmlFile(name: string): boolean {
+function previewKind(name: string): PreviewKind {
   const lower = name.toLowerCase();
-  return lower.endsWith('.html') || lower.endsWith('.htm');
+  // Same rule as path.extname: a leading dot is a dotfile, not an extension.
+  const dot = lower.lastIndexOf('.');
+  const ext = dot > 0 ? lower.slice(dot + 1) : '';
+  if (IMAGE_EXTS.has(ext)) return 'image';
+  if (ext === 'pdf') return 'pdf';
+  if (ext === 'html' || ext === 'htm') return 'html';
+  if (ext === 'md' || ext === 'markdown') return 'markdown';
+  return 'text';
 }
 
 /** Map file extension to shiki language id. */
@@ -322,9 +322,8 @@ function FilePreview({
   sessionId: string;
   onClose: () => void;
 }) {
-  // Fullscreen is a class on the modal rather than the Fullscreen API: iOS Safari
-  // doesn't support requestFullscreen on arbitrary elements, and this is a PWA that
-  // gets used from a phone.
+  // A class rather than the Fullscreen API, which iOS Safari won't grant to
+  // arbitrary elements - and this gets used from a phone.
   const [full, setFull] = useState(false);
   // Keyed by path so switching files doesn't carry the previous file's choice over.
   const [sourceByPath, setSourceByPath] = useState<Record<string, boolean>>({});
@@ -345,17 +344,18 @@ function FilePreview({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // Rendered HTML defaults to on: someone opening a generated page wants to see
-  // the page. Source stays one click away for reading the markup.
+  // Rendered by default: a generated page or a README is opened to be read.
   const showSource = sourceByPath[preview.path] ?? false;
+  const canRender = preview.kind === 'html' || preview.kind === 'markdown';
+  const showRendered = canRender && !showSource;
+  const showText = preview.kind !== 'image' && preview.kind !== 'pdf' && !showRendered;
 
   return (
     <div className="fpreview-backdrop" onClick={onBackdropClick}>
       <div className={`fpreview-modal${full ? ' fpreview-full' : ''}`}>
         <div className="fpreview-header">
-          {preview.isHtml && !preview.error && (
-            // Segmented control: eye for the rendered page, </> for the markup. The
-            // active side is filled so it reads as a position rather than an action.
+          {canRender && !preview.error && (
+            // The active side is filled, so it reads as a position not an action.
             <div className="fpreview-seg" role="group" aria-label="Preview mode">
               <button
                 className={`fpreview-seg-btn${showSource ? '' : ' is-active'}`}
@@ -401,23 +401,27 @@ function FilePreview({
           </button>
         </div>
         <div className="fpreview-body">
-          {preview.loading && <div className="ftree-loading">Loading…</div>}
+          {preview.loading && (
+            <div className="fpreview-loading">
+              <Spinner size={48} />
+            </div>
+          )}
           {preview.error && <div className="ftree-error">{preview.error}</div>}
-          {!preview.loading && !preview.error && preview.isImage && (
+          {!preview.loading && !preview.error && preview.kind === 'image' && (
             <img
               src={api.previewUrl(sessionId, preview.path)}
               alt={preview.name}
               className="fpreview-image"
             />
           )}
-          {!preview.error && preview.isPdf && (
+          {!preview.error && preview.kind === 'pdf' && (
             <iframe
               src={api.previewUrl(sessionId, preview.path)}
               title={preview.name}
               className="fpreview-pdf"
             />
           )}
-          {!preview.error && preview.isHtml && !showSource && (
+          {!preview.error && preview.kind === 'html' && showRendered && (
             // No allow-same-origin, so scripts run but the page can't touch the session
             // cookie or the API. The server sends a matching CSP.
             <iframe
@@ -427,13 +431,19 @@ function FilePreview({
               sandbox="allow-scripts allow-forms"
             />
           )}
-          {!preview.loading && !preview.error && !preview.isImage && !preview.isPdf && (!preview.isHtml || showSource) && preview.highlightedHtml && (
+          {!preview.loading && !preview.error && preview.kind === 'markdown' && showRendered && preview.content !== null && (
+            // react-markdown drops raw HTML, so there is nothing to sandbox.
+            <div className="fpreview-md">
+              <MarkdownRenderer text={preview.content} />
+            </div>
+          )}
+          {!preview.loading && !preview.error && showText && preview.highlightedHtml && (
             <div
               className="fpreview-highlighted"
               dangerouslySetInnerHTML={{ __html: preview.highlightedHtml }}
             />
           )}
-          {!preview.loading && !preview.error && !preview.isImage && !preview.isPdf && (!preview.isHtml || showSource) && !preview.highlightedHtml && preview.content !== null && (
+          {!preview.loading && !preview.error && showText && !preview.highlightedHtml && preview.content !== null && (
             <pre className="fpreview-code">{preview.content}</pre>
           )}
         </div>
@@ -474,22 +484,19 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
 
   const openPreview = useCallback(
     async (entry: FileEntry) => {
-      const image = isImageFile(entry.name);
-      const pdf = isPdfFile(entry.name);
+      const kind = previewKind(entry.name);
+      const needsContent = kind !== 'image' && kind !== 'pdf';
       setPreview({
         path: entry.path,
         name: entry.name,
         content: null,
         highlightedHtml: null,
-        isImage: image,
-        isPdf: pdf,
-        isHtml: isHtmlFile(entry.name),
-        loading: !image && !pdf, // images/PDFs render via their own element
+        kind,
+        loading: needsContent,
         error: null,
       });
 
-      // For text files, fetch the content and highlight it.
-      if (!image && !pdf) {
+      if (needsContent) {
         try {
           const url = api.previewUrl(sessionId, entry.path);
           const res = await fetch(url, { credentials: 'same-origin' });
@@ -499,16 +506,21 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
           }
           const text = await res.text();
 
-          // Attempt syntax highlighting (grammar loaded lazily on demand).
-          let html: string | null = null;
-          const lang = langFromFilename(entry.name);
-          if (lang) html = await highlightToHtml(text, lang);
-
+          // Show the file as soon as it arrives; highlighting lands separately so a
+          // big file isn't held behind it.
           setPreview((p) =>
-            p && p.path === entry.path
-              ? { ...p, content: text, highlightedHtml: html, loading: false }
-              : p,
+            p && p.path === entry.path ? { ...p, content: text, loading: false } : p,
           );
+
+          const lang = langFromFilename(entry.name);
+          if (lang) {
+            const html = await highlightToHtml(text, lang);
+            if (html) {
+              setPreview((p) =>
+                p && p.path === entry.path ? { ...p, highlightedHtml: html } : p,
+              );
+            }
+          }
         } catch (err) {
           setPreview((p) =>
             p && p.path === entry.path

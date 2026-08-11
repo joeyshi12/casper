@@ -44,6 +44,8 @@ import { classifyKind, looksBinary } from '../server/src/util/filekind.js';
 import { bumpSessionToTop } from '../web/src/state/sessions.js';
 import { olderPageRequest } from '../web/src/state/pagination.js';
 import { lineDiff } from '../web/src/util/diff.js';
+import { matchPath } from 'react-router';
+import { SESSION_ROUTE, pathForSession } from '../web/src/util/route.js';
 import { lazyImageProps } from '../web/src/util/lazyImage.js';
 import { classifyTurnFailure } from '../web/src/util/turnFailure.js';
 import {
@@ -1490,5 +1492,18 @@ describe('config file precedence', () => {
 
   it('points at the settings file it reads, for diagnostics', () => {
     assert.match(config.configFile, /casper\/config\.json$/);
+  });
+});
+
+describe('session deep links', () => {
+  // The builder and the route pattern have to agree, or a link navigates to a
+  // URL the app doesn't match and quietly lands on the session list.
+  it('builds paths the route pattern matches', () => {
+    const id = 'c959cc04-2a80-494b-bef8-9e7315ff4abd';
+    assert.equal(matchPath(SESSION_ROUTE, pathForSession(id))?.params.sessionId, id);
+  });
+
+  it('does not match the list route', () => {
+    assert.equal(matchPath(SESSION_ROUTE, '/'), null);
   });
 });

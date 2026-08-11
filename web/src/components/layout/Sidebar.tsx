@@ -1,3 +1,5 @@
+import { Link } from 'react-router';
+import { pathForSession } from '../../util/route.js';
 import { useEffect, useState } from 'react';
 import type { SessionSummary } from '@casper/shared';
 import { LockIcon, PlusIcon, SearchIcon, Spinner } from '../common/icons.js';
@@ -11,6 +13,7 @@ interface Props {
   /** Session currently being fetched after a click, for a small inline spinner
    *  while a slow transcript hydrates. */
   loadingId: string | null;
+  /** Fired on a plain left click, just before the router navigates. */
   onOpen: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
@@ -36,10 +39,7 @@ function relTime(iso: string): string {
   return `${Math.round(hrs / 24)}d`;
 }
 
-/**
- * Persistent session list. Search opens a centered modal palette. On desktop
- * the sidebar sits left of the chat; on mobile it's the home screen.
- */
+/** Session list: left of the chat on desktop, the home screen on mobile. */
 export function Sidebar({
   sessions,
   activeId,
@@ -164,7 +164,15 @@ export function Sidebar({
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
-                <button className="srow-open" onClick={() => onOpen(s.sessionId)}>
+                <Link
+                  className="srow-open"
+                  to={pathForSession(s.sessionId)}
+                  onClick={(e) => {
+                    // A modified click opens a new tab; don't mark this one loading.
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    onOpen(s.sessionId);
+                  }}
+                >
                   <span className="srow-main">
                     <span className="srow-title" title={s.title}>
                       {s.title}
@@ -183,7 +191,7 @@ export function Sidebar({
                       </span>
                     )}
                   </span>
-                </button>
+                </Link>
               )}
 
               <div className="srow-menu">

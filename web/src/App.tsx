@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { BrowserRouter, Navigate, Route, Routes, useMatch, useNavigate } from 'react-router';
 import type { PromptContentBlock } from '@casper/shared';
 import { stripAttachmentsLine } from '@casper/shared';
 import { useStore } from './state/store.js';
@@ -8,6 +9,7 @@ import { Sidebar } from './components/layout/Sidebar.js';
 import { ChatPane } from './components/layout/ChatPane.js';
 import { NewSessionSheet } from './components/sessions/NewSessionSheet.js';
 import { TokenGate } from './components/common/TokenGate.js';
+import { SESSION_ROUTE, pathForSession } from './util/route.js';
 
 type AuthState = 'checking' | 'gate' | 'ready';
 
@@ -22,9 +24,7 @@ const ACTION_LABEL: Record<string, string> = {
 };
 
 export function App() {
-  // Start in 'checking' and probe the server: if a valid session cookie is
-  // present the request succeeds and we skip the login page; a 401 falls back
-  // to the gate. This avoids flashing the login page for an already-authed user.
+  // Probe first, so an already-authed user never sees the login page flash by.
   const [auth, setAuth] = useState<AuthState>('checking');
 
   useEffect(() => {
@@ -37,16 +37,27 @@ export function App() {
 
   if (auth === 'checking') return <div className="app-splash" />;
   if (auth === 'gate') return <TokenGate onReady={() => setAuth('ready')} />;
-  return <Shell onLock={() => setAuth('gate')} />;
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* A layout route, so navigating doesn't remount Shell and drop the
+            socket. The children only exist to put :sessionId in the URL. */}
+        <Route element={<Shell onLock={() => setAuth('gate')} />}>
+          <Route index element={null} />
+          <Route path="sessions/:sessionId" element={null} />
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }
 
-/**
- * Responsive shell, modeled on Happy's web layout: a persistent session sidebar
- * beside the chat on desktop, collapsing to a one-screen-at-a-time flow on
- * mobile. `has-active` drives which pane is visible on narrow screens.
- */
+/** Sidebar beside the chat on desktop, one pane at a time on mobile. */
 function Shell({ onLock }: { onLock: () => void }) {
   const store = useStore();
+  const navigate = useNavigate();
+  // Not useParams: the param belongs to the child route, so it isn't visible here.
+  const routeSessionId = useMatch(SESSION_ROUTE)?.params.sessionId ?? null;
   const [newOpen, setNewOpen] = useState(false);
   const [connStatus, setConnStatus] = useState<ConnStatus>('closed');
   const [creating, setCreating] = useState(false);
@@ -79,9 +90,8 @@ function Shell({ onLock }: { onLock: () => void }) {
     socketRef.current = null;
   }, []);
 
-  // The socket was rejected as unauthorized (session expired or missing). The
-  // cookie is already invalid, so just drop the active session and return to
-  // the login gate rather than looping on reconnects.
+  // The cookie is already invalid, so drop the session and show the gate rather
+  // than looping on reconnects.
   const handleUnauthorized = useCallback(() => {
     closeSocket();
     store.clearActive();
@@ -104,6 +114,8 @@ function Shell({ onLock }: { onLock: () => void }) {
         setConnStatus('closed');
         useStore.getState().setLoadingSession(null);
         console.error('open session failed:', err);
+        // Replaced, so a refresh doesn't retry it and back doesn't return to it.
+        navigate('/', { replace: true });
         return;
       }
       store.loadDetail(detail);
@@ -113,10 +125,8 @@ function Shell({ onLock }: { onLock: () => void }) {
         {
           onEvent: (e) => {
             useStore.getState().applyEvent(e);
-            // A turn just finished: kiro persists the session around now, so
-            // reconcile the list from the server (real updatedAt, auto-title,
-            // credits). Delayed slightly so the persisted file is settled; the
-            // optimistic turn_started bump holds the top spot until then.
+            // kiro persists the session around now, so reconcile the list for its
+            // real updatedAt, title and credits. Delayed until that settles.
             if (e.payload.kind === 'turn_ended') {
               setTimeout(refreshSessions, 1200);
             }
@@ -154,14 +164,40 @@ function Shell({ onLock }: { onLock: () => void }) {
       socketRef.current = socket;
       socket.connect();
     },
-    [closeSocket, handleUnauthorized, refreshSessions, store],
+    [closeSocket, handleUnauthorized, navigate, refreshSessions, store],
   );
 
-  const backToList = useCallback(() => {
-    closeSocket();
-    store.clearActive();
-    refreshSessions();
-  }, [closeSocket, refreshSessions, store]);
+  const backToList = useCallback(() => navigate('/'), [navigate]);
+
+  // Marked before the route changes, or the pane flashes back to the list.
+  // Not for the open session: the route wouldn't change, so nothing clears it.
+  const markLoading = useCallback((id: string) => {
+    if (id === useStore.getState().activeId) return;
+    useStore.getState().setLoadingSession(id);
+  }, []);
+
+  const goToSession = useCallback(
+    (id: string) => {
+      markLoading(id);
+      navigate(pathForSession(id));
+    },
+    [markLoading, navigate],
+  );
+
+  // The route owns which session is open, so cold loads, back/forward and
+  // clicks all arrive here. The ref fires it on URL changes, not renders.
+  const handledRoute = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (handledRoute.current === routeSessionId) return;
+    handledRoute.current = routeSessionId;
+    if (routeSessionId) {
+      void openSession(routeSessionId);
+    } else {
+      closeSocket();
+      store.clearActive();
+      refreshSessions();
+    }
+  }, [routeSessionId, openSession, closeSocket, refreshSessions, store]);
 
   const createSession = useCallback(
     async (opts: { cwd: string; agentId: string; modelId: string }) => {
@@ -179,7 +215,7 @@ function Shell({ onLock }: { onLock: () => void }) {
           modelId: opts.modelId,
         });
         refreshSessions();
-        await openSession(detail.summary.sessionId);
+        goToSession(detail.summary.sessionId);
       } catch (err) {
         // Keep the user on the chat pane and show what went wrong; `creating`
         // stays true so `hasActive` holds the view open for the error screen.
@@ -189,7 +225,7 @@ function Shell({ onLock }: { onLock: () => void }) {
         setCreating(false);
       }
     },
-    [closeSocket, openSession, refreshSessions],
+    [closeSocket, goToSession, refreshSessions],
   );
 
   const retryCreate = useCallback(() => {
@@ -306,9 +342,8 @@ function Shell({ onLock }: { onLock: () => void }) {
   }, []);
   const changeAgent = useCallback((modeId: string) => {
     socketRef.current?.setMode(modeId);
-    // Optimistically reflect the switch in both the active session's picker
-    // (currentModeId) and its row in the session list (agentId), so the sidebar
-    // updates immediately instead of only after the next listSessions/reload.
+    // Optimistic in both the picker (currentModeId) and the sidebar row (agentId),
+    // so neither waits for the next listSessions.
     useStore.setState((s) => ({
       currentModeId: modeId,
       sessions: s.activeId
@@ -340,6 +375,7 @@ function Shell({ onLock }: { onLock: () => void }) {
     void logout();
     closeSocket();
     store.clearActive();
+    navigate('/', { replace: true });
     onLock();
   }, [closeSocket, onLock, store]);
 
@@ -355,7 +391,7 @@ function Shell({ onLock }: { onLock: () => void }) {
         sessions={store.sessions}
         activeId={store.activeId}
         loadingId={store.loadingSessionId}
-        onOpen={openSession}
+        onOpen={markLoading}
         onNew={() => setNewOpen(true)}
         onDelete={deleteSession}
         onRename={renameSession}
