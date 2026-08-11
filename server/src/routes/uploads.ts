@@ -127,7 +127,9 @@ export function registerUploadRoutes(
       }
 
       const uploadDir = uploadDirFor(req.params.id);
-      await fs.mkdir(uploadDir, { recursive: true });
+      // 0700 like the data directory: uploads are the user's files, and the default
+      // umask would otherwise leave them readable to anyone on the machine.
+      await fs.mkdir(uploadDir, { recursive: true, mode: 0o700 });
 
       const results: UploadedFile[] = [];
 
