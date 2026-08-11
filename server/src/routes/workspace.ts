@@ -309,11 +309,9 @@ export function registerWorkspaceRoutes(
         }
       }
 
-      // Raw HTML for the rendered preview. The CSP sandbox is the load-bearing
-      // part: it applies however the response is loaded, including someone
-      // opening the URL directly, where the iframe's own sandbox attribute
-      // wouldn't. Without allow-same-origin the page gets an opaque origin, so
-      // it can't read cookies or call the API as the user - it only renders.
+      // Raw HTML for the rendered preview. The CSP sandbox applies however the
+      // response is loaded - including direct navigation, where the iframe's own
+      // sandbox attribute wouldn't - so the page can never act as the user.
       if (isHtml) {
         if (stat.size > MAX_TEXT_PREVIEW_BYTES) {
           reply.code(413);

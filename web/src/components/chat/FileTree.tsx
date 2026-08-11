@@ -5,19 +5,23 @@ import { useStore } from '../../state/store.js';
 import { ChangeFolderSheet } from '../sessions/ChangeFolderSheet.js';
 import { highlightToHtml } from '../../util/highlighter.js';
 import {
-  FileIcon,
+  ChevronIcon,
+  CloseIcon,
+  CodeIcon,
+  DownloadIcon,
+  ExpandIcon,
+  EyeIcon,
   FileCodeIcon,
   FileConfigIcon,
-  FileTextIcon,
+  FileIcon,
   FileImageIcon,
   FileStyleIcon,
   FileTerminalIcon,
+  FileTextIcon,
   FolderIcon,
   FolderOpenIcon,
-  DownloadIcon,
   RefreshIcon,
-  CloseIcon,
-  ChevronIcon,
+  ShrinkIcon,
   Spinner,
 } from '../common/icons.js';
 
@@ -349,40 +353,51 @@ function FilePreview({
     <div className="fpreview-backdrop" onClick={onBackdropClick}>
       <div className={`fpreview-modal${full ? ' fpreview-full' : ''}`}>
         <div className="fpreview-header">
+          {preview.isHtml && !preview.error && (
+            // Segmented control: eye for the rendered page, </> for the markup. The
+            // active side is filled so it reads as a position rather than an action.
+            <div className="fpreview-seg" role="group" aria-label="Preview mode">
+              <button
+                className={`fpreview-seg-btn${showSource ? '' : ' is-active'}`}
+                onClick={() => setSourceByPath((prev) => ({ ...prev, [preview.path]: false }))}
+                title="Rendered"
+                aria-label="Rendered"
+                aria-pressed={!showSource}
+              >
+                <EyeIcon size={17} />
+              </button>
+              <button
+                className={`fpreview-seg-btn${showSource ? ' is-active' : ''}`}
+                onClick={() => setSourceByPath((prev) => ({ ...prev, [preview.path]: true }))}
+                title="Source"
+                aria-label="Source"
+                aria-pressed={showSource}
+              >
+                <CodeIcon size={17} />
+              </button>
+            </div>
+          )}
           <span className="fpreview-name" title={preview.path}>
             {preview.name}
           </span>
-          {preview.isHtml && !preview.error && (
-            <button
-              className="fpreview-toggle"
-              onClick={() => setSourceByPath((prev) => ({ ...prev, [preview.path]: !showSource }))}
-              title={showSource ? 'Show rendered page' : 'Show source'}
-            >
-              {showSource ? 'Rendered' : 'Source'}
-            </button>
-          )}
-          <button
-            className="fpreview-full-btn"
-            onClick={() => setFull((v) => !v)}
-            title={full ? 'Exit fullscreen' : 'Fullscreen'}
-            aria-label={full ? 'Exit fullscreen' : 'Fullscreen'}
-          >
-            {full ? '⤡' : '⤢'}
-          </button>
           <button
             className="fpreview-dl"
             onClick={download}
             title="Download file"
             aria-label="Download file"
           >
-            <DownloadIcon size={14} />
+            <DownloadIcon size={18} />
           </button>
           <button
-            className="fpreview-close"
-            onClick={onClose}
-            aria-label="Close preview"
+            className="fpreview-full-btn"
+            onClick={() => setFull((v) => !v)}
+            title={full ? 'Exit fullscreen' : 'Fullscreen'}
+            aria-label={full ? 'Exit fullscreen' : 'Fullscreen'}
           >
-            ×
+            {full ? <ShrinkIcon size={18} /> : <ExpandIcon size={18} />}
+          </button>
+          <button className="fpreview-close" onClick={onClose} aria-label="Close preview">
+            <CloseIcon size={18} />
           </button>
         </div>
         <div className="fpreview-body">
@@ -403,9 +418,8 @@ function FilePreview({
             />
           )}
           {!preview.error && preview.isHtml && !showSource && (
-            // sandbox without allow-same-origin: scripts run, but the page gets an
-            // opaque origin, so it can't read the session cookie or call the API as
-            // the user. The server sends a matching CSP sandbox header.
+            // No allow-same-origin, so scripts run but the page can't touch the session
+            // cookie or the API. The server sends a matching CSP.
             <iframe
               src={`${api.previewUrl(sessionId, preview.path)}&raw=1`}
               title={preview.name}

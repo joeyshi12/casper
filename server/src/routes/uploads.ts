@@ -12,13 +12,8 @@ import { classifyKind, mimeForExt } from '../util/filekind.js';
 import { confineToRoot, isValidSessionId } from '../util/paths.js';
 
 /**
- * Where uploads land: <data dir>/sessions/<id>/uploads.
- *
- * Not inside the session's working directory, which is where they used to go. That
- * left a .casper/ directory in every project you chatted about - untracked noise in
- * a git repo, easy to commit by accident, missed by the documented uninstall, and
- * never cleaned up. Keeping them with the rest of Casper's state means one place to
- * back up and one place to delete.
+ * Where uploads land. Deliberately not under the session's working directory, which
+ * would leave a .casper/ folder in every project you chat about.
  */
 function uploadDirFor(sessionId: string): string {
   return path.join(config.casperDataDir, 'sessions', sessionId, 'uploads');
@@ -105,10 +100,9 @@ export function registerUploadRoutes(
   /**
    * POST /api/sessions/:id/uploads  (multipart/form-data)
    *
-   * Streams each uploaded file to <data dir>/sessions/<id>/uploads/ (byte-for-byte, so
-   * binaries stay intact), classifies it, and for binaries attaches a cheap
-   * triage summary (file type, sha256, sample strings). Returns metadata the
-   * client uses to build the prompt.
+     * Streams each file to <data dir>/sessions/<id>/uploads/ byte-for-byte, classifies
+     * it, and for binaries adds a triage summary (type, sha256, sample strings) so the
+     * agent starts with context.
    */
   app.post<{ Params: { id: string } }>(
     '/api/sessions/:id/uploads',

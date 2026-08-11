@@ -23,12 +23,8 @@ const IMAGE_MIMES: Record<string, string> = {
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 /**
- * Confine to fileRoot, or to Casper's own data directory.
- *
- * Uploads live under the data directory, which is deliberately outside the workspace.
- * A narrowed CASPER_FILE_ROOT would otherwise make a user's own attachments
- * unviewable, so the data directory is allowed regardless. It only ever contains
- * Casper's state and the files the user uploaded through Casper.
+ * Confine to fileRoot, or to the data directory - uploads live there, and a narrowed
+ * CASPER_FILE_ROOT would otherwise hide the user's own attachments.
  */
 function confinedPath(input: string): string | null {
   return confineToRoot(config.fileRoot, input) ?? confineToRoot(config.casperDataDir, input);

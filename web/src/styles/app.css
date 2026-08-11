@@ -2419,8 +2419,8 @@
 .fpreview-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
+  gap: 8px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--n1);
   flex-shrink: 0;
 }
@@ -2440,8 +2440,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
   border-radius: var(--r-sm);
   border: none;
   background: none;
@@ -2494,12 +2495,17 @@
 
 /* Fullscreen preview. A class rather than the Fullscreen API, which iOS Safari
    won't grant to arbitrary elements. */
+/* The backdrop's 24px padding caps the modal, so drop it when going fullscreen. 100%
+   rather than 100vw, which overflows by the scrollbar width. */
+.fpreview-backdrop:has(.fpreview-full) {
+  padding: 0;
+}
+
 .fpreview-modal.fpreview-full {
   max-width: none;
   max-height: none;
-  width: 100vw;
-  height: 100vh;
-  height: 100dvh;
+  width: 100%;
+  height: 100%;
   border: 0;
   border-radius: 0;
 }
@@ -2509,20 +2515,40 @@
   min-height: 0;
 }
 
-.fpreview-toggle {
-  padding: 2px 8px;
-  font: inherit;
-  font-size: 11px;
-  color: var(--n6);
+/* Segmented rendered/source control, sitting at the left of the preview header. */
+.fpreview-seg {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
   background: var(--n1);
   border: 1px solid var(--n2);
   border-radius: var(--r-sm);
-  cursor: pointer;
+  flex-shrink: 0;
 }
 
-.fpreview-toggle:hover {
-  color: var(--n8);
-  border-color: var(--n3);
+.fpreview-seg-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  border: none;
+  border-radius: calc(var(--r-sm) - 1px);
+  background: none;
+  color: var(--n4);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.fpreview-seg-btn:hover {
+  color: var(--n7);
+}
+
+/* Filled, so the control reads as a position rather than a button to press. */
+.fpreview-seg-btn.is-active {
+  background: var(--n3);
+  color: var(--n9);
 }
 .fpreview-code {
   font-family: var(--font-mono);

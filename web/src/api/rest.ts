@@ -83,10 +83,8 @@ export const api = {
   previewUrl: (id: string, relativePath: string) =>
     `/api/sessions/${id}/preview?path=${encodeURIComponent(relativePath)}`,
   /**
-   * URL for an attachment. Uploads are stored outside the workspace and referenced by
-   * absolute path, which the session preview endpoint would reject as out of bounds;
-   * the fs endpoint takes absolute paths. Older transcripts still carry
-   * workspace-relative paths from when uploads lived in the project.
+   * Attachments are absolute paths, which only the fs endpoint accepts. Transcripts
+   * written before uploads moved out of the workspace still carry relative ones.
    */
   attachmentUrl: (id: string, filePath: string) =>
     filePath.startsWith('/')
