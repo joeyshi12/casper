@@ -9,10 +9,20 @@ import type { UploadResponse, UploadedFile } from '@casper/shared';
 import type { SessionManager } from '../session/SessionManager.js';
 import { config } from '../config.js';
 import { classifyKind, mimeForExt } from '../util/filekind.js';
-import { confineToRoot } from '../util/paths.js';
+import { confineToRoot, isValidSessionId } from '../util/paths.js';
 
-/** Where uploads land, relative to the session cwd. */
-const UPLOAD_SUBDIR = path.join('.casper', 'uploads');
+/**
+ * Where uploads land: <data dir>/sessions/<id>/uploads.
+ *
+ * Not inside the session's working directory, which is where they used to go. That
+ * left a .casper/ directory in every project you chatted about - untracked noise in
+ * a git repo, easy to commit by accident, missed by the documented uninstall, and
+ * never cleaned up. Keeping them with the rest of Casper's state means one place to
+ * back up and one place to delete.
+ */
+function uploadDirFor(sessionId: string): string {
+  return path.join(config.casperDataDir, 'sessions', sessionId, 'uploads');
+}
 
 /** Bytes of a binary to scan for a triage `strings` sample. */
 const STRINGS_SCAN_BYTES = 256 * 1024;
@@ -95,7 +105,7 @@ export function registerUploadRoutes(
   /**
    * POST /api/sessions/:id/uploads  (multipart/form-data)
    *
-   * Streams each uploaded file to <cwd>/.casper/uploads/ (byte-for-byte, so
+   * Streams each uploaded file to <data dir>/sessions/<id>/uploads/ (byte-for-byte, so
    * binaries stay intact), classifies it, and for binaries attaches a cheap
    * triage summary (file type, sha256, sample strings). Returns metadata the
    * client uses to build the prompt.
@@ -103,15 +113,20 @@ export function registerUploadRoutes(
   app.post<{ Params: { id: string } }>(
     '/api/sessions/:id/uploads',
     async (req, reply) => {
-      let cwd: string;
+      // Resolved only so an unknown session 404s rather than creating a directory
+      // for it; uploads no longer live under the workspace.
       try {
-        cwd = await manager.getSessionCwd(req.params.id);
+        await manager.getSessionCwd(req.params.id);
       } catch {
         reply.code(404);
         return { error: 'Session not found' };
       }
+      if (!isValidSessionId(req.params.id)) {
+        reply.code(400);
+        return { error: 'Invalid session id' };
+      }
 
-      const uploadDir = path.join(cwd, UPLOAD_SUBDIR);
+      const uploadDir = uploadDirFor(req.params.id);
       await fs.mkdir(uploadDir, { recursive: true });
 
       const results: UploadedFile[] = [];
@@ -143,11 +158,12 @@ export function registerUploadRoutes(
         const stat = await fs.stat(dest);
         const ext = path.extname(dest);
         const kind = classifyKind(dest);
-        const relative = path.relative(cwd, dest);
-
         const uploaded: UploadedFile = {
           name: path.basename(dest),
-          path: relative,
+          // Absolute, because the file sits outside the session's workspace: a
+          // relative path would resolve against the wrong root for both the agent
+          // and the image endpoint.
+          path: dest,
           size: stat.size,
           mimeType: mimeForExt(ext),
           kind,

@@ -242,7 +242,7 @@ export function registerWorkspaceRoutes(
    * UTF-8 text; images are returned with their MIME type for inline display.
    * Large files (>1 MB for text, >20 MB for images) are rejected.
    */
-  app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { path?: string; raw?: string } }>(
     '/api/sessions/:id/preview',
     async (req, reply) => {
       let cwd: string;
@@ -289,6 +289,10 @@ export function registerWorkspaceRoutes(
       const mime = mimeForExt(ext);
       const isImage = mime.startsWith('image/');
       const isPdf = mime === 'application/pdf';
+      // Served raw so the panel can render it in an iframe rather than showing
+      // source. `raw=1` is required: without it a bare link to this endpoint
+      // would hand an agent-authored page the same origin as the API.
+      const isHtml = mime === 'text/html' && req.query.raw === '1';
       const kind = classifyKind(realTarget);
 
       // Binaries are only hexdumped (fixed head), so no size gate for them.
@@ -303,6 +307,22 @@ export function registerWorkspaceRoutes(
           reply.code(413);
           return tooLargeForPreview(stat.size, MAX_TEXT_PREVIEW_BYTES);
         }
+      }
+
+      // Raw HTML for the rendered preview. The CSP sandbox is the load-bearing
+      // part: it applies however the response is loaded, including someone
+      // opening the URL directly, where the iframe's own sandbox attribute
+      // wouldn't. Without allow-same-origin the page gets an opaque origin, so
+      // it can't read cookies or call the API as the user - it only renders.
+      if (isHtml) {
+        if (stat.size > MAX_TEXT_PREVIEW_BYTES) {
+          reply.code(413);
+          return tooLargeForPreview(stat.size, MAX_TEXT_PREVIEW_BYTES);
+        }
+        reply.header('Content-Security-Policy', 'sandbox allow-scripts allow-forms');
+        reply.header('Content-Type', 'text/html; charset=utf-8');
+        reply.header('Cache-Control', 'no-store');
+        return reply.send(createReadStream(realTarget));
       }
 
       // Stream images and PDFs with Content-Disposition: inline so the browser

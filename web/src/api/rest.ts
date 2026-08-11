@@ -82,7 +82,17 @@ export const api = {
   /** Get a preview URL for a file (inline display). */
   previewUrl: (id: string, relativePath: string) =>
     `/api/sessions/${id}/preview?path=${encodeURIComponent(relativePath)}`,
-  /** Upload files to a session's workspace (.casper/uploads). */
+  /**
+   * URL for an attachment. Uploads are stored outside the workspace and referenced by
+   * absolute path, which the session preview endpoint would reject as out of bounds;
+   * the fs endpoint takes absolute paths. Older transcripts still carry
+   * workspace-relative paths from when uploads lived in the project.
+   */
+  attachmentUrl: (id: string, filePath: string) =>
+    filePath.startsWith('/')
+      ? `/api/fs/image?path=${encodeURIComponent(filePath)}`
+      : `/api/sessions/${id}/preview?path=${encodeURIComponent(filePath)}`,
+  /** Upload files for a session (stored under the data directory). */
   uploadFiles: async (id: string, files: File[]): Promise<UploadResponse> => {
     const form = new FormData();
     for (const f of files) form.append('files', f, f.name);

@@ -20,8 +20,8 @@ exactly what it missed.
 - **Per-session model and agent**, from the live model list and kiro's agents.
 - **Rich rendering** of Markdown, Mermaid, syntax-highlighted code, and MCP tool
   calls with their status, input and output.
-- **File browser** for the session's workspace, with previews for text, images
-  and PDFs.
+- **File browser** for the session's workspace, previewing text, images and PDFs.
+  HTML renders as a live page, sandboxed, and either can go fullscreen.
 - **Observability** for credits spent, context-window usage and turn duration.
 - **PWA** that installs to a home screen and reconnects when the network returns.
 
@@ -104,7 +104,7 @@ inside it, and `CASPER_WEB_DIST`, which is install layout rather than a preferen
 | `DEFAULT_AGENT` | `defaultAgent` | `kiro_default` | Agent for new sessions |
 | `CASPER_FILE_ROOT` | `fileRoot` | `/` | Confines the file browser. Defaults to everything the server can read; narrow it to keep authenticated users out of system files |
 | `MAX_LIVE_SESSIONS` | `maxLiveSessions` | `6` | Concurrent live kiro processes |
-| `CASPER_DATA_DIR` | _(env only)_ | `~/.casper` | Where `casper.db` lives |
+| `CASPER_DATA_DIR` | _(env only)_ | `~/.casper` | Where `casper.db` and uploaded files live |
 | `CASPER_WEB_DIST` | _(env only)_ | beside the bundle | Built web app to serve |
 
 Beyond your LAN, put a TLS-terminating reverse proxy in front of

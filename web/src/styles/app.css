@@ -2435,6 +2435,7 @@
   min-width: 0;
 }
 .fpreview-dl,
+.fpreview-full-btn,
 .fpreview-close {
   display: flex;
   align-items: center;
@@ -2450,6 +2451,7 @@
   transition: background 0.12s, color 0.12s;
 }
 .fpreview-dl:hover,
+.fpreview-full-btn:hover,
 .fpreview-close:hover {
   background: var(--n1);
   color: var(--n6);
@@ -2476,6 +2478,51 @@
   border: 0;
   border-radius: var(--r-sm);
   background: var(--n-abyss);
+}
+
+/* Rendered HTML. White background regardless of theme: the page brings its own
+   styling and most pages assume a light canvas. */
+.fpreview-html {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 65vh;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: #fff;
+}
+
+/* Fullscreen preview. A class rather than the Fullscreen API, which iOS Safari
+   won't grant to arbitrary elements. */
+.fpreview-modal.fpreview-full {
+  max-width: none;
+  max-height: none;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  border: 0;
+  border-radius: 0;
+}
+
+.fpreview-modal.fpreview-full .fpreview-html,
+.fpreview-modal.fpreview-full .fpreview-pdf {
+  min-height: 0;
+}
+
+.fpreview-toggle {
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--n6);
+  background: var(--n1);
+  border: 1px solid var(--n2);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.fpreview-toggle:hover {
+  color: var(--n8);
+  border-color: var(--n3);
 }
 .fpreview-code {
   font-family: var(--font-mono);

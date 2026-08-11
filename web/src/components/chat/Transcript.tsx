@@ -237,13 +237,13 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
                       {item.message.imagePaths.map((p) => (
                         <a
                           key={p}
-                          href={api.previewUrl(activeId, p)}
+                          href={api.attachmentUrl(activeId, p)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="msg-image-link"
                         >
                           <img
-                            src={api.previewUrl(activeId, p)}
+                            src={api.attachmentUrl(activeId, p)}
                             alt={p.split('/').pop() ?? 'image'}
                             className="msg-image"
                             {...lazyImageProps}

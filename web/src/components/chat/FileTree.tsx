@@ -41,6 +41,7 @@ interface PreviewState {
   highlightedHtml: string | null;
   isImage: boolean;
   isPdf: boolean;
+  isHtml: boolean;
   loading: boolean;
   error: string | null;
 }
@@ -124,6 +125,11 @@ function isImageFile(name: string): boolean {
 
 function isPdfFile(name: string): boolean {
   return name.toLowerCase().endsWith('.pdf');
+}
+
+function isHtmlFile(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith('.html') || lower.endsWith('.htm');
 }
 
 /** Map file extension to shiki language id. */
@@ -312,6 +318,13 @@ function FilePreview({
   sessionId: string;
   onClose: () => void;
 }) {
+  // Fullscreen is a class on the modal rather than the Fullscreen API: iOS Safari
+  // doesn't support requestFullscreen on arbitrary elements, and this is a PWA that
+  // gets used from a phone.
+  const [full, setFull] = useState(false);
+  // Keyed by path so switching files doesn't carry the previous file's choice over.
+  const [sourceByPath, setSourceByPath] = useState<Record<string, boolean>>({});
+
   const download = () => {
     window.open(api.downloadUrl(sessionId, preview.path), '_blank');
   };
@@ -328,13 +341,34 @@ function FilePreview({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Rendered HTML defaults to on: someone opening a generated page wants to see
+  // the page. Source stays one click away for reading the markup.
+  const showSource = sourceByPath[preview.path] ?? false;
+
   return (
     <div className="fpreview-backdrop" onClick={onBackdropClick}>
-      <div className="fpreview-modal">
+      <div className={`fpreview-modal${full ? ' fpreview-full' : ''}`}>
         <div className="fpreview-header">
           <span className="fpreview-name" title={preview.path}>
             {preview.name}
           </span>
+          {preview.isHtml && !preview.error && (
+            <button
+              className="fpreview-toggle"
+              onClick={() => setSourceByPath((prev) => ({ ...prev, [preview.path]: !showSource }))}
+              title={showSource ? 'Show rendered page' : 'Show source'}
+            >
+              {showSource ? 'Rendered' : 'Source'}
+            </button>
+          )}
+          <button
+            className="fpreview-full-btn"
+            onClick={() => setFull((v) => !v)}
+            title={full ? 'Exit fullscreen' : 'Fullscreen'}
+            aria-label={full ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {full ? '⤡' : '⤢'}
+          </button>
           <button
             className="fpreview-dl"
             onClick={download}
@@ -368,13 +402,24 @@ function FilePreview({
               className="fpreview-pdf"
             />
           )}
-          {!preview.loading && !preview.error && !preview.isImage && !preview.isPdf && preview.highlightedHtml && (
+          {!preview.error && preview.isHtml && !showSource && (
+            // sandbox without allow-same-origin: scripts run, but the page gets an
+            // opaque origin, so it can't read the session cookie or call the API as
+            // the user. The server sends a matching CSP sandbox header.
+            <iframe
+              src={`${api.previewUrl(sessionId, preview.path)}&raw=1`}
+              title={preview.name}
+              className="fpreview-html"
+              sandbox="allow-scripts allow-forms"
+            />
+          )}
+          {!preview.loading && !preview.error && !preview.isImage && !preview.isPdf && (!preview.isHtml || showSource) && preview.highlightedHtml && (
             <div
               className="fpreview-highlighted"
               dangerouslySetInnerHTML={{ __html: preview.highlightedHtml }}
             />
           )}
-          {!preview.loading && !preview.error && !preview.isImage && !preview.isPdf && !preview.highlightedHtml && preview.content !== null && (
+          {!preview.loading && !preview.error && !preview.isImage && !preview.isPdf && (!preview.isHtml || showSource) && !preview.highlightedHtml && preview.content !== null && (
             <pre className="fpreview-code">{preview.content}</pre>
           )}
         </div>
@@ -424,6 +469,7 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
         highlightedHtml: null,
         isImage: image,
         isPdf: pdf,
+        isHtml: isHtmlFile(entry.name),
         loading: !image && !pdf, // images/PDFs render via their own element
         error: null,
       });

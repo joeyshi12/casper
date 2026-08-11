@@ -218,7 +218,7 @@ export type UploadKind = 'image' | 'text' | 'binary';
 export interface UploadedFile {
   /** Original (sanitized) filename. */
   name: string;
-  /** Path relative to the session cwd, e.g. .casper/uploads/report.pdf */
+  /** Absolute path, e.g. ~/.casper/sessions/<id>/uploads/report.pdf */
   path: string;
   size: number;
   /** Detected MIME type (best effort). */
