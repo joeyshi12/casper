@@ -27,8 +27,12 @@ function assert(cond: unknown, msg: string): asserts cond {
 // Captured from POST /api/login and replayed on REST + WS as the session cookie.
 let cookie = '';
 
-function headers(): Record<string, string> {
-  const h: Record<string, string> = { 'content-type': 'application/json' };
+// Only declare a JSON content-type when there's a body, the same rule the web client
+// follows: Fastify rejects a bodyless request (a DELETE, say) that claims JSON, which
+// silently broke this script's own cleanup.
+function headers(hasBody = false): Record<string, string> {
+  const h: Record<string, string> = {};
+  if (hasBody) h['content-type'] = 'application/json';
   if (cookie) h.cookie = cookie;
   return h;
 }
@@ -49,8 +53,8 @@ async function login(): Promise<void> {
 async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: headers(),
-    body: body ? JSON.stringify(body) : undefined,
+    headers: headers(body !== undefined),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw new Error(`${method} ${path} -> ${res.status} ${await res.text()}`);
   return (await res.json()) as T;

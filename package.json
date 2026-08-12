@@ -19,7 +19,7 @@
     "build": "npm run build:shared && npm run build --workspace @casper/web && node scripts/bundle.mjs",
     "start": "npm run start --workspace @joeyshi12/casper",
     "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present",
-    "test": "npm run build:shared && node --import tsx --test tests/unit.ts",
+    "test": "npm run build:shared && node --import tsx --test 'tests/**/*.test.ts'",
     "e2e": "npm run build:shared && tsx tests/bridge-e2e.ts"
   },
   "devDependencies": {
