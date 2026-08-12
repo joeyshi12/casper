@@ -4,7 +4,7 @@
 //   server/dist/server.js   the server, with @casper/shared inlined
 //   server/dist/mcp\.js      the generative-UI MCP server kiro spawns over stdio
 //   server/dist/web/        the built web app, served from beside the bundle
-//   server/dist/agents/     the casper agent, installed into ~/.kiro on first run
+//   server/dist/agents/     the agent prompt, written into ~/.kiro on first run
 //
 // The workspaces stay private, so @casper/shared can't be resolved from the
 // registry - inlining it is what makes one publishable package possible. Real
@@ -61,11 +61,12 @@ if (!fs.existsSync(webSrc)) {
 }
 fs.cpSync(webSrc, path.join(outDir, 'web'), { recursive: true });
 
-// files: ["dist/"] can't reach ../assets, so the agent has to live inside the bundle.
-const agentSrc = path.join(root, 'assets/agents/casper.json');
-if (!fs.existsSync(agentSrc)) throw new Error(`missing ${agentSrc}`);
+// files: ["dist/"] can't reach ../assets, so the prompt has to live inside the bundle.
+// The rest of the agent file is an object literal in agentFile.ts, compiled in.
+const promptSrc = path.join(root, 'assets/agents/prompt.md');
+if (!fs.existsSync(promptSrc)) throw new Error(`missing ${promptSrc}`);
 fs.mkdirSync(path.join(outDir, 'agents'), { recursive: true });
-fs.copyFileSync(agentSrc, path.join(outDir, 'agents/casper.json'));
+fs.copyFileSync(promptSrc, path.join(outDir, 'agents/prompt.md'));
 
 // npm picks up README and LICENSE from the package directory only, and both live at
 // the repo root - without copying them in, the npm page has no readme and the tarball

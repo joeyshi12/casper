@@ -10,11 +10,17 @@ import path from 'node:path';
 import { config, parseConfigDoc, pickInt, pickString } from '../server/src/config.js';
 import { readSettings, updateSettings } from '../server/src/cli/settings.js';
 import { configFilePath, dataDirPath } from '../server/src/paths.js';
-import { installAgentFile } from '../server/src/cli/agentFile.js';
+import {
+  agentConfig,
+  agentPrompt,
+  installAgentFile,
+  type KiroAgent,
+} from '../server/src/cli/agentFile.js';
 import { mcpWiring } from '../server/src/cli/doctor.js';
 import type { Command } from 'commander';
 import { buildProgram } from '../server/src/cli/program.js';
 import { handleMessage, DEFAULT_PROTOCOL_VERSION } from '../server/src/mcp/protocol.js';
+import { spawnSync } from 'node:child_process';
 
 describe('cli argument validation', () => {
   // `casper reset-token --dry-run` used to adopt "--dry-run" as the new token and
@@ -310,25 +316,54 @@ describe('doctor: casper mcp', () => {
   });
 });
 
-describe('shipped agent file', () => {
-  const agent = JSON.parse(
-    fs.readFileSync('assets/agents/casper.json', 'utf8'),
-  ) as { mcpServers: Record<string, { command: string; args: string[] }>; prompt: string };
+describe('shipped agent config', () => {
+  const prompt = agentPrompt();
 
-  // It shipped with mcpServers empty, relying on the installer to fill it in, which
-  // left the file unable to describe itself and a hand copy without widget tools.
-  it('names the widget server, so the file stands on its own', () => {
-    const server = agent.mcpServers.casper;
-    assert.ok(server, 'no casper server declared');
+  it('finds the prompt markdown', () => {
+    assert.ok(prompt, 'agentPrompt() found no prompt.md');
+    assert.ok(prompt!.length > 1000, 'prompt is suspiciously short');
+    assert.ok(!prompt!.endsWith('\n'), 'trailing newline would churn the stamp');
+  });
+
+  // A hand-written file needs the PATH form, or it has no widget tools.
+  it('falls back to the PATH form when there is no bundle', () => {
+    const server = agentConfig(prompt ?? '', null).mcpServers.casper!;
     assert.equal(server.command, 'casper');
     assert.deepEqual(server.args, ['mcp']);
+  });
+
+  it('uses absolute paths when given the bundled server', () => {
+    const server = agentConfig(prompt ?? '', '/opt/casper/dist/mcp.js').mcpServers.casper!;
+    assert.equal(server.command, process.execPath);
+    assert.deepEqual(server.args, ['/opt/casper/dist/mcp.js']);
   });
 
   it('only promises tools the server actually has', () => {
     const res = handleMessage({ id: 1, method: 'tools/list' }, '0');
     const names = (res?.result as { tools: { name: string }[] }).tools.map((t) => t.name);
-    for (const match of agent.prompt.match(/\bshow_[a-z_]+/g) ?? []) {
+    for (const match of (prompt ?? '').match(/\bshow_[a-z_]+/g) ?? []) {
       assert.ok(names.includes(match), `prompt names ${match}, which no tool provides`);
     }
+  });
+
+  // Nothing checked the output against kiro's schema before.
+  it('writes a file kiro accepts', (t) => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-valid-'));
+    const res = installAgentFile(home, path.join(home, 'data'));
+    assert.equal(res.action, 'installed');
+    const written = JSON.parse(fs.readFileSync(res.target, 'utf8')) as KiroAgent;
+    assert.equal(written.name, 'casper');
+    assert.equal(written.prompt, prompt);
+    assert.equal(written.includeMcpJson, true);
+
+    const kiro = spawnSync('kiro-cli', ['agent', 'validate', '--path', res.target], {
+      encoding: 'utf8',
+    });
+    if (kiro.error) {
+      t.skip('kiro-cli is not installed, so its schema cannot be consulted');
+    } else {
+      assert.equal(kiro.status, 0, `kiro rejected it: ${kiro.stdout}${kiro.stderr}`);
+    }
+    fs.rmSync(home, { recursive: true, force: true });
   });
 });
