@@ -1869,8 +1869,18 @@ describe('doctor: casper mcp', () => {
   const agent = (server: unknown) => JSON.stringify({ mcpServers: server ? { casper: server } : {} });
 
   it('passes when the script it names is really there', () => {
-    const r = mcpWiring(agent({ command: '/usr/bin/node', args: ['server/dist/mcp.js'] }), resolves);
-    assert.equal(r.ok, true);
+    // A real file, made here: pointing at a build artifact made this pass locally and
+    // fail in CI, which runs the tests without building first.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-mcp-'));
+    const script = path.join(dir, 'mcp.js');
+    fs.writeFileSync(script, '');
+    try {
+      const r = mcpWiring(agent({ command: '/usr/bin/node', args: [script] }), resolves);
+      assert.equal(r.ok, true);
+      assert.equal(r.detail, script);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('says what to do when the path is stale', () => {
