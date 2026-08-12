@@ -1298,6 +1298,93 @@
 .notice-x:hover {
   color: var(--n6);
 }
+/* Widgets: the frame carries no chrome, so the content sits in the conversation
+   rather than in a box. Height comes from the frame itself, over postMessage. */
+/* Templates are first-party, so they render as part of the app rather than in a
+   sandboxed frame: no isolation needed for markup we wrote. */
+.tpl-choice {
+  margin: 12px 0;
+}
+
+.tpl-choice-q {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.tpl-choice-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tpl-choice-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 12px;
+  text-align: left;
+  font: inherit;
+  background: var(--n1);
+  border: 1px solid var(--n2);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+
+.tpl-choice-opt:hover:not(:disabled) {
+  border-color: var(--frost);
+}
+
+.tpl-choice-opt:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.tpl-choice-opt.is-picked {
+  border-color: var(--aurora-green);
+  opacity: 1;
+}
+
+.tpl-choice-label {
+  font-size: 13px;
+  color: var(--n5);
+}
+
+.tpl-choice-opt.is-picked .tpl-choice-label::after {
+  content: ' ✓';
+  color: var(--aurora-green);
+}
+
+.tpl-choice-detail {
+  font-size: 11px;
+  color: var(--n4);
+}
+
+.widget-wrap {
+  width: 100%;
+  margin: 12px 0;
+  overflow: hidden;
+  transition: height 0.18s ease;
+}
+
+.widget-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color-scheme: dark;
+}
+
+.widget-error {
+  padding: 10px 12px;
+  border: 1px solid var(--n2);
+  border-radius: var(--r-md);
+  color: var(--n4);
+  font-size: 13px;
+}
+
 .md {
   overflow-wrap: break-word;
   word-break: break-word;

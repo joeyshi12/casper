@@ -25,6 +25,7 @@
   "devDependencies": {
     "concurrently": "^9.1.0",
     "esbuild": "0.25.0",
+    "jsdom": "30.0.1",
     "tsx": "^4.19.2",
     "typescript": "5.9.3"
   }

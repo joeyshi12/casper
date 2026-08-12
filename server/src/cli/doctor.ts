@@ -31,6 +31,38 @@ function which(bin: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Whether the agent's MCP server points at something that exists. The recorded path
+ * can rot: npm replaces the install directory on upgrade, and a hand-edited agent
+ * file stops being updated, so it can name a version that is gone.
+ */
+export function mcpWiring(
+  agentJson: string,
+  resolve: (bin: string) => string | undefined,
+): { ok: boolean; detail: string } {
+  let servers: Record<string, { command?: unknown; args?: unknown }> | undefined;
+  try {
+    servers = (JSON.parse(agentJson) as { mcpServers?: typeof servers }).mcpServers;
+  } catch {
+    return { ok: false, detail: 'the agent file is not valid JSON' };
+  }
+  const server = servers?.casper;
+  if (!server) {
+    return { ok: false, detail: 'not declared in the agent file, so widgets are unavailable' };
+  }
+  const command = typeof server.command === 'string' ? server.command : '';
+  const args = Array.isArray(server.args) ? server.args.filter((a) => typeof a === 'string') : [];
+  if (!resolve(command)) {
+    return { ok: false, detail: `${command || '(no command)'} not found - widgets are unavailable` };
+  }
+  // A bundled install records the script; `casper mcp` names the CLI and has no path.
+  const script = args.find((a) => a.endsWith('.js'));
+  if (script && !fs.existsSync(script)) {
+    return { ok: false, detail: `${script} is gone - delete the agent file and restart to rewrite it` };
+  }
+  return { ok: true, detail: script ?? `${command} ${args.join(' ')}` };
+}
+
 function checks(): Check[] {
   const out: Check[] = [];
 
@@ -115,11 +147,17 @@ function checks(): Check[] {
   );
 
   const agent = path.join(config.kiroSessionsDir, '..', '..', 'agents', 'casper.json');
+  const hasAgent = fs.existsSync(agent);
   out.push({
-    ok: fs.existsSync(agent),
+    ok: hasAgent,
     name: 'casper agent',
-    detail: fs.existsSync(agent) ? agent : `${agent} missing - it is installed on first run`,
+    detail: hasAgent ? agent : `${agent} missing - it is installed on first run`,
   });
+
+  if (hasAgent) {
+    const wiring = mcpWiring(fs.readFileSync(agent, 'utf8'), which);
+    out.push({ ok: wiring.ok, name: 'casper mcp', detail: wiring.detail });
+  }
 
   return out;
 }

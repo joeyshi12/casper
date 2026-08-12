@@ -15,6 +15,10 @@ import {
   toolLabel,
 } from '../../util/toolRender.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
+import { WidgetToolCall } from './WidgetToolCall.js';
+import { widgetCallOf } from '../../util/widgetCall.js';
+import { choiceCallOf } from '../../util/choiceCall.js';
+import { ChoiceTemplate } from './ChoiceTemplate.js';
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'queued',
@@ -106,6 +110,11 @@ const imageUrl = (absolutePath: string) =>
  * informative header so the transcript stays compact.
  */
 export function ToolCallCard({ tool }: { tool: ToolCallView }) {
+  // A widget or template is the point of its own call, not a tool to inspect.
+  if (widgetCallOf(tool)) return <WidgetToolCall tool={tool} />;
+  const choice = choiceCallOf(tool);
+  if (choice) return <ChoiceTemplate data={choice} toolId={tool.id} />;
+
   const status = tool.status;
   const [open, setOpen] = useState(status === 'failed');
   const summary = summaryOf(tool);

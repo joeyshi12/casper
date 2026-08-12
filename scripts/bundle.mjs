@@ -2,6 +2,7 @@
 //
 //   server/dist/casper.js   launcher: checks the Node version, then loads the bundle
 //   server/dist/server.js   the server, with @casper/shared inlined
+//   server/dist/mcp\.js      the generative-UI MCP server kiro spawns over stdio
 //   server/dist/web/        the built web app, served from beside the bundle
 //   server/dist/agents/     the casper agent, installed into ~/.kiro on first run
 //
@@ -34,6 +35,19 @@ const result = await esbuild.build({
   define: { __CASPER_VERSION__: JSON.stringify(pkg.version) },
   logLevel: 'warning',
   metafile: true,
+});
+
+// Its own entry, because kiro spawns it as a separate stdio process.
+await esbuild.build({
+  entryPoints: [path.join(root, 'server/src/mcp/index.ts')],
+  outfile: path.join(outDir, 'mcp.js'),
+  bundle: true,
+  platform: 'node',
+  target: 'node24',
+  format: 'esm',
+  external,
+  define: { __CASPER_VERSION__: JSON.stringify(pkg.version) },
+  logLevel: 'warning',
 });
 
 // The bin entry is the launcher, not the bundle: it checks the Node version before
@@ -72,4 +86,5 @@ if (leaked.length > 0) {
 
 const bundleSize = fs.statSync(path.join(outDir, 'server.js')).size;
 console.log(`bundled server/dist/server.js (${(bundleSize / 1024).toFixed(0)} KB), launcher at server/dist/casper.js`);
+console.log(`bundled server/dist/mcp.js (${(fs.statSync(path.join(outDir, 'mcp.js')).size / 1024).toFixed(0)} KB)`);
 console.log(`external: ${external.join(', ')}`);

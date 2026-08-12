@@ -22,6 +22,7 @@ import { readSettings, updateSettings } from '../server/src/cli/settings.js';
 import { AttemptLimiter } from '../server/src/util/rateLimit.js';
 import { configFilePath, dataDirPath } from '../server/src/paths.js';
 import { installAgentFile } from '../server/src/cli/agentFile.js';
+import { mcpWiring } from '../server/src/cli/doctor.js';
 import type { Command } from 'commander';
 import { buildProgram } from '../server/src/cli/program.js';
 import { TurnState } from '../server/src/session/TurnState.js';
@@ -46,6 +47,14 @@ import { olderPageRequest } from '../web/src/state/pagination.js';
 import { lineDiff } from '../web/src/util/diff.js';
 import { matchPath } from 'react-router';
 import { SESSION_ROUTE, pathForSession } from '../web/src/util/route.js';
+import { JSDOM, requestInterceptor } from 'jsdom';
+import { handleMessage, DEFAULT_PROTOCOL_VERSION } from '../server/src/mcp/protocol.js';
+import { getGuidelines, MODULES } from '../server/src/mcp/guidelines.js';
+import { validateChoice } from '../server/src/mcp/choice.js';
+import { choiceCallOf } from '../web/src/util/choiceCall.js';
+import { widgetCallOf } from '../web/src/util/widgetCall.js';
+import { buildWidgetShell, WIDGET_CDNS } from '../web/src/components/chat/widgetShell.js';
+import { sendWidgetPrompt, setPromptSender } from '../web/src/state/promptBridge.js';
 import { lazyImageProps } from '../web/src/util/lazyImage.js';
 import { classifyTurnFailure } from '../web/src/util/turnFailure.js';
 import {
@@ -1340,7 +1349,17 @@ describe('cli argument validation', () => {
     const names = buildProgram()
       .commands.map((c) => c.name())
       .sort();
-    assert.deepEqual(names, ['doctor', 'reset-token', 'service', 'start', 'token']);
+    assert.deepEqual(names, ['doctor', 'mcp', 'reset-token', 'service', 'start', 'token']);
+  });
+
+  it('exposes the mcp server as a command, so it can be wired in by hand', () => {
+    const names = buildProgram().commands.map((c) => c.name());
+    assert.ok(names.includes('mcp'), names.join(', '));
+    // Anything on stdout corrupts the protocol stream, so this one must not bootstrap.
+    assert.equal(
+      parse(['mcp', 'extra']),
+      "error: too many arguments for 'mcp'. Expected 0 arguments but got 1: extra.",
+    );
   });
 });
 
@@ -1507,3 +1526,442 @@ describe('session deep links', () => {
     assert.equal(matchPath(SESSION_ROUTE, '/'), null);
   });
 });
+
+describe('widget shell', () => {
+  const shell = buildWidgetShell();
+
+  it('sandboxes with a CDN allowlist rather than letting scripts load anywhere', () => {
+    const csp = /content="([^"]*)"/.exec(shell)?.[1] ?? '';
+    assert.match(csp, /default-src 'none'/);
+    for (const cdn of WIDGET_CDNS) assert.ok(csp.includes(cdn), `${cdn} missing`);
+    // No same-origin escape hatch, and nothing may be sent off to arbitrary hosts.
+    assert.ok(!csp.includes("connect-src *"));
+  });
+
+  it('gives the runtime a mount point and the bridge', () => {
+    assert.match(shell, /<div id="root"><\/div>/);
+    assert.match(shell, /sendPrompt/);
+  });
+
+});
+
+describe('widget prompt bridge', () => {
+  it('does nothing when no session is listening', () => {
+    setPromptSender(null);
+    assert.equal(sendWidgetPrompt('hello'), false);
+  });
+
+  it('forwards trimmed text and caps the length', () => {
+    const seen: string[] = [];
+    setPromptSender((t) => seen.push(t));
+    assert.equal(sendWidgetPrompt('  hi  '), true);
+    assert.equal(sendWidgetPrompt('x'.repeat(5000)), true);
+    assert.equal(sendWidgetPrompt('   '), false);
+    setPromptSender(null);
+    assert.deepEqual(seen, ['hi', 'x'.repeat(4000)]);
+  });
+});
+
+/** The shell in a real DOM, driven over postMessage exactly as WidgetBlock drives it. */
+function mountWidget() {
+  const dom = new JSDOM(buildWidgetShell(), {
+    runScripts: 'dangerously',
+    pretendToBeVisual: true,
+    beforeParse(window) {
+      (window as unknown as { __out: unknown[] }).__out = [];
+      window.postMessage = ((msg: unknown) => {
+        (window as unknown as { __out: unknown[] }).__out.push(msg);
+      }) as typeof window.postMessage;
+    },
+  });
+  const win = dom.window as unknown as {
+    __out: { type: string; height?: number; text?: string }[];
+    MessageEvent: typeof MessageEvent;
+    document: Document;
+    dispatchEvent(e: Event): boolean;
+    close(): void;
+    casper: { sendPrompt(t: string): void };
+  };
+  const send = (data: unknown) => {
+    const ev = new win.MessageEvent('message', { data });
+    Object.defineProperty(ev, 'source', { value: dom.window });
+    win.dispatchEvent(ev);
+  };
+  return { win, send, root: () => win.document.getElementById('root')! };
+}
+
+describe('widget runtime', () => {
+  it('renders streamed html', () => {
+    const { win, send, root } = mountWidget();
+    send({ type: 'casper:html', html: '<p class="a">hello</p>' });
+    assert.match(root().innerHTML, /hello/);
+    win.close();
+  });
+
+  it('measures height from the content, not the frame it was given', () => {
+    const { win, send, root } = mountWidget();
+    // jsdom has no layout. The frame is 120px until the host is told otherwise, so a
+    // document-based measurement reports that and the content overflows - which is
+    // exactly the scrollbar this replaced.
+    Object.defineProperty(win.document.documentElement, 'scrollHeight', {
+      value: 120,
+      configurable: true,
+    });
+    Object.defineProperty(root(), 'scrollHeight', { value: 940, configurable: true });
+    send({ type: 'casper:html', html: '<p>tall</p>' });
+    const height = win.__out.find((m) => m.type === 'casper:height')?.height;
+    // 940 of content plus two pixels of slack for fractional layout.
+    assert.equal(height, 942);
+    win.close();
+  });
+
+  it('runs a script once, and not again on a repeat of the same content', () => {
+    const { win, send } = mountWidget();
+    const html = '<div>x</div><script>window.__ran = (window.__ran || 0) + 1;</script>';
+    send({ type: 'casper:html', html });
+    assert.equal((win as unknown as { __ran?: number }).__ran, 1);
+    // A second identical post must not wipe the nodes the script is driving.
+    send({ type: 'casper:html', html });
+    assert.equal((win as unknown as { __ran?: number }).__ran, 1);
+    win.close();
+  });
+
+  it('exposes sendPrompt, and refuses empty text', () => {
+    const { win } = mountWidget();
+    win.casper.sendPrompt('   ');
+    assert.equal(win.__out.filter((m) => m.type === 'casper:prompt').length, 0);
+    win.casper.sendPrompt('do the thing');
+    const sent = win.__out.find((m) => m.type === 'casper:prompt');
+    assert.equal(sent?.text, 'do the thing');
+    win.close();
+  });
+
+  it('ignores messages that did not come from its host', () => {
+    const { win, root } = mountWidget();
+    const ev = new win.MessageEvent('message', {
+      data: { type: 'casper:html', html: '<p>injected</p>' },
+    });
+    Object.defineProperty(ev, 'source', { value: null });
+    win.dispatchEvent(ev);
+    assert.equal(root().innerHTML, '');
+    win.close();
+  });
+});
+
+describe('widget external scripts', () => {
+  /**
+   * Narrower than it looks: it proves a widget can pull in a library and use it, not
+   * that the runtime waits. jsdom sequences dynamic scripts itself, so it passes either
+   * way - the structural check below is what guards that.
+   */
+  it('can load a library and use it from its own script', async () => {
+    const dom = new JSDOM(buildWidgetShell(), {
+      runScripts: 'dangerously',
+      url: 'https://widget.test/',
+      resources: {
+        interceptors: [
+          requestInterceptor((request: Request) =>
+            request.url.endsWith('/lib.js')
+              ? new Response('window.Chart = function () {};', {
+                  headers: { 'Content-Type': 'application/javascript' },
+                })
+              : undefined,
+          ),
+        ],
+      },
+      beforeParse(window) {
+        window.postMessage = (() => {}) as typeof window.postMessage;
+      },
+    });
+    const win = dom.window as unknown as {
+      MessageEvent: typeof MessageEvent;
+      dispatchEvent(e: Event): boolean;
+      close(): void;
+      __seen?: string;
+    };
+
+    const html =
+      '<div>chart</div>' +
+      '<script src="https://widget.test/lib.js"><' + '/script>' +
+      '<script>window.__seen = typeof window.Chart;<' + '/script>';
+    const ev = new win.MessageEvent('message', {
+      data: { type: 'casper:html', html },
+    });
+    Object.defineProperty(ev, 'source', { value: dom.window });
+    win.dispatchEvent(ev);
+
+    // Nothing yet: the inline script has to wait for the library.
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(win.__seen, 'function', 'library was not available to the inline script');
+    win.close();
+  });
+});
+
+describe('widget script sequencing', () => {
+  // Structural, because behaviour can't be observed in jsdom. Real browsers do not
+  // block on a dynamically inserted script, which is how a widget got
+  // "Chart is not defined": the library was still in flight when its own code ran.
+  const runtime = () => {
+    const shell = buildWidgetShell();
+    // One script block now: the runtime. morphdom used to be the first.
+    return /<script>([\s\S]*?)<\/script>/.exec(shell)?.[1] ?? '';
+  };
+
+  it('waits for a script with a src before running the next one', () => {
+    const source = runtime();
+    assert.match(source, /onload = advance/, 'external scripts are not awaited');
+    assert.match(source, /onerror = advance/, 'a failed script would stall the rest');
+    assert.match(source, /async = false/);
+  });
+
+  it('caps the wait, so a CDN that never answers does not strand the widget', () => {
+    assert.match(runtime(), /setTimeout\(advance, \d+\)/);
+  });
+
+  it('runs inline scripts without waiting', () => {
+    assert.match(runtime(), /if \(!external\) next\(\);/);
+  });
+});
+
+describe('MCP server protocol', () => {
+  const call = (name: string, args: Record<string, unknown>) =>
+    handleMessage({ id: 1, method: 'tools/call', params: { name, arguments: args } }, '1.2.3');
+  const resultOf = (res: ReturnType<typeof handleMessage>) =>
+    (res?.result ?? {}) as { content?: { text: string }[]; isError?: boolean };
+
+  it('echoes the protocol version a client asks for', () => {
+    const res = handleMessage(
+      { id: 1, method: 'initialize', params: { protocolVersion: '2099-01-01' } },
+      '1.2.3',
+    );
+    const r = res?.result as { protocolVersion: string; serverInfo: { version: string } };
+    assert.equal(r.protocolVersion, '2099-01-01');
+    assert.equal(r.serverInfo.version, '1.2.3');
+  });
+
+  it('falls back to a known version when the client names none', () => {
+    const res = handleMessage({ id: 1, method: 'initialize', params: {} }, '1.2.3');
+    assert.equal((res?.result as { protocolVersion: string }).protocolVersion, DEFAULT_PROTOCOL_VERSION);
+  });
+
+  it('answers tools/call without an initialize handshake, for stateless clients', () => {
+    const res = call('read_me', { modules: ['chart'] });
+    assert.equal(resultOf(res).isError, false);
+  });
+
+  it('takes no reply for notifications', () => {
+    assert.equal(handleMessage({ method: 'notifications/initialized' }, '1.2.3'), null);
+  });
+
+  it('lists both tools with their required arguments', () => {
+    const res = handleMessage({ id: 1, method: 'tools/list' }, '1.2.3');
+    const tools = (res?.result as { tools: { name: string; inputSchema: { required: string[] } }[] }).tools;
+assert.deepEqual(tools.map((t) => t.name), ['read_me', 'show_widget', 'show_choice']);
+    const widget = tools[1]!;
+    assert.deepEqual(widget.inputSchema.required, ['i_have_seen_read_me', 'title', 'widget_code']);
+  });
+
+  it('refuses show_widget until read_me has been acknowledged', () => {
+    const res = resultOf(call('show_widget', { title: 'x', widget_code: '<p>x</p>' }));
+    assert.equal(res.isError, true);
+    assert.match(res.content![0]!.text, /read_me/);
+  });
+
+  it('refuses a whole document, since a widget is a fragment', () => {
+    const res = resultOf(call('show_widget', {
+      i_have_seen_read_me: true, title: 'x', widget_code: '<html><body><p>x</p></body></html>',
+    }));
+    assert.equal(res.isError, true);
+    assert.match(res.content![0]!.text, /fragment/);
+  });
+
+  it('accepts a valid widget', () => {
+    const res = resultOf(call('show_widget', {
+      i_have_seen_read_me: true, title: 'compound_interest', widget_code: '<p>x</p>',
+    }));
+    assert.equal(res.isError, false);
+    assert.match(res.content![0]!.text, /compound_interest/);
+  });
+
+  // The reason for a tool per template: the model gets a real schema for each,
+  // where a single tool with a data object gives it nothing to follow.
+  it('gives every template tool a schema with required fields', () => {
+    const res = handleMessage({ id: 1, method: 'tools/list' }, '1.2.3');
+    const tools = (res?.result as {
+      tools: { name: string; inputSchema: { required?: string[]; properties: Record<string, unknown> } }[];
+    }).tools;
+    const byName = new Map(tools.map((t) => [t.name, t.inputSchema]));
+    assert.deepEqual(byName.get('show_choice')?.required, ['question', 'options']);
+    // Nested shapes are described too, not left as bare objects.
+    const options = byName.get('show_choice')?.properties.options as {
+      items: { required: string[] };
+      maxItems: number;
+    };
+    assert.deepEqual(options.items.required, ['label']);
+    assert.equal(options.maxItems, 6);
+  });
+
+  it('reports an unknown tool as a protocol error, not a tool result', () => {
+    const res = handleMessage({ id: 1, method: 'tools/call', params: { name: 'nope' } }, '1.2.3');
+    assert.equal(res?.error?.code, -32602);
+  });
+});
+
+describe('widget guidelines', () => {
+  it('includes each shared section once when modules overlap', () => {
+    const both = getGuidelines(['interactive', 'chart']);
+    assert.equal(both.split('## Components').length - 1, 1);
+    assert.equal(both.split('## Colour').length - 1, 1);
+    assert.match(both, /## Charts/);
+  });
+
+  it('loads only what the module needs', () => {
+    const chart = getGuidelines(['chart']);
+    assert.ok(!chart.includes('## Diagrams'), 'chart pulled in diagram rules');
+    const diagram = getGuidelines(['diagram']);
+    assert.ok(!diagram.includes('## Charts'), 'diagram pulled in chart rules');
+  });
+
+  it('always carries the core rules, whatever the module', () => {
+    for (const m of MODULES) assert.match(getGuidelines([m]), /streaming|sandbox|# Widgets/i);
+  });
+});
+
+describe('widget tool call parsing', () => {
+  const base = { id: 't1', title: 'show_widget', status: 'completed' as const, content: [] };
+
+  it('matches the namespaced name kiro reports', () => {
+    const call = widgetCallOf({
+      ...base, name: 'casper___show_widget',
+      input: { title: 'a_b', widget_code: '<p>x</p>' },
+    });
+    assert.equal(call?.title, 'a_b');
+    assert.equal(call?.code, '<p>x</p>');
+  });
+
+  // The exact rawInput kiro delivered in a live session, __My_purpose and all.
+  it('reads the payload kiro actually sends', () => {
+    const call = widgetCallOf({
+      ...base,
+      name: 'show_widget',
+      title: 'Running: @casper/show_widget',
+      input: {
+        __My_purpose: 'show a slider',
+        i_have_seen_read_me: true,
+        title: 'square_slider',
+        widget_code: '<style>p{color:red}</style><p>x</p>',
+      },
+    });
+    assert.equal(call?.title, 'square_slider');
+    assert.match(call!.code, /<style>/);
+  });
+
+  it('ignores other tools', () => {
+    assert.equal(widgetCallOf({ ...base, name: 'fs_read', input: {} }), null);
+    assert.equal(widgetCallOf({ ...base, name: undefined, input: {} }), null);
+  });
+});
+
+describe('doctor: casper mcp', () => {
+  // The recorded path can outlive its install: npm replaces the directory on upgrade,
+  // and a hand-edited agent file stops being rewritten.
+  const resolves = (bin: string) => (bin === '/usr/bin/node' || bin === 'casper' ? bin : undefined);
+  const agent = (server: unknown) => JSON.stringify({ mcpServers: server ? { casper: server } : {} });
+
+  it('passes when the script it names is really there', () => {
+    const r = mcpWiring(agent({ command: '/usr/bin/node', args: ['server/dist/mcp.js'] }), resolves);
+    assert.equal(r.ok, true);
+  });
+
+  it('says what to do when the path is stale', () => {
+    const r = mcpWiring(agent({ command: '/usr/bin/node', args: ['/gone/dist/mcp.js'] }), resolves);
+    assert.equal(r.ok, false);
+    assert.match(r.detail, /is gone - delete the agent file/);
+  });
+
+  it('accepts a hand-copied config that goes through the CLI', () => {
+    const r = mcpWiring(agent({ command: 'casper', args: ['mcp'] }), resolves);
+    assert.equal(r.ok, true);
+    assert.match(r.detail, /casper mcp/);
+  });
+
+  it('warns when the tools are not wired at all', () => {
+    assert.match(mcpWiring(agent(null), resolves).detail, /not declared/);
+  });
+
+  it('warns when the command is missing rather than claiming health', () => {
+    const r = mcpWiring(agent({ command: '/nope/node', args: ['x.js'] }), resolves);
+    assert.equal(r.ok, false);
+    assert.match(r.detail, /not found/);
+  });
+
+  it('survives an agent file that is not JSON', () => {
+    assert.equal(mcpWiring('{oops', resolves).ok, false);
+  });
+});
+
+describe('shipped agent file', () => {
+  const agent = JSON.parse(
+    fs.readFileSync('assets/agents/casper.json', 'utf8'),
+  ) as { mcpServers: Record<string, { command: string; args: string[] }>; prompt: string };
+
+  // It shipped with mcpServers empty, relying on the installer to fill it in, which
+  // left the file unable to describe itself and a hand copy without widget tools.
+  it('names the widget server, so the file stands on its own', () => {
+    const server = agent.mcpServers.casper;
+    assert.ok(server, 'no casper server declared');
+    assert.equal(server.command, 'casper');
+    assert.deepEqual(server.args, ['mcp']);
+  });
+
+  it('only promises tools the server actually has', () => {
+    const res = handleMessage({ id: 1, method: 'tools/list' }, '0');
+    const names = (res?.result as { tools: { name: string }[] }).tools.map((t) => t.name);
+    for (const match of agent.prompt.match(/\bshow_[a-z_]+/g) ?? []) {
+      assert.ok(names.includes(match), `prompt names ${match}, which no tool provides`);
+    }
+  });
+});
+
+describe('choice validation', () => {
+  const fails = (d: unknown, match: RegExp) => {
+    const problem = validateChoice(d);
+    assert.ok(problem, 'expected a problem');
+    assert.match(problem, match);
+  };
+
+  it('accepts a usable choice', () => {
+    assert.equal(validateChoice({ question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] }), null);
+  });
+
+  it('rejects a choice that is not a choice', () => {
+    fails({ question: 'Which?', options: [{ label: 'A' }] }, /two options/);
+  });
+
+  it('rejects more options than anyone wants to tap', () => {
+    fails({ question: 'Which?', options: Array.from({ length: 7 }, (_, i) => ({ label: `o${i}` })) }, /at most 6/);
+  });
+
+  it('names the option that is wrong', () => {
+    fails({ question: 'Which?', options: [{ label: 'A' }, { detail: 'no label' }] }, /options\[1\]\.label/);
+  });
+});
+
+describe('choice call parsing', () => {
+  const base = { id: 't9', title: 'Running: @casper/show_choice', status: 'completed' as const, content: [] };
+  const call = (input: unknown) => choiceCallOf({ ...base, name: 'show_choice', input });
+
+  it('defaults an option prompt to its label, since that is what was tapped', () => {
+    const data = call({
+      question: 'Push?', options: [{ label: 'Push now' }, { label: 'Wait', prompt: 'hold off' }],
+    });
+    assert.deepEqual(data?.options.map((o) => o.prompt), ['Push now', 'hold off']);
+  });
+
+  it('ignores other tools, and a choice with nothing to choose', () => {
+    assert.equal(choiceCallOf({ ...base, name: 'fs_read', input: {} }), null);
+    assert.equal(call({ question: 'Which?', options: [{ label: 'only one' }] }), null);
+  });
+});
+
+

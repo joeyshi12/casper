@@ -34,7 +34,10 @@ async function bootstrap(): Promise<void> {
   if (agent.action === 'installed' || agent.action === 'updated') {
     process.stdout.write(`casper agent ${agent.action}: ${agent.target}\n`);
   } else if (agent.action === 'kept-yours') {
-    process.stdout.write(`keeping your edited agent file at ${agent.target}\n`);
+    process.stdout.write(
+      `keeping your edited agent file at ${agent.target}\n` +
+        '  Prompt and tool updates are being skipped. Delete it to take them.\n',
+    );
   }
 }
 
@@ -133,6 +136,16 @@ export function buildProgram(): Command {
     .allowExcessArguments(false)
     .action(async () => {
       process.exitCode = (await import('./doctor.js')).doctor();
+    });
+
+  program
+    .command('mcp')
+    .description('run the generative-UI MCP server on stdio (kiro spawns this itself)')
+    .allowUnknownOption(false)
+    .allowExcessArguments(false)
+    .action(async () => {
+      // No bootstrap: it prints, and stdout here belongs to the protocol.
+      (await import('../mcp/server.js')).runMcpServer();
     });
 
   const service = program

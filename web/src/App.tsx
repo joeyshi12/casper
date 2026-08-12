@@ -10,6 +10,7 @@ import { ChatPane } from './components/layout/ChatPane.js';
 import { NewSessionSheet } from './components/sessions/NewSessionSheet.js';
 import { TokenGate } from './components/common/TokenGate.js';
 import { SESSION_ROUTE, pathForSession } from './util/route.js';
+import { setPromptSender } from './state/promptBridge.js';
 
 type AuthState = 'checking' | 'gate' | 'ready';
 
@@ -378,6 +379,13 @@ function Shell({ onLock }: { onLock: () => void }) {
     navigate('/', { replace: true });
     onLock();
   }, [closeSocket, onLock, store]);
+
+  // Lets a widget send a message as the user. Registered here because this is
+  // where the socket lives.
+  useEffect(() => {
+    setPromptSender((text) => send([{ type: 'text', text }]));
+    return () => setPromptSender(null);
+  }, [send]);
 
   const hasActive =
     store.activeId !== null ||

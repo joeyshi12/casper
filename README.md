@@ -22,6 +22,9 @@ exactly what it missed.
   calls with their status, input and output.
 - **File browser** for the session's workspace, previewing text, images and PDFs.
   HTML renders as a live page, sandboxed, and either can go fullscreen.
+- **Widgets**: the agent calls a `show_widget` tool over MCP and the result renders
+  inline as a live page. Charts, simulations, animated diagrams. Sandboxed, and they
+  can send a message back.
 - **Observability** for credits spent, context-window usage and turn duration.
 - **PWA** that installs to a home screen and reconnects when the network returns.
 
@@ -53,10 +56,18 @@ systemd is optional. Without it, run `casper` from your own init system, under
 | `casper` | Run the server in the foreground |
 | `casper token` | Print the access token |
 | `casper reset-token [value]` | Set a new token and sign every device out |
-| `casper doctor` | Check kiro-cli, settings, data directory and web app |
+| `casper doctor` | Check kiro-cli, settings, data directory, web app and MCP server |
+| `casper mcp` | Run the widget MCP server on stdio (kiro spawns this for you) |
 | `casper service install` | Run as a systemd user service |
 | `casper service uninstall` | Remove the service, keeping settings and sessions |
 | `casper service status` | Show the service status |
+
+The `casper` agent gets the widget tools automatically. To give them to another
+agent, point it at the same server:
+
+```bash
+kiro-cli mcp add --name casper --agent <agent> --command casper --args mcp
+```
 
 To update, `npm install -g @joeyshi12/casper@latest`. Re-run
 `casper service install` afterwards if you use the service: the unit records

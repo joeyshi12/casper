@@ -27,6 +27,35 @@ function sourceFile(): string {
   return fs.existsSync(packaged) ? packaged : workspace;
 }
 
+/** Absolute path to the bundled MCP server, or null when there's no build to point at. */
+function mcpServerPath(): string | null {
+  const here = path.dirname(url.fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(here, 'mcp.js'), // bundled: beside server.js
+    path.resolve(here, '../../dist/mcp.js'), // from source, if built
+  ];
+  return candidates.find((c) => fs.existsSync(c)) ?? null;
+}
+
+/**
+ * The shipped file says `casper mcp`, which needs PATH - and the service's PATH has no
+ * npm bin. So an install rewrites it to absolute paths, and leaves it alone otherwise.
+ */
+function withMcpServer(json: string): string {
+  const mcp = mcpServerPath();
+  if (!mcp) return json;
+  const agent = JSON.parse(json) as Record<string, unknown>;
+  agent.mcpServers = {
+    casper: {
+      command: process.execPath,
+      args: [mcp],
+      env: {},
+      timeout: 10000,
+    },
+  };
+  return JSON.stringify(agent, null, 2) + '\n';
+}
+
 function sha256(text: string): string {
   return crypto.createHash('sha256').update(text).digest('hex');
 }
@@ -36,7 +65,7 @@ export function installAgentFile(home: string, dataDir: string): AgentResult {
   const target = path.join(home, '.kiro', 'agents', 'casper.json');
   if (!fs.existsSync(src)) return { action: 'no-source', target };
 
-  const desired = fs.readFileSync(src, 'utf8');
+  const desired = withMcpServer(fs.readFileSync(src, 'utf8'));
   const stampFile = path.join(dataDir, 'agent-stamp');
   const stamp = fs.existsSync(stampFile) ? fs.readFileSync(stampFile, 'utf8').trim() : '';
 
