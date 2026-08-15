@@ -99,6 +99,15 @@ function Shell({ onLock }: { onLock: () => void }) {
     onLock();
   }, [closeSocket, onLock, store]);
 
+  // The file panel declares which directories it is showing, and the server
+  // watches exactly those. Resent on reconnect, since watches live with the
+  // connection rather than the session.
+  const watchedPaths = useStore((s) => s.watchedPaths);
+  useEffect(() => {
+    if (connStatus !== 'connected') return;
+    socketRef.current?.watchPaths(watchedPaths);
+  }, [watchedPaths, connStatus]);
+
   const openSession = useCallback(
     async (id: string) => {
       if (store.activeId === id) return;
@@ -155,6 +164,7 @@ function Shell({ onLock }: { onLock: () => void }) {
             // attach to, so this only reaches the console for now.
             console.error(`${ACTION_LABEL[action] ?? action} rejected:`, reason);
           },
+          onFsChanged: (path) => useStore.getState().bumpFsPath(path),
           onUnauthorized: handleUnauthorized,
           onServerError: (message) => {
             console.error('server error:', message);

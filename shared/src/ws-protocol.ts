@@ -147,6 +147,15 @@ export interface ClientPing {
   type: 'ping';
 }
 
+/**
+ * The directories the file panel is currently showing, relative to the session's
+ * working directory. Replaces the previous set, so closing a folder stops its watch.
+ */
+export interface ClientWatchPaths {
+  type: 'watch_paths';
+  paths: string[];
+}
+
 export type ClientMessage =
   | ClientHello
   | ClientPrompt
@@ -154,7 +163,8 @@ export type ClientMessage =
   | ClientSetMode
   | ClientSetModel
   | ClientExecCommand
-  | ClientPing;
+  | ClientPing
+  | ClientWatchPaths;
 
 // ---------------------------------------------------------------------------
 // Server -> Client messages
@@ -195,8 +205,19 @@ export interface ServerError {
   message: string;
 }
 
+/**
+ * A watched directory changed on disk. Connection-scoped rather than a session event:
+ * it depends on what this client is looking at, so it is not part of the replayable
+ * history.
+ */
+export interface ServerFsChanged {
+  type: 'fs_changed';
+  path: string;
+}
+
 export type ServerMessage =
   | ServerEvent
+  | ServerFsChanged
   | ServerReplayComplete
   | ServerResync
   | ServerAck

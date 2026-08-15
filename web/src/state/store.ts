@@ -63,12 +63,18 @@ interface CasperState {
    *  for lazy load-on-scroll-up. More items exist while this is > 0. */
   remainingOlder: number;
   observability: ObservabilitySnapshot;
+  /** Bumped per directory when the server reports it changed, so open folders reload. */
+  fsVersion: Record<string, number>;
+  /** Directories the file panel is showing, sent to the server as its watch set. */
+  watchedPaths: string[];
   streamingText: string; // in-flight assistant chunk not yet committed
   streamingThought: string; // in-flight reasoning chunk not yet committed
   pending: PendingMessage[]; // user messages sent locally, awaiting server echo
   sessionNotice: SessionNotice | null;
 
   // actions
+  bumpFsPath: (path: string) => void;
+  setWatchedPaths: (paths: string[]) => void;
   setSessions: (s: SessionSummary[]) => void;
   setModels: (m: ModelInfo[]) => void;
   setAgents: (a: AgentMode[], defaultAgentId: string) => void;
@@ -94,10 +100,16 @@ export const useStore = create<CasperState>((set, get) => ({
   appliedSeq: 0,
   remainingOlder: 0,
   observability: emptyObservabilitySnapshot(),
+  fsVersion: {},
+  watchedPaths: [],
   streamingText: '',
   streamingThought: '',
   pending: [],
   sessionNotice: null,
+
+  bumpFsPath: (path) =>
+    set((s) => ({ fsVersion: { ...s.fsVersion, [path]: (s.fsVersion[path] ?? 0) + 1 } })),
+  setWatchedPaths: (watchedPaths) => set({ watchedPaths }),
 
   setSessions: (sessions) => set({ sessions }),
   setModels: (models) => set({ models }),

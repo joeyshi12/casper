@@ -7,6 +7,8 @@ import type {
 import type { SessionManager } from '../session/SessionManager.js';
 import { authDisabled, hasValidSession } from '../routes/auth.js';
 import { handleClientMessage, send } from './dispatch.js';
+import { createDirWatchers } from './dirWatchers.js';
+import { confineToRoot } from '../util/paths.js';
 
 const HEARTBEAT_MS = 20_000;
 
@@ -39,6 +41,20 @@ export function registerWsGateway(
 
     let cursor = Number.parseInt(query.cursor ?? '0', 10) || 0;
     let unsubscribe: (() => void) | null = null;
+
+    // Watches the directories this client has open, so the file panel updates itself.
+    // Resolved per event rather than once: a session can be re-pointed at another
+    // working directory while the socket lives.
+    const watchers = createDirWatchers({
+      resolve: async (relative) => {
+        try {
+          return confineToRoot(await manager.getSessionCwd(sessionId), relative);
+        } catch {
+          return null;
+        }
+      },
+      onChange: (path) => send(socket, { type: 'fs_changed', path }),
+    });
     let alive = true;
     let ready = false;
 
@@ -115,12 +131,13 @@ export function registerWsGateway(
         send(socket, { type: 'error', message: 'Invalid JSON' });
         return;
       }
-      void handleClientMessage(socket, manager, sessionId, msg);
+      void handleClientMessage(socket, manager, sessionId, msg, watchers);
     });
 
     socket.on('close', () => {
       clearInterval(heartbeat);
       unsubscribe?.();
+      watchers.close();
     });
   });
 }

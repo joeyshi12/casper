@@ -1,6 +1,7 @@
 import type { WebSocket } from 'ws';
 import type { ClientMessage, ServerMessage } from '@casper/shared';
 import type { SessionManager } from '../session/SessionManager.js';
+import type { DirWatchers } from './dirWatchers.js';
 
 export function send(socket: WebSocket, msg: ServerMessage): void {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
@@ -12,6 +13,7 @@ export async function handleClientMessage(
   manager: SessionManager,
   sessionId: string,
   msg: ClientMessage,
+  watchers: DirWatchers,
 ): Promise<void> {
   switch (msg.type) {
     case 'ping':
@@ -20,6 +22,10 @@ export async function handleClientMessage(
 
     case 'hello':
       // Handshake handled at connect time via query params; no-op here.
+      return;
+
+    case 'watch_paths':
+      await watchers.sync(msg.paths);
       return;
 
     case 'prompt':

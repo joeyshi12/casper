@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import type { FileEntry } from '@casper/shared';
 import { api } from '../../api/rest.js';
 import { useStore } from '../../state/store.js';
@@ -20,7 +20,6 @@ import {
   FileTextIcon,
   FolderIcon,
   FolderOpenIcon,
-  RefreshIcon,
   ShrinkIcon,
   Spinner,
 } from '../common/icons.js';
@@ -203,17 +202,43 @@ function TreeEntry({
   sessionId,
   depth,
   onPreview,
+  onExpanded,
 }: {
   entry: FileEntry;
   sessionId: string;
   depth: number;
   onPreview: (entry: FileEntry) => void;
+  onExpanded: (path: string, expanded: boolean) => void;
 }) {
+  const changed = useStore((st) => st.fsVersion[entry.path] ?? 0);
   const [folder, setFolder] = useState<FolderState>({
     expanded: false,
     children: null,
     loading: false,
   });
+
+  useEffect(() => {
+    if (entry.type !== 'directory') return;
+    onExpanded(entry.path, folder.expanded);
+    return () => onExpanded(entry.path, false);
+  }, [entry.path, entry.type, folder.expanded, onExpanded]);
+
+  // The server reported this directory changed, so re-list it. Only this row
+  // reloads, which is why the rest of the tree keeps its expansion.
+  useEffect(() => {
+    if (!changed || !folder.expanded) return;
+    let live = true;
+    api
+      .tree(sessionId, entry.path)
+      .then((res) => {
+        if (live) setFolder((f) => ({ ...f, children: res.entries }));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [changed]);
 
   const toggle = useCallback(async () => {
     if (entry.type !== 'directory') return;
@@ -278,6 +303,7 @@ function TreeEntry({
                 sessionId={sessionId}
                 depth={depth + 1}
                 onPreview={onPreview}
+                onExpanded={onExpanded}
               />
             ))}
             {folder.children.length === 0 && (
@@ -461,8 +487,35 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [changingFolder, setChangingFolder] = useState(false);
   const sessions = useStore((s) => s.sessions);
+  const setWatchedPaths = useStore((st) => st.setWatchedPaths);
+  const rootChanged = useStore((st) => st.fsVersion[''] ?? 0);
+  const expandedRef = useRef<Set<string>>(new Set());
   const setSessions = useStore((s) => s.setSessions);
   const summaryCwd = sessions.find((s) => s.sessionId === sessionId)?.cwd;
+
+  // Watch the root plus every expanded directory: exactly what the tree can show,
+  // so the server holds a handful of watches instead of the whole workspace.
+  const publish = useCallback(() => {
+    setWatchedPaths(['', ...expandedRef.current]);
+  }, [setWatchedPaths]);
+
+  const onExpanded = useCallback(
+    (path: string, expanded: boolean) => {
+      const set = expandedRef.current;
+      if (expanded === set.has(path)) return;
+      if (expanded) set.add(path);
+      else set.delete(path);
+      publish();
+    },
+    [publish],
+  );
+
+  // This component mounts when the panel opens, so the set is declared then and
+  // dropped when it closes.
+  useEffect(() => {
+    publish();
+    return () => setWatchedPaths([]);
+  }, [publish, setWatchedPaths]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -481,6 +534,12 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // The top level, on the same signal a folder row uses.
+  useEffect(() => {
+    if (rootChanged) void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootChanged]);
 
   const openPreview = useCallback(
     async (entry: FileEntry) => {
@@ -549,14 +608,6 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
         >
           <FolderIcon size={14} />
         </button>
-        <button
-          className="ftree-refresh"
-          onClick={refresh}
-          title="Refresh file tree"
-          aria-label="Refresh file tree"
-        >
-          <RefreshIcon size={14} />
-        </button>
         {onClose && (
           <button
             className="ftree-close"
@@ -591,6 +642,7 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
               sessionId={sessionId}
               depth={0}
               onPreview={openPreview}
+              onExpanded={onExpanded}
             />
           ))}
       </div>

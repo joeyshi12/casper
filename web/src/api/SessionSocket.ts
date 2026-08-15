@@ -26,6 +26,8 @@ interface SessionSocketHandlers {
   onServerError?: (message: string) => void;
   /** The server rejected the connection as unauthorized (expired/absent session). */
   onUnauthorized?: () => void;
+  /** A directory this client asked to watch changed on disk. */
+  onFsChanged?: (path: string) => void;
 }
 
 // WebSocket close code the server uses for an unauthorized upgrade (policy
@@ -165,6 +167,10 @@ export class SessionSocket {
           console.warn('ws error:', msg.message);
           this.handlers.onServerError?.(msg.message);
           break;
+        case 'fs_changed':
+          this.handlers.onFsChanged?.(msg.path);
+          break;
+
         case 'pong':
           break;
       }
@@ -214,6 +220,10 @@ export class SessionSocket {
   }
   setModel(modelId: string): void {
     this.send({ type: 'set_model', modelId });
+  }
+  /** Declare which directories the file panel is showing; replaces the previous set. */
+  watchPaths(paths: string[]): void {
+    this.send({ type: 'watch_paths', paths });
   }
   execCommand(command: string, args?: string): void {
     this.send({ type: 'exec_command', command, args });

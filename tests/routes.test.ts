@@ -29,6 +29,11 @@ import {
 } from '../server/src/util/paths.js';
 import { classifyKind, looksBinary } from '../server/src/util/filekind.js';
 import { noopLogger } from './helpers.js';
+import {
+  createDirWatchers,
+  diffWatchSet,
+  MAX_WATCHES,
+} from '../server/src/ws/dirWatchers.js';
 
 describe('path confinement (bounds all file-serving endpoints)', () => {
   it('isWithinRoot: nested path allowed', () => assert.ok(isWithinRoot('/home/joey', '/home/joey/a/b')));
@@ -429,5 +434,80 @@ describe('login attempt limiter', () => {
     l.fail('fresh', WINDOW + 1);
     const size = (l as unknown as { hits: Map<string, unknown> }).hits.size;
     assert.equal(size, 1);
+  });
+});
+
+describe('directory watch set', () => {
+  it('starts and stops only what changed', () => {
+    const d = diffWatchSet(['', 'src', 'src/util'], ['', 'src', 'tests']);
+    assert.deepEqual(d.add, ['tests']);
+    assert.deepEqual(d.remove, ['src/util']);
+  });
+
+  it('is a no-op when the set is unchanged', () => {
+    const d = diffWatchSet(['', 'src'], ['src', '']);
+    assert.deepEqual([d.add, d.remove], [[], []]);
+  });
+
+  // A client could otherwise ask the server to hold thousands of inotify handles.
+  it('caps how many paths a client can ask for', () => {
+    const many = Array.from({ length: MAX_WATCHES + 20 }, (_, i) => `d${i}`);
+    assert.equal(diffWatchSet([], many).add.length, MAX_WATCHES);
+  });
+});
+
+describe('directory watchers', () => {
+  it('reports the directory that changed, and nothing else', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-watch-'));
+    fs.mkdirSync(path.join(root, 'a'));
+    fs.mkdirSync(path.join(root, 'b'));
+    const seen: string[] = [];
+    const watchers = createDirWatchers({
+      resolve: async (rel) => path.join(root, rel),
+      onChange: (rel) => seen.push(rel),
+    });
+    try {
+      await watchers.sync(['a', 'b']);
+      assert.deepEqual(watchers.watching().sort(), ['a', 'b']);
+
+      fs.writeFileSync(path.join(root, 'a', 'new.ts'), 'x');
+      await new Promise((r) => setTimeout(r, 400));
+      assert.deepEqual(seen, ['a'], `expected only a, got ${JSON.stringify(seen)}`);
+
+      // Collapsing a folder stops its watch, so later writes there are silent.
+      await watchers.sync(['b']);
+      assert.deepEqual(watchers.watching(), ['b']);
+      fs.writeFileSync(path.join(root, 'a', 'another.ts'), 'x');
+      await new Promise((r) => setTimeout(r, 400));
+      assert.deepEqual(seen, ['a']);
+    } finally {
+      watchers.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('coalesces a burst into one report', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-watch-'));
+    const seen: string[] = [];
+    const watchers = createDirWatchers({
+      resolve: async (rel) => path.join(root, rel),
+      onChange: (rel) => seen.push(rel),
+    });
+    try {
+      await watchers.sync(['']);
+      for (let i = 0; i < 25; i++) fs.writeFileSync(path.join(root, `f${i}.txt`), 'x');
+      await new Promise((r) => setTimeout(r, 500));
+      assert.equal(seen.length, 1, `expected one report, got ${seen.length}`);
+    } finally {
+      watchers.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores a path that does not resolve, rather than throwing', async () => {
+    const watchers = createDirWatchers({ resolve: async () => null, onChange: () => {} });
+    await watchers.sync(['../../etc']);
+    assert.deepEqual(watchers.watching(), []);
+    watchers.close();
   });
 });
