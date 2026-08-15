@@ -51,6 +51,10 @@ import {
 import { SessionSocket } from '../web/src/api/SessionSocket.js';
 import { sanitize } from 'hast-util-sanitize';
 import { MARKDOWN_HTML_SCHEMA } from '../web/src/util/markdownHtml.js';
+import {
+  escapeCurrencyDollars,
+  looksLikeMath,
+} from '../web/src/util/currencyDollars.js';
 
 describe('attachments line (drives image thumbnails; stripped from the bubble)', () => {
   const msg = `${ATTACHMENTS_PREFIX}.casper/uploads/a.png, .casper/uploads/notes.txt\nplease review`;
@@ -695,5 +699,69 @@ describe('markdown HTML sanitising', () => {
 
   it('drops an iframe, which would be a frame inside the app origin', () => {
     assert.equal(clean(el('iframe', { src: 'https://example.com' })).children.length, 0);
+  });
+});
+
+describe('currency versus inline math', () => {
+  const math = ['x', 'x^2', 'n_i', '\\alpha + \\beta', '\\frac{a}{b}', 'E = mc^2', '2n', 'a+b', '\\pi'];
+  const money = [
+    '50',
+    '3.5B',
+    '1,000,000',
+    '3.5B valuation in 2022, and its budgets have climbed - *Civil War* was around ',
+    'HOME and ',
+    '5 and ',
+    '50M last year and ',
+  ];
+
+  for (const m of math) {
+    it(`reads ${m} as math`, () => assert.equal(looksLikeMath(m), true));
+  }
+  for (const m of money) {
+    it(`reads ${JSON.stringify(m.slice(0, 28))} as not math`, () =>
+      assert.equal(looksLikeMath(m), false));
+  }
+
+  // The reported turn: two amounts in one sentence made everything between them a
+  // formula, emphasis included.
+  it('escapes an amount pair and leaves the markdown between it alone', () => {
+    const out = escapeCurrencyDollars(
+      'A24 raised ~$3.5B in 2022 and *Civil War* cost about $50M.',
+    );
+    // Only the opener needs escaping; the trailing dollar is unpaired and literal.
+    assert.equal(out, 'A24 raised ~\\$3.5B in 2022 and *Civil War* cost about $50M.');
+  });
+
+  // The dollar closing a currency pair can be the one opening real math.
+  it('keeps math that follows an amount in the same line', () => {
+    assert.equal(
+      escapeCurrencyDollars('Paying $30 for a shirt while $x^2 + y^2 = z^2$ stays true.'),
+      'Paying \\$30 for a shirt while $x^2 + y^2 = z^2$ stays true.',
+    );
+  });
+
+  it('leaves real inline math untouched', () => {
+    const src = 'The area is $\\pi r^2$ exactly.';
+    assert.equal(escapeCurrencyDollars(src), src);
+  });
+
+  it('leaves display math untouched', () => {
+    const src = 'Before\n\n$$\n\\int_0^1 x^2 dx\n$$\n\nAfter';
+    assert.equal(escapeCurrencyDollars(src), src);
+  });
+
+  // Escaping inside code would show the backslash to the reader.
+  it('does not touch a code span', () => {
+    const src = 'Run `echo $HOME` and `df -h $PWD` first.';
+    assert.equal(escapeCurrencyDollars(src), src);
+  });
+
+  it('does not touch a fenced block', () => {
+    const src = '```sh\nexport COST=$50\necho $HOME\n```\n';
+    assert.equal(escapeCurrencyDollars(src), src);
+  });
+
+  it('leaves an unpaired dollar alone, which markdown already renders literally', () => {
+    assert.equal(escapeCurrencyDollars('It cost $50 all in.'), 'It cost $50 all in.');
   });
 });

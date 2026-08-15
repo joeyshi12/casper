@@ -1,8 +1,8 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components, Options } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
+import { REMARK_PLUGINS } from './markdownPlugins.js';
+import { escapeCurrencyDollars } from '../../util/currencyDollars.js';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
@@ -52,14 +52,18 @@ const HTML_PLUGINS: Options['rehypePlugins'] = [
  * streaming re-renders stay cheap.
  */
 export const MarkdownRenderer = memo(function MarkdownRenderer({ text, html = false }: Props) {
+  // Dollar amounts would otherwise be parsed as math, taking the prose between
+  // them with them.
+  const source = useMemo(() => escapeCurrencyDollars(text), [text]);
+
   return (
     <div className="md">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={REMARK_PLUGINS as unknown as Options['remarkPlugins']}
         rehypePlugins={html ? HTML_PLUGINS : PLUGINS}
         components={MD_COMPONENTS}
       >
-        {text}
+        {source}
       </ReactMarkdown>
     </div>
   );
