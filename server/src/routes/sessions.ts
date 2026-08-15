@@ -24,6 +24,7 @@ export function registerSessionRoutes(
         cwd: body.cwd,
         agentId: body.agentId,
         modelId: body.modelId,
+        freshWorkspace: body.freshWorkspace,
       });
     } catch (err) {
       reply.code(400);

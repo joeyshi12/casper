@@ -1,13 +1,10 @@
 /**
  * Tells currency apart from inline math in markdown source.
  *
- * remark-math treats every `$...$` pair as math, so a sentence with two dollar amounts
- * in it renders the prose between them as one italic formula, swallowing any markdown
- * inside. Turning single-dollar math off instead loses real inline math, which is worse.
- *
- * So this decides per pair, on the same grounds a person would: does the content look
- * like notation, or like money and words? Rejected pairs are escaped before parsing, so
- * the dollars render literally and the markdown between them is still markdown.
+ * remark-math treats every `$...$` pair as math, so two dollar amounts in a sentence
+ * render the prose between them as one formula. Disabling single-dollar math loses real
+ * inline math, which is worse - so this judges each pair by its content and escapes only
+ * the rejected ones, before parsing.
  */
 
 /** A LaTeX command, superscript or subscript settles it immediately. */

@@ -7,12 +7,9 @@ import url from 'node:url';
 /**
  * Install Casper as a systemd user service.
  *
- * The unit hardcodes the resolved node binary and script path. Both move when node
- * is upgraded or the package is reinstalled, so `casper service install` has to be
- * re-run after either - that's the accepted trade for a unit that starts reliably
- * under systemd's minimal PATH, where a bare `node` often isn't found.
- *
- * systemd is optional: without it you run `casper` yourself.
+ * The unit hardcodes the resolved node binary and script path, both of which move on
+ * upgrade, so this has to be re-run afterwards. That is the trade for a unit that starts
+ * reliably under systemd's minimal PATH, where a bare `node` often isn't found.
  */
 const SERVICE = 'casper.service';
 

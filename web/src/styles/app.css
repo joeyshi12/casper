@@ -187,26 +187,28 @@
     display: inline;
   }
 }
-.srow-cwd {
-  margin-top: 2px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--n3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* Renaming in place: the row's own type and metrics, so its height never changes.
+   Padding is the row's 10px 12px less the border; the negative margin absorbs the ring. */
 .srow-rename {
   flex: 1;
   min-width: 0;
-  margin: 6px 8px;
+  margin: 0 -1px;
+  padding: 9px 11px;
   background: var(--n0);
   border: 1px solid var(--frost);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   color: var(--n6);
-  padding: 8px 10px;
+  font-family: inherit;
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.35;
+}
+.srow-rename:focus {
+  /* The border is the focus affordance; the browser ring on top of it reads as two. */
+  outline: none;
+}
+.srow-rename::selection {
+  background: color-mix(in srgb, var(--frost) 40%, transparent);
 }
 .srow-menu {
   position: relative;
@@ -670,11 +672,6 @@
   padding: 8px 11px;
   font-size: 13px;
   max-width: 100%;
-}
-.sheet .picker {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 5px;
 }
 .picker-hint {
   font-size: 11px;

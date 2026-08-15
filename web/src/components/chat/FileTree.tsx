@@ -604,7 +604,7 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
     <div className="ftree-panel">
       <div className="ftree-header">
         <span className="ftree-title" title={cwd}>
-          {cwd ? cwd.split('/').pop() : 'Files'}
+          Files
         </span>
         <button
           className="ftree-refresh"

@@ -19,14 +19,11 @@ type ToolKind =
   | 'generic';
 
 /**
- * Which specialized renderer handles a tool call. Prefer the canonical tool
- * name (kiro's _meta.kiro.toolName live, or the persisted name on hydrate),
- * which is identical across live and reload.
+ * Which specialized renderer handles a tool call. Prefer the canonical tool name (kiro's
+ * _meta.kiro.toolName live, the persisted name on hydrate), which is identical either way.
  *
- * The kind + input heuristics below are not legacy: live ACP tool_call updates
- * can arrive without _meta.kiro.toolName, and the tests pin live and hydrated
- * output to the same result. Every persisted toolUse block carries a name
- * (3285/3285 across the sessions here), so only the live path needs them.
+ * The kind + input heuristics below are not legacy: live ACP updates can arrive without
+ * that name, and the tests pin live and hydrated output to the same result.
  */
 export function classifyTool(tool: { name?: string; title?: string; kind?: string; input?: unknown }): ToolKind {
   switch (tool.name) {
@@ -109,7 +106,29 @@ const KIND_LABEL: Record<ToolKind, string | undefined> = {
   generic: undefined,
 };
 
+/** A namespaced MCP tool, as "server/tool" or "@server/tool". */
+const NAMESPACED = /^@?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/;
+/** kiro's own rendering of one, e.g. "Running: @casper/show_widget". */
+const IN_TITLE = /@([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/;
+
+/**
+ * An MCP tool as "@server/tool", or null when it is not one. Live, kiro sends the tool name
+ * bare and puts the namespace only in the title, so the server has to come from there. The
+ * title is matched against the name before it is trusted, because a shell command can carry
+ * something that looks like one: "Running: npm i @casper/web" is the shell tool.
+ */
+export function mcpLabel(tool: { name?: string; title?: string }): string | null {
+  const named = NAMESPACED.exec(tool.name ?? '');
+  if (named) return `@${named[1]}/${named[2]}`;
+  const titled = IN_TITLE.exec(tool.title ?? '');
+  if (!titled) return null;
+  if (tool.name && tool.name !== titled[2]) return null;
+  return `@${titled[1]}/${titled[2]}`;
+}
+
 export function toolLabel(tool: { name?: string; title?: string; kind?: string; input?: unknown }): string {
+  const mcp = mcpLabel(tool);
+  if (mcp) return mcp;
   if (tool.name) return tool.name;
   const mapped = KIND_LABEL[classifyTool(tool)];
   if (mapped) return mapped;

@@ -25,6 +25,12 @@ import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
 import { bumpSessionToTop } from '../web/src/state/sessions.js';
 import { olderPageRequest } from '../web/src/state/pagination.js';
 import { noopLogger } from './helpers.js';
+import {
+  createWorkspace,
+  workspaceDir,
+  workspacesRoot,
+} from '../server/src/session/workspaces.js';
+import { titleFromPrompt } from '../server/src/session/titles.js';
 
 
 describe('TurnState: observability fold across a full turn', () => {
@@ -489,5 +495,74 @@ describe('default agent', () => {
   // kiro 2.11: requesting a missing agent returned currentModeId kiro_default.
   it('is the casper agent, which is the one carrying the widget tools', () => {
     assert.equal(config.defaultAgent, 'casper');
+  });
+});
+
+describe('workspaces', () => {
+  // Kept apart from the session id on purpose: kiro only names a session once it has
+  // started, and a working directory has to exist before it can start in one.
+  it('mints an id of its own, not the session id', () => {
+    const a = createWorkspace();
+    const b = createWorkspace();
+    try {
+      assert.notEqual(a.id, b.id);
+      assert.equal(a.dir, workspaceDir(a.id));
+      assert.ok(a.dir.startsWith(workspacesRoot()), `${a.dir} not under ${workspacesRoot()}`);
+    } finally {
+      fs.rmSync(a.dir, { recursive: true, force: true });
+      fs.rmSync(b.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('creates the directory, private to the user', () => {
+    const { dir } = createWorkspace();
+    try {
+      assert.equal(fs.existsSync(dir), true);
+      assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('naming a session after its first prompt', () => {
+  const text = (t: string) => [{ type: 'text' as const, text: t }];
+
+  it('uses the prompt', () => {
+    assert.equal(titleFromPrompt(text('Fix the transcript follow bug')), 'Fix the transcript follow bug');
+  });
+
+  it('drops trailing punctuation', () => {
+    assert.equal(titleFromPrompt(text('why did the dots stop showing?')), 'why did the dots stop showing');
+  });
+
+  it('collapses newlines and runs of space', () => {
+    assert.equal(titleFromPrompt(text('Fix   the\n\nscrollbar')), 'Fix the scrollbar');
+  });
+
+  it('cuts long prompts at a word boundary', () => {
+    const long = 'Remove the friction about starting new sessions so that clicking new goes straight in';
+    const out = titleFromPrompt(text(long));
+    assert.ok(out.length <= 61, `${out.length} chars: ${out}`);
+    assert.ok(out.endsWith('…'), out);
+    assert.ok(!out.includes('  '), out);
+    assert.ok(long.startsWith(out.slice(0, -1)), out);
+  });
+
+  // The attachments line is machine-facing; without this every message with a file
+  // would be titled after the upload path.
+  it('ignores the attachments line', () => {
+    const withFile = 'Attached files: /home/j/.casper/sessions/x/uploads/a.png\nwhat is wrong here';
+    assert.equal(titleFromPrompt(text(withFile)), 'what is wrong here');
+  });
+
+  it('ignores fenced code, which says nothing about the topic', () => {
+    assert.equal(titleFromPrompt(text('why does this fail\n\n```ts\nconst x = 1;\n```')), 'why does this fail');
+  });
+
+  // An image with no words: leave the existing name rather than setting a blank one.
+  it('gives nothing back for a promptless message', () => {
+    assert.equal(titleFromPrompt([{ type: 'image', mimeType: 'image/png', data: 'x' } as never]), '');
+    assert.equal(titleFromPrompt(text('   ')), '');
   });
 });

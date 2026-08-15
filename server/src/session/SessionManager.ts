@@ -22,6 +22,8 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { createWorkspace } from './workspaces.js';
+import { titleFromPrompt } from './titles.js';
 import type { Logger } from '../util/logger.js';
 import { isWithinRoot } from '../util/paths.js';
 import { KiroProcess } from './KiroProcess.js';
@@ -35,12 +37,10 @@ import {
 } from './kiroFiles.js';
 import { SessionStore } from './sessionStore.js';
 
-// Resolve a working directory for a new session, normalized to an absolute path
-// (relative input is resolved against DEFAULT_CWD). If the directory doesn't
-// exist it's created; a path that exists but is a file is rejected. The result
-// is confined to config.fileRoot so a session's working directory - and thus
-// the workspace file-serving endpoints scoped to it - can't reach arbitrary
-// filesystem locations (e.g. /etc, SSH keys).
+// Resolve a working directory for a new session as an absolute path (relative input against
+// DEFAULT_CWD), created if missing, rejected if it exists as a file. Confined to
+// config.fileRoot so a session - and the file endpoints scoped to it - can't reach arbitrary
+// locations such as /etc or SSH keys.
 function resolveCwd(input?: string): string {
   const raw = input?.trim();
   const abs = raw ? path.resolve(config.defaultCwd, raw) : config.defaultCwd;
@@ -164,17 +164,10 @@ export class SessionManager {
   }
 
   /**
-   * Re-point a session at a different working directory. A session's cwd is
-   * fixed at creation, so this is needed when the original folder was moved or
-   * deleted (the workspace endpoints and the kiro process are scoped to it).
-   *
-   * The target is validated and created exactly like a new session's cwd, so a
-   * folder is only created on this explicit action - never silently on resume.
-   * Any live kiro process was spawned with the old cwd, so it's disposed here;
-   * the next turn respawns in the new directory with the transcript intact
-   * (kiro reloads the session from its own file).
-   *
-   * Returns the resolved absolute path.
+   * Re-point a session at a different working directory, for when the original was moved
+   * or deleted. Validates and creates the target exactly like a new session's cwd, so a
+   * folder is only created on this explicit action. Any live process was spawned with the
+   * old cwd, so it is disposed and the next turn respawns in the new one, transcript intact.
    */
   async setSessionCwd(sessionId: string, input: string): Promise<string> {
     const resolved = resolveCwd(input);
@@ -367,8 +360,10 @@ export class SessionManager {
     cwd?: string;
     agentId?: string;
     modelId?: string;
+    freshWorkspace?: boolean;
   }): Promise<SessionDetail> {
-    const cwd = resolveCwd(opts.cwd);
+    // A workspace of its own is created before the spawn, so kiro starts in it directly.
+    const cwd = opts.freshWorkspace ? createWorkspace().dir : resolveCwd(opts.cwd);
     // Temporary local id until kiro assigns the real one during ensureProc.
     const tempId = `pending-${Date.now()}-${Math.floor(this.sessions.size)}`;
     const store = new EventStore(tempId);
@@ -387,10 +382,11 @@ export class SessionManager {
       throw err;
     }
 
-    // Name a fresh session after its workspace folder, so it reads clearly in
-    // the list right away (kiro's prompt-derived title only appears after the
-    // first turn). Stored as a Casper title override; the user can rename.
-    const folder = path.basename(s.cwd);
+
+    // Name a session after its working directory, so it reads clearly in the list right
+    // away (kiro's prompt-derived title only appears after the first turn). Stored as a
+    // Casper title override; the user can rename.
+    const folder = opts.freshWorkspace ? '' : path.basename(s.cwd);
     if (folder) {
       this.store.setTitle(s.sessionId, folder);
       s.title = folder;
@@ -410,6 +406,17 @@ export class SessionManager {
     s.running = true;
     s.lastActivity = Date.now();
     s.record({ kind: 'turn_started', prompt: content });
+
+    // Name the session after its first prompt, so the row reads as something while
+    // the turn runs. Only when nothing has named it yet: a title the user set, or one
+    // taken from a chosen working directory, is theirs to keep.
+    if (!this.store.getTitle(s.sessionId)) {
+      const title = titleFromPrompt(content);
+      if (title) {
+        this.store.setTitle(s.sessionId, title);
+        s.title = title;
+      }
+    }
 
     proc
       .prompt({ sessionId: s.sessionId, prompt: content })
@@ -571,12 +578,10 @@ export class SessionManager {
   }
 
   /**
-   * The cursor a reconnecting client should start from. Normally the store
-   * head, but while a turn is in flight the prompt/response are not yet in
-   * kiro's persisted jsonl (kiro writes a turn only when it completes), so the
-   * hydrated transcript is missing them. Rewind to just before the in-flight
-   * turn_started so the WS replays the whole in-flight turn. Guarded against
-   * duplication in case kiro ever persists the prompt at turn start.
+   * The cursor a reconnecting client should start from. Normally the store head, but kiro writes
+   * a turn to its jsonl only once the turn completes, so a hydrated transcript is missing one in
+   * flight. Rewind to just before its turn_started and let the WS replay the whole turn. Guarded
+   * against duplication in case kiro ever persists the prompt at turn start.
    */
   private replayHead(s: Session, transcript: SessionDetail['transcript']): number {
     const head = s.store.head();

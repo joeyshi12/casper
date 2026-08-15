@@ -122,13 +122,10 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
     setShowScrollBtn(distanceFromBottom > 240);
   };
 
-  // Smoothly follow the bottom with a single rAF loop that eases scrollTop
-  // toward the bottom itself. Unlike CSS smooth-scroll + repeated scrollIntoView
-  // (which restarts an eased animation from a moving target every frame and so
-  // pulses down-and-up), this is position-based: each frame it moves a fraction
-  // of the remaining distance and only ever downward, so streamed chunks and
-  // mid-stream markdown reflow never jerk it. One loop at a time; it stops when
-  // caught up and the content effect re-arms it when new content arrives.
+  // Follow the bottom with one rAF loop easing scrollTop toward it. Position-based, unlike CSS
+  // smooth-scroll + repeated scrollIntoView, which restarts an eased animation from a moving
+  // target every frame and so pulses: each frame covers a fraction of the remaining distance,
+  // only ever downward. It stops when caught up; the content effect re-arms it.
   const followTick = () => {
     followRaf.current = 0;
     const el = scrollRef.current;
@@ -369,16 +366,13 @@ function ThoughtBlock({ text, live = false }: { text: string; live?: boolean }) 
 }
 
 /**
- * A durable divider marking where the conversation was compacted. Everything
- * above it was condensed by kiro into the summary shown here (which is what the
- * model now carries as context). Collapsed by default since these summaries are
- * long; click to reveal the full summary.
+ * Divider marking where kiro compacted the conversation. The summary shown is what the
+ * model now carries as context, collapsed by default because these run long.
  */
 /**
- * A failed turn, shown as a system event rather than something the assistant
- * said. Collapsed to a single line by default - it borrows the compaction
- * divider's shape so system events read alike - and expands to the cause, what
- * to do about it, and the server's raw output.
+ * A failed turn, shown as a system event rather than something the assistant said. One
+ * line by default, borrowing the compaction divider's shape, expanding to the cause,
+ * what to do about it, and the server's raw output.
  */
 function TurnErrorBlock({
   message,

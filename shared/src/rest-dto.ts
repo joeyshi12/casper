@@ -64,6 +64,11 @@ export interface CreateSessionRequest {
   cwd?: string;
   agentId?: string;
   modelId?: string;
+  /**
+   * Give the session a workspace of its own instead of a working directory the user
+   * picked: <data dir>/workspaces/<workspace id>.
+   */
+  freshWorkspace?: boolean;
 }
 
 /** A message entry in a session transcript. */

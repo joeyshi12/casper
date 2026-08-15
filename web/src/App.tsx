@@ -7,9 +7,8 @@ import { api, logout } from './api/rest.js';
 import { SessionSocket, type ConnStatus } from './api/SessionSocket.js';
 import { Sidebar } from './components/layout/Sidebar.js';
 import { ChatPane } from './components/layout/ChatPane.js';
-import { NewSessionSheet } from './components/sessions/NewSessionSheet.js';
 import { TokenGate } from './components/common/TokenGate.js';
-import { SESSION_ROUTE, pathForSession } from './util/route.js';
+import { DRAFT_PATH, SESSION_ROUTE, pathForSession } from './util/route.js';
 import { setPromptSender } from './state/promptBridge.js';
 
 type AuthState = 'checking' | 'gate' | 'ready';
@@ -58,12 +57,23 @@ function Shell({ onLock }: { onLock: () => void }) {
   const store = useStore();
   const navigate = useNavigate();
   // Not useParams: the param belongs to the child route, so it isn't visible here.
-  const routeSessionId = useMatch(SESSION_ROUTE)?.params.sessionId ?? null;
-  const [newOpen, setNewOpen] = useState(false);
+  const matchedId = useMatch(SESSION_ROUTE)?.params.sessionId ?? null;
+  // A draft is a session that does not exist yet: the chat opens immediately and the first
+  // prompt creates it. Both the explicit /sessions/new route and the default page, so
+  // landing with nothing open puts you in front of a composer.
+  const isDraftRoute = matchedId === 'new';
+  const isDraft = isDraftRoute || (!matchedId && store.activeId === null);
+  const routeSessionId = isDraft ? null : matchedId;
   const [connStatus, setConnStatus] = useState<ConnStatus>('closed');
+  // A draft's first prompt, held until the new session's socket is connected.
+  const firstPromptRef = useRef<{ id: string; content: PromptContentBlock[] } | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const lastCreateOpts = useRef<{ cwd: string; agentId: string; modelId: string } | null>(null);
+  const lastCreateOpts = useRef<{
+    cwd?: string;
+    agentId?: string;
+    modelId?: string;
+  } | null>(null);
   const socketRef = useRef<SessionSocket | null>(null);
   const lastSentRef = useRef<string | null>(null);
   const msgSeqRef = useRef(0);
@@ -73,8 +83,7 @@ function Shell({ onLock }: { onLock: () => void }) {
   }, [store]);
 
   useEffect(() => {
-    // Quiet on failure: an empty picker is its own signal, and refreshSessions()
-    // below has always failed quietly too.
+    // Quiet on failure: an empty picker is its own signal.
     api
       .models()
       .then((r) => store.setModels(r.models))
@@ -109,13 +118,18 @@ function Shell({ onLock }: { onLock: () => void }) {
   }, [watchedPaths, connStatus]);
 
   const openSession = useCallback(
-    async (id: string) => {
+    // `adopted` is a detail already in hand, from creating the session: there is nothing
+    // to fetch, and no "Opening session" state to show, which is what made the draft
+    // look like it reloaded the page.
+    async (id: string, adopted?: Awaited<ReturnType<typeof api.getSession>>) => {
       if (store.activeId === id) return;
       closeSocket();
       setConnStatus('connecting');
-      useStore.getState().setLoadingSession(id);
+      if (!adopted) useStore.getState().setLoadingSession(id);
 
       let detail: Awaited<ReturnType<typeof api.getSession>>;
+      if (adopted) detail = adopted;
+      else
       try {
         detail = await api.getSession(id);
       } catch (err) {
@@ -128,7 +142,7 @@ function Shell({ onLock }: { onLock: () => void }) {
         navigate('/', { replace: true });
         return;
       }
-      store.loadDetail(detail);
+      store.loadDetail(detail, { keepPending: Boolean(adopted) });
 
       const socket = new SessionSocket(
         id,
@@ -187,13 +201,6 @@ function Shell({ onLock }: { onLock: () => void }) {
     useStore.getState().setLoadingSession(id);
   }, []);
 
-  const goToSession = useCallback(
-    (id: string) => {
-      markLoading(id);
-      navigate(pathForSession(id));
-    },
-    [markLoading, navigate],
-  );
 
   // The route owns which session is open, so cold loads, back/forward and
   // clicks all arrive here. The ref fires it on URL changes, not renders.
@@ -211,8 +218,7 @@ function Shell({ onLock }: { onLock: () => void }) {
   }, [routeSessionId, openSession, closeSocket, refreshSessions, store]);
 
   const createSession = useCallback(
-    async (opts: { cwd: string; agentId: string; modelId: string }) => {
-      setNewOpen(false);
+    async (opts: { cwd?: string; agentId?: string; modelId?: string }) => {
       // Enter the session view right away; it shows "Connecting" until ready.
       closeSocket();
       setConnStatus('connecting');
@@ -224,19 +230,28 @@ function Shell({ onLock }: { onLock: () => void }) {
           cwd: opts.cwd || undefined,
           agentId: opts.agentId,
           modelId: opts.modelId,
+          // No directory named: the session gets one of its own.
+          freshWorkspace: !opts.cwd,
         });
         refreshSessions();
-        goToSession(detail.summary.sessionId);
+        const id = detail.summary.sessionId;
+        // Claim the route before navigating, so the effect that opens sessions leaves
+        // this one alone: it is already open, with the prompt that created it on screen.
+        handledRoute.current = id;
+        navigate(pathForSession(id));
+        void openSession(id, detail);
+        return true;
       } catch (err) {
         // Keep the user on the chat pane and show what went wrong; `creating`
         // stays true so `hasActive` holds the view open for the error screen.
         setConnStatus('closed');
         setCreateError(err instanceof Error ? err.message : 'Failed to create session');
+        return false;
       } finally {
         setCreating(false);
       }
     },
-    [closeSocket, goToSession, refreshSessions],
+    [closeSocket, navigate, openSession, refreshSessions],
   );
 
   const retryCreate = useCallback(() => {
@@ -297,6 +312,15 @@ function Shell({ onLock }: { onLock: () => void }) {
     [],
   );
 
+  // A new session costs nothing until there is something to say: the chat opens on a
+  // draft route, and the first prompt is what creates the session.
+  const startDraft = useCallback(() => {
+    closeSocket();
+    store.clearActive();
+    setCreateError(null);
+    navigate(DRAFT_PATH);
+  }, [closeSocket, navigate, store]);
+
   const send = useCallback(
     (content: PromptContentBlock[]) => {
       const id = `pending-${msgSeqRef.current++}`;
@@ -311,9 +335,18 @@ function Shell({ onLock }: { onLock: () => void }) {
       const hasImages = content.some((b) => b.type === 'image');
       const displayText = text || (hasImages ? '[image]' : '[attachment]');
       useStore.getState().addPending(id, displayText);
+      if (isDraft) {
+        // Create on demand, then deliver: the socket opens as part of going to the
+        // new session, so the prompt waits for it rather than being dropped.
+        void createSession({}).then((created) => {
+          if (created) firstPromptRef.current = { id, content };
+          else useStore.getState().markPendingFailed(id, 'Could not start the session.');
+        });
+        return;
+      }
       sendMessage(id, content);
     },
-    [sendMessage],
+    [createSession, isDraft, sendMessage],
   );
 
   const retrySend = useCallback(
@@ -397,7 +430,18 @@ function Shell({ onLock }: { onLock: () => void }) {
     return () => setPromptSender(null);
   }, [send]);
 
+  // The prompt that created the session, delivered once there is a socket for it.
+  useEffect(() => {
+    const held = firstPromptRef.current;
+    if (!held || connStatus !== 'connected') return;
+    firstPromptRef.current = null;
+    sendMessage(held.id, held.content);
+  }, [connStatus, sendMessage]);
+
+  // Mobile shows one pane at a time and the list is home, so landing on the default
+  // draft must not push the chat over it - only an explicit new-session tap does.
   const hasActive =
+    isDraftRoute ||
     store.activeId !== null ||
     store.loadingSessionId !== null ||
     creating ||
@@ -410,16 +454,15 @@ function Shell({ onLock }: { onLock: () => void }) {
         activeId={store.activeId}
         loadingId={store.loadingSessionId}
         onOpen={markLoading}
-        onNew={() => setNewOpen(true)}
+        onNew={startDraft}
         onDelete={deleteSession}
         onRename={renameSession}
         onLock={lock}
       />
       <ChatPane
-        hasActive={hasActive}
+        isDraft={isDraft}
         loadingSessionId={store.loadingSessionId}
         connStatus={connStatus}
-        creating={creating}
         createError={createError}
         onRetryCreate={retryCreate}
         onDismissError={dismissCreateError}
@@ -428,14 +471,10 @@ function Shell({ onLock }: { onLock: () => void }) {
         onRetry={retrySend}
         onRetryTurn={retryTurn}
         onCancel={cancel}
-        onNew={() => setNewOpen(true)}
         onChangeModel={changeModel}
         onChangeAgent={changeAgent}
         onCompact={compact}
       />
-      {newOpen && (
-        <NewSessionSheet onCreate={createSession} onClose={() => setNewOpen(false)} />
-      )}
     </div>
   );
 }

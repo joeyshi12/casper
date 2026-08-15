@@ -4,15 +4,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { config } from '../config.js';
 
 /**
- * Casper's own persistence: one SQLite file holding the state kiro doesn't know
- * about.
+ * Casper's own persistence: one SQLite file for the state kiro doesn't keep.
  *
- * `sessions` carries the per-session overrides Casper layers on top of kiro's
- * files (a renamed title, a re-pointed working directory); `logins` carries the
- * device sessions the auth cookie is checked against.
- *
- * node:sqlite is built in, so this costs no dependency - which is why the Node
- * floor is 24 rather than shipping a native driver.
+ * `sessions` holds the per-session overrides layered on kiro's files (renamed title,
+ * re-pointed working directory); `logins` holds the device sessions the auth cookie is
+ * checked against. node:sqlite is built in, which is why the Node floor is 24 rather
+ * than a native driver.
  */
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sessions (

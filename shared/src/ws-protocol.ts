@@ -1,12 +1,10 @@
 /**
- * WebSocket protocol - the resumable streaming channel between the browser
- * and the Casper server.
+ * WebSocket protocol - the resumable streaming channel between browser and server.
  *
- * Core invariant: every server-side event carries a strictly increasing
- * per-session `seq`. The client remembers the last `seq` it applied; on
- * reconnect it sends that cursor and the server replays everything after it
- * (or tells the client to `resync` if the cursor is older than the buffer).
- * This is what lets a long agent run survive a disconnect or tab close.
+ * Every event carries a strictly increasing per-session `seq`. The client remembers the
+ * last one it applied and sends that cursor on reconnect; the server replays everything
+ * after it, or answers `resync` if the cursor is older than the buffer. This is what lets
+ * a long agent run survive a disconnect.
  */
 
 import type {

@@ -100,14 +100,11 @@ export class SessionSocket {
       this.reconnectTimer = null;
     }
 
-    // Drop any socket we already have before opening another. Waking a phone
-    // fires 'online' and 'visibilitychange' together, and the dying socket's
-    // own onclose schedules a retry, so connect() can be re-entered while a
-    // previous socket is still live. Each server connection keeps its own
-    // replay cursor and its own event subscription, so a leaked socket means
-    // every event is delivered twice - duplicate prompts, tool calls, and
-    // interleaved streaming text. Null the handlers first so the close we
-    // trigger here doesn't schedule yet another reconnect.
+    // Drop any socket we already have before opening another: waking a phone fires 'online' and
+    // 'visibilitychange' together, and a dying socket's onclose schedules its own retry, so
+    // connect() can be re-entered while one is still live. Each connection carries its own replay
+    // cursor, so a leaked socket delivers every event twice. Null the handlers first, or the close
+    // we trigger here schedules yet another reconnect.
     const stale = this.ws;
     if (stale) {
       this.ws = null;

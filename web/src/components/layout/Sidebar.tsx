@@ -21,13 +21,6 @@ interface Props {
   onLock: () => void;
 }
 
-// Show the last one or two path segments so the directory reads at a glance.
-function shortCwd(cwd: string): string {
-  const parts = cwd.split('/').filter(Boolean);
-  if (parts.length <= 2) return cwd;
-  return `…/${parts.slice(-2).join('/')}`;
-}
-
 function relTime(iso: string): string {
   const d = Date.parse(iso);
   if (Number.isNaN(d)) return '';
@@ -154,6 +147,8 @@ export function Sidebar({
                 <input
                   className="srow-rename"
                   autoFocus
+                  // Start with the name selected, so typing replaces it.
+                  onFocus={(e) => e.currentTarget.select()}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onBlur={() => commitRename(s.sessionId)}
@@ -185,11 +180,6 @@ export function Sidebar({
                       )}
                       <span className="srow-when">{relTime(s.updatedAt)}</span>
                     </span>
-                    {s.cwd && (
-                      <span className="srow-cwd" title={s.cwd}>
-                        {shortCwd(s.cwd)}
-                      </span>
-                    )}
                   </span>
                 </Link>
               )}

@@ -11,11 +11,10 @@ const SESSION_COOKIE = 'casper.sid';
 // random token, the store keeps only its hash.
 const logins = new LoginStore();
 
-// Ten wrong tokens per quarter hour: forgiving of a mistyped paste, useless for
-// guessing 24 random bytes. Keyed on the socket address, so behind a reverse proxy
-// (where every request appears to come from the proxy) this throttles the endpoint
-// as a whole rather than per client. That's still the protection that matters here,
-// since trusting X-Forwarded-For would let anyone claim a fresh address.
+// Ten wrong tokens per quarter hour: forgiving of a mistyped paste, useless for guessing 24
+// random bytes. Keyed on the socket address, so behind a reverse proxy this throttles the
+// endpoint as a whole rather than per client - still the protection that matters, since
+// trusting X-Forwarded-For would let anyone claim a fresh address.
 const loginLimiter = new AttemptLimiter(10, 15 * 60 * 1000);
 
 /**
@@ -60,12 +59,10 @@ export function hasValidSession(req: FastifyRequest): boolean {
   return logins.verify(sessionToken(req)) !== null;
 }
 
-// Cookie options. `secure: 'auto'` sets the Secure flag only over HTTPS (so it
-// works on a plain-HTTP LAN and a tunneled HTTPS origin alike). SameSite=Lax
-// still blocks cross-site POSTs (our CSRF concern) but, unlike Strict, lets the
-// cookie ride the WebSocket upgrade and top-level navigations to our own origin
-// - Strict drops it there, which breaks WS auth and causes a reconnect loop.
-// maxAge matches the store TTL.
+// Cookie options. `secure: 'auto'` sets Secure only over HTTPS, so a plain-HTTP LAN and a
+// tunneled HTTPS origin both work. SameSite=Lax still blocks cross-site POSTs but, unlike
+// Strict, rides the WebSocket upgrade and top-level navigations to our own origin - Strict
+// drops it there, breaking WS auth into a reconnect loop. maxAge matches the store TTL.
 function cookieOptions(): {
   path: string;
   httpOnly: true;

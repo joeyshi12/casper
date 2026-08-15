@@ -4,13 +4,10 @@ import { App } from './App.js';
 import './styles/theme.css';
 import './styles/app.css';
 
-// PWA update handling. The service worker uses skipWaiting + clientsClaim, so a
-// new deploy activates and takes control of open tabs. Without this, the tab
-// keeps running the previously cached bundle until the user manually reloads
-// (twice), so shipped fixes appear "not deployed". When a NEW worker takes
-// control of a page that already had one (a returning visitor getting an
-// update), reload once to swap in the fresh assets. Guarded so the first-ever
-// install (no prior controller) and repeat reloads don't loop.
+// PWA update handling. The service worker uses skipWaiting + clientsClaim, so a new deploy
+// takes control of open tabs - but the tab keeps running the cached bundle until reloaded,
+// which makes shipped fixes look undeployed. Reload once when a new worker takes over a page
+// that already had one, guarded so a first install and repeat reloads don't loop.
 if ('serviceWorker' in navigator) {
   const hadController = Boolean(navigator.serviceWorker.controller);
   let reloading = false;

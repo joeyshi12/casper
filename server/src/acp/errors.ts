@@ -6,11 +6,9 @@ const MAX_DETAIL = 2000;
 /**
  * Flatten a JSON-RPC error into something a person can act on.
  *
- * `message` is usually just the text for the code - kiro answers a failed
- * session/prompt with "Internal error" and puts the real cause in `data`, e.g.
- * "No session found with id". Reporting only `message` gave every failure the
- * same useless wording, so lead with `data` and keep the generic classification
- * in parentheses behind it.
+ * kiro answers a failed session/prompt with "Internal error" and puts the real cause in
+ * `data`, e.g. "No session found with id", so lead with `data` and keep the generic
+ * classification in parentheses behind it.
  */
 export function describeError(error: JsonRpcError['error']): string {
   const detail = detailText(error.data);

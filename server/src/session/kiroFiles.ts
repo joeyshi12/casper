@@ -46,12 +46,10 @@ interface KiroSessionJson {
   };
 }
 
-// A content block is always {kind, data}, but `data`'s shape depends on `kind`
-// and kiro emits kinds we don't model. Modelling that as a union with a
-// `kind: string` catch-all doesn't work: checking `kind === 'text'` leaves the
-// catch-all in play, so `data` widens back to `unknown` and every read needs a
-// cast. Keep the block itself loose and narrow it with the guards below, which
-// check at runtime instead of asserting.
+// A content block is always {kind, data}, but `data`'s shape depends on `kind` and kiro emits
+// kinds we don't model. A union with a `kind: string` catch-all doesn't work: checking
+// `kind === 'text'` leaves the catch-all in play, so `data` widens back to unknown and every
+// read needs a cast. Keep the block loose and narrow it with the runtime guards below.
 interface KiroContentBlock {
   kind: string;
   data: unknown;
@@ -116,16 +114,11 @@ function blockText(c: KiroContentBlock): string {
 }
 
 /**
- * The blocks of a persisted tool result that are worth sending, i.e. everything
- * except inline images.
+ * The blocks of a persisted tool result worth sending: everything except inline images.
  *
- * kiro stores tool-result images inline as a raw byte array (data.source.data),
- * which costs several bytes of JSON per image byte - a tool call returning a few
- * screenshots becomes megabytes, and one transcript page measured 5.1 MB against
- * ~100 KB for pages without them. Nothing renders these: the live path already
- * keeps only Text and Json items (see outputToBlocks), so a reload was shipping
- * payload the UI has no code to display. Images the user should see come from
- * the file endpoints by path instead.
+ * kiro stores tool-result images as a raw byte array, costing several bytes of JSON per
+ * image byte - one transcript page measured 5.1 MB against ~100 KB without them. Nothing
+ * renders them anyway; images the user should see come from the file endpoints by path.
  */
 function renderableBlocks(content: unknown): KiroContentBlock[] {
   return contentBlocks(content).filter((b) => b.kind !== 'image');

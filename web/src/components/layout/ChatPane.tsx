@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { PromptContentBlock } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 import type { ConnStatus } from '../../api/SessionSocket.js';
@@ -9,13 +9,13 @@ import { ConnDot } from '../common/ConnBanner.js';
 import { Spinner, FilesIcon } from '../common/icons.js';
 
 interface Props {
-  hasActive: boolean;
+  /** A session being composed: no id yet, created by the first prompt. */
+  isDraft: boolean;
   /** Session whose detail is being fetched (switching sessions), distinct from
    *  the currently-loaded one so we don't render its stale transcript while
    *  waiting on a slow hydrate. */
   loadingSessionId: string | null;
   connStatus: ConnStatus;
-  creating: boolean;
   createError: string | null;
   onRetryCreate: () => void;
   onDismissError: () => void;
@@ -25,7 +25,6 @@ interface Props {
   /** Re-send a prompt after a failed turn. */
   onRetryTurn: (text: string) => void;
   onCancel: () => void;
-  onNew: () => void;
   onChangeModel: (modelId: string) => void;
   onChangeAgent: (modeId: string) => void;
   onCompact: () => void;
@@ -33,10 +32,9 @@ interface Props {
 
 /** The right-hand chat area. Shows an empty prompt when no session is open. */
 export function ChatPane({
-  hasActive,
+  isDraft,
   loadingSessionId,
   connStatus,
-  creating,
   createError,
   onRetryCreate,
   onDismissError,
@@ -45,7 +43,6 @@ export function ChatPane({
   onRetry,
   onRetryTurn,
   onCancel,
-  onNew,
   onChangeModel,
   onChangeAgent,
   onCompact,
@@ -56,11 +53,16 @@ export function ChatPane({
   const dismissSessionNotice = useStore((s) => s.dismissSessionNotice);
   const [showTree, setShowTree] = useState(false);
 
-  // Switching to a different session: its detail (transcript, mode, etc.) is
-  // still being fetched. Checked before the main branch below so we don't keep
-  // rendering the previous session's transcript under its old header while a
-  // slow hydrate (large transcripts re-parse their full history on open) is in
-  // flight - that reads as the click having done nothing.
+  // The panel belongs to the session it was opened in. Without this it survives a
+  // switch as component state, and a new session pops it open the moment the first
+  // prompt gives that session an id.
+  useEffect(() => {
+    setShowTree(false);
+  }, [activeId]);
+
+  // Switching sessions: the detail is still being fetched. Checked before the main branch
+  // so a slow hydrate doesn't leave the previous session's transcript on screen under a new
+  // header, which reads as the click having done nothing.
   if (loadingSessionId) {
     return (
       <main className="chatpane">
@@ -77,39 +79,7 @@ export function ChatPane({
     );
   }
 
-  if (!hasActive) {
-    return (
-      <main className="chatpane">
-        <div className="chat-blank">
-          <p className="chat-blank-title">Pick a session</p>
-          <p className="chat-blank-sub">
-            Choose one on the left, or start a new one. Casper keeps working even
-            after you close the app.
-          </p>
-          <button className="btn-primary" onClick={onNew}>
-            New session
-          </button>
-        </div>
-      </main>
-    );
-  }
 
-  if (creating) {
-    return (
-      <main className="chatpane">
-        <header className="chat-head">
-          <span className="chat-title">New session</span>
-        </header>
-        <div className="chat-blank">
-          <Spinner size={32} className="chat-spinner" />
-          <p className="chat-blank-title">Starting session</p>
-          <p className="chat-blank-sub">
-            Spinning up Kiro and connecting. This can take a few seconds.
-          </p>
-        </div>
-      </main>
-    );
-  }
 
   if (createError) {
     return (
@@ -144,18 +114,22 @@ export function ChatPane({
             ‹
           </button>
           <span className="chat-title" title={title}>
-            {title ?? 'Session'}
+            {isDraft ? 'New session' : title ?? 'Session'}
           </span>
-          <ConnDot status={connStatus} />
-          <button
-            className={`ftree-toggle ${showTree ? 'is-active' : ''}`}
-            onClick={() => setShowTree((v) => !v)}
-            title="Toggle file tree"
-            aria-label="Toggle file tree"
-            aria-pressed={showTree}
-          >
-            <FilesIcon size={18} />
-          </button>
+          {/* A draft has no socket yet, so a red "Offline" dot would be a lie. */}
+          {!isDraft && <ConnDot status={connStatus} />}
+          {/* A draft has no workspace yet, so there is nothing to browse. */}
+          {!isDraft && (
+            <button
+              className={`ftree-toggle ${showTree ? 'is-active' : ''}`}
+              onClick={() => setShowTree((v) => !v)}
+              title="Toggle file tree"
+              aria-label="Toggle file tree"
+              aria-pressed={showTree}
+            >
+              <FilesIcon size={18} />
+            </button>
+          )}
         </header>
 
         <div className="chat-body">

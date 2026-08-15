@@ -140,6 +140,32 @@ describe('tool-call rendering: toolLabel (header identical live vs hydrated)', (
   });
   it('generic keeps a single-token name', () => assert.equal(toolLabel({ title: 'web_fetch', input: {} }), 'web_fetch'));
   it('generic human title -> tool', () => assert.equal(toolLabel({ title: 'Fetching a page', input: {} }), 'tool'));
+
+  // Live, kiro sends the tool name bare and only the title carries the server.
+  it('mcp tool live -> @server/tool', () =>
+    assert.equal(
+      toolLabel({ name: 'show_widget', title: 'Running: @casper/show_widget' }),
+      '@casper/show_widget',
+    ));
+
+  it('mcp tool from a namespaced name', () =>
+    assert.equal(toolLabel({ name: 'casper/read_me' }), '@casper/read_me'));
+
+  it('mcp tool whose name already carries the @', () =>
+    assert.equal(toolLabel({ name: '@casper/show_choice' }), '@casper/show_choice'));
+
+  // A shell command can contain something that looks like a namespace.
+  it('a package scope in a shell title is not an mcp tool', () =>
+    assert.equal(
+      toolLabel({ name: 'shell', title: 'Running: npm i @casper/web' }),
+      'shell',
+    ));
+
+  it('another server namespaces the same way', () =>
+    assert.equal(
+      toolLabel({ name: 'search_docs', title: 'Running: @context7/search_docs' }),
+      '@context7/search_docs',
+    ));
 });
 
 describe('tool-call rendering: langFromPath', () => {

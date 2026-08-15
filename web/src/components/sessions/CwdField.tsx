@@ -12,9 +12,8 @@ interface Props {
 }
 
 /**
- * Working-directory input with debounced directory autocomplete. Shared by the
- * new-session sheet and the change-folder sheet so both resolve paths the same
- * way (server-side suggestions, confined to CASPER_FILE_ROOT).
+ * Working-directory input with debounced autocomplete: suggestions come from the
+ * server, confined to CASPER_FILE_ROOT.
  */
 export function CwdField({
   value,

@@ -79,7 +79,7 @@ interface CasperState {
   setModels: (m: ModelInfo[]) => void;
   setAgents: (a: AgentMode[], defaultAgentId: string) => void;
   setLoadingSession: (id: string | null) => void;
-  loadDetail: (d: SessionDetail) => void;
+  loadDetail: (d: SessionDetail, opts?: { keepPending?: boolean }) => void;
   prependItems: (older: TranscriptItem[]) => void;
   clearActive: () => void;
   applyEvent: (e: CasperEvent) => void;
@@ -116,8 +116,8 @@ export const useStore = create<CasperState>((set, get) => ({
   setAgents: (agents, defaultAgentId) => set({ agents, defaultAgentId }),
   setLoadingSession: (loadingSessionId) => set({ loadingSessionId }),
 
-  loadDetail: (d) =>
-    set({
+  loadDetail: (d, opts) =>
+    set((s) => ({
       activeId: d.summary.sessionId,
       loadingSessionId: null,
       modes: d.modes,
@@ -131,9 +131,11 @@ export const useStore = create<CasperState>((set, get) => ({
       remainingOlder: Math.max(0, d.transcriptTotal - d.transcript.length),
       streamingText: '',
       streamingThought: '',
-      pending: [],
+      // Switching sessions drops optimistic bubbles, but adopting the session a draft
+      // just created must keep the message that created it.
+      pending: opts?.keepPending ? s.pending : [],
       sessionNotice: null,
-    }),
+    })),
 
   // Prepend an older page (loaded on scroll-up). remainingOlder shrinks by the
   // number actually returned so it converges to 0 when the head is reached.
