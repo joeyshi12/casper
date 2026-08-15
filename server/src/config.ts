@@ -169,7 +169,12 @@ export const config = {
   kiroBin: resolveKiroBin(setting('KIRO_BIN', 'kiroBin', 'kiro-cli'), home),
   defaultCwd: setting('DEFAULT_CWD', 'defaultCwd', process.cwd()),
   maxLiveSessions: settingInt('MAX_LIVE_SESSIONS', 'maxLiveSessions', 6),
-  defaultAgent: setting('DEFAULT_AGENT', 'defaultAgent', 'kiro_default'),
+  /**
+   * The agent Casper installs, which is the one with the widget tools. Safe as a
+   * default even when it is missing: kiro-cli acp falls back to kiro_default rather
+   * than failing, and reports what it chose, which is what a session records.
+   */
+  defaultAgent: setting('DEFAULT_AGENT', 'defaultAgent', 'casper'),
   /**
    * Filesystem root that file-serving endpoints (/api/fs/dirs, /api/fs/image)
    * are confined to. Requests resolving outside this root are rejected.

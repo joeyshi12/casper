@@ -92,41 +92,6 @@
   padding: 6px 8px;
 }
 
-/* Scrollbars everywhere: an 8px gutter whose width is always reserved, with a thumb
-   that is transparent at rest, coloured while its own element scrolls (startScrollActivity
-   marks whatever moved) and brighter under the pointer, which is what stops it vanishing
-   as you reach for it. Reserving the width means revealing the thumb never reflows the
-   content. scrollbar-color inherits, so setting it on body covers Firefox. */
-body {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-}
-.is-scrolling {
-  scrollbar-color: var(--n2) transparent;
-}
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 4px;
-  transition: background 0.3s ease;
-}
-.is-scrolling::-webkit-scrollbar-thumb {
-  background: var(--n2);
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--n3);
-}
-@media (prefers-reduced-motion: reduce) {
-  ::-webkit-scrollbar-thumb {
-    transition: none;
-  }
-}
 .sidebar-empty {
   color: var(--n3);
   font-size: 13px;
@@ -952,7 +917,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  scrollbar-width: none; /* Firefox: hide the scrollbar, keep scrolling */
 }
+.transcript::-webkit-scrollbar {
+  display: none; /* WebKit/Blink */
+}
+
 /* Direct children are flex items and default to flex-shrink: 1, so a full
    column compresses them (tool cards clip and flatten). Pin them all. */
 .transcript > * {

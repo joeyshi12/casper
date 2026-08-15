@@ -28,7 +28,7 @@ function systemctl(args: string[], quiet = false): number {
   return r.status ?? 1;
 }
 
-export function hasUserSystemd(): boolean {
+function hasUserSystemd(): boolean {
   const r = spawnSync('systemctl', ['--user', 'show-environment'], { stdio: 'ignore' });
   return r.status === 0;
 }

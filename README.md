@@ -112,7 +112,7 @@ inside it, and `CASPER_WEB_DIST`, which is install layout rather than a preferen
 | `CASPER_SESSION_TTL_SECONDS` | `sessionTtlSeconds` | `604800` | Device-login lifetime, slid forward on activity |
 | `KIRO_BIN` | `kiroBin` | `kiro-cli` | Path to the kiro-cli binary |
 | `DEFAULT_CWD` | `defaultCwd` | cwd | Working directory for new sessions |
-| `DEFAULT_AGENT` | `defaultAgent` | `kiro_default` | Agent for new sessions |
+| `DEFAULT_AGENT` | `defaultAgent` | `casper` | Agent for new sessions, so widgets work out of the box. If it is missing, kiro falls back to `kiro_default` on its own |
 | `CASPER_FILE_ROOT` | `fileRoot` | `/` | Confines the file browser. Defaults to everything the server can read; narrow it to keep authenticated users out of system files |
 | `MAX_LIVE_SESSIONS` | `maxLiveSessions` | `6` | Concurrent live kiro processes |
 | `CASPER_DATA_DIR` | _(env only)_ | `~/.casper` | Where `casper.db` and uploaded files live |

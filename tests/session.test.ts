@@ -481,3 +481,13 @@ describe('SQLite stores', () => {
     assert.equal(fs.existsSync(path.join(dir, 'casper.db')), true);
   });
 });
+
+describe('default agent', () => {
+  // Asking for an agent that does not exist is safe: kiro-cli acp falls back to
+  // kiro_default instead of failing, and reports the choice in session/new, which
+  // SessionManager adopts (s.agentId = res.modes.currentModeId). Verified against
+  // kiro 2.11: requesting a missing agent returned currentModeId kiro_default.
+  it('is the casper agent, which is the one carrying the widget tools', () => {
+    assert.equal(config.defaultAgent, 'casper');
+  });
+});
