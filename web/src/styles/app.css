@@ -673,6 +673,13 @@
   font-size: 13px;
   max-width: 100%;
 }
+/* A picker in a sheet has room to breathe: label above the field, full width, so the hint
+   is not squeezed into a column beside it. */
+.sheet .picker {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
 .picker-hint {
   font-size: 11px;
   color: var(--n3);
