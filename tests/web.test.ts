@@ -49,6 +49,8 @@ import {
   shouldReconnect,
 } from '../web/src/api/socketHealth.js';
 import { SessionSocket } from '../web/src/api/SessionSocket.js';
+import { sanitize } from 'hast-util-sanitize';
+import { MARKDOWN_HTML_SCHEMA } from '../web/src/util/markdownHtml.js';
 
 describe('attachments line (drives image thumbnails; stripped from the bubble)', () => {
   const msg = `${ATTACHMENTS_PREFIX}.casper/uploads/a.png, .casper/uploads/notes.txt\nplease review`;
@@ -632,5 +634,66 @@ describe('socket watchdog: a connect that never resolves', () => {
       tick();
       assert.deepEqual(seen, ['reconnecting', 'reconnecting']);
     });
+  });
+});
+
+describe('markdown HTML sanitising', () => {
+  interface El {
+    type: 'element';
+    tagName: string;
+    properties: Record<string, unknown>;
+    children: El[];
+  }
+  const el = (tagName: string, properties: Record<string, unknown> = {}, children: El[] = []) =>
+    ({ type: 'element', tagName, properties, children }) as El;
+  const clean = (tree: El) =>
+    sanitize({ type: 'root', children: [tree] } as never, MARKDOWN_HTML_SCHEMA) as {
+      children: El[];
+    };
+  const first = (tree: El) => clean(tree).children[0];
+
+  // The README banner: a centred paragraph holding a sized image.
+  it('keeps the attributes a README banner needs', () => {
+    const out = first(
+      el('p', { align: 'center' }, [
+        el('img', { src: 'https://example.com/banner.svg', alt: 'banner', width: '100%' }),
+      ]),
+    );
+    assert.equal(out.tagName, 'p');
+    assert.equal(out.properties.align, 'center');
+    const img = out.children[0]!;
+    assert.equal(img.properties.src, 'https://example.com/banner.svg');
+    assert.equal(img.properties.width, '100%');
+    assert.equal(img.properties.alt, 'banner');
+  });
+
+  // The file browser opens anything under fileRoot, so this is untrusted input
+  // rendered in Casper's origin, where script could call the API as the user.
+  it('drops script entirely', () => {
+    const out = clean(el('script', {}, []));
+    assert.equal(out.children.length, 0);
+  });
+
+  it('drops event handlers but keeps the element', () => {
+    const out = first(el('img', { src: 'x.png', onError: 'alert(1)', onClick: 'alert(2)' }));
+    assert.equal(out.tagName, 'img');
+    assert.equal(out.properties.src, 'x.png');
+    assert.equal(out.properties.onError, undefined);
+    assert.equal(out.properties.onClick, undefined);
+  });
+
+  it('drops a javascript: link but keeps the text', () => {
+    const out = first(el('a', { href: 'javascript:alert(1)' }, []));
+    assert.equal(out.tagName, 'a');
+    assert.equal(out.properties.href, undefined);
+  });
+
+  it('keeps an ordinary link', () => {
+    const out = first(el('a', { href: 'https://example.com' }, []));
+    assert.equal(out.properties.href, 'https://example.com');
+  });
+
+  it('drops an iframe, which would be a frame inside the app origin', () => {
+    assert.equal(clean(el('iframe', { src: 'https://example.com' })).children.length, 0);
   });
 });

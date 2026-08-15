@@ -91,6 +91,42 @@
   overflow-y: auto;
   padding: 6px 8px;
 }
+
+/* Scrollbar visible while the container is scrolling or under the pointer, faded out
+   otherwise. Its width is always reserved, so showing it never reflows the content.
+   Driven by useAutoHideScrollbar, which adds is-scrolling. */
+.scroll-autohide {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.scroll-autohide.is-scrolling,
+.scroll-autohide:hover {
+  scrollbar-color: var(--n2) transparent;
+}
+.scroll-autohide::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-autohide::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-autohide::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 4px;
+  transition: background 0.3s ease;
+}
+.scroll-autohide.is-scrolling::-webkit-scrollbar-thumb,
+.scroll-autohide:hover::-webkit-scrollbar-thumb {
+  background: var(--n2);
+}
+.scroll-autohide::-webkit-scrollbar-thumb:hover {
+  background: var(--n3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .scroll-autohide::-webkit-scrollbar-thumb {
+    transition: none;
+  }
+}
 .sidebar-empty {
   color: var(--n3);
   font-size: 13px;
@@ -2037,6 +2073,7 @@
 /* Attachment thumbnails above the input. */
 .composer-attachments {
   display: flex;
+  align-items: flex-start;
   gap: 8px;
   padding-bottom: 8px;
   overflow-x: auto;
@@ -2045,10 +2082,15 @@
   position: relative;
   flex-shrink: 0;
 }
+/* Tall enough to recognise a screenshot, and contained rather than cropped so it
+   is the whole picture at a glance. */
 .composer-att-img {
-  width: 56px;
-  height: 56px;
-  object-fit: cover;
+  display: block;
+  height: 112px;
+  width: auto;
+  max-width: 220px;
+  object-fit: contain;
+  background: var(--n0);
   border-radius: var(--r-sm);
   border: 1px solid var(--n2);
 }
@@ -2057,7 +2099,7 @@
   align-items: center;
   gap: 4px;
   height: 56px;
-  padding: 0 10px;
+  padding: 0 28px 0 10px;
   border-radius: var(--r-sm);
   border: 1px solid var(--n2);
   background: var(--n0);
@@ -2075,26 +2117,41 @@
   white-space: nowrap;
   min-width: 0;
 }
+/* Inside the thumbnail, not overlapping its edge: the strip scrolls horizontally,
+   which clips both axes, so anything outside the box loses its top. */
 .composer-att-remove {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  width: 18px;
-  height: 18px;
+  top: 5px;
+  right: 5px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   border: none;
-  background: var(--n2);
+  background: var(--n1);
   color: var(--n6);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.12s;
+  opacity: 0;
+  transition:
+    opacity 0.12s,
+    background 0.12s;
+}
+.composer-att:hover .composer-att-remove,
+.composer-att-remove:focus-visible {
+  opacity: 1;
 }
 .composer-att-remove:hover {
   background: var(--aurora-red);
+}
+/* No hover to reveal it with, so leave it showing. */
+@media (hover: none) {
+  .composer-att-remove {
+    opacity: 1;
+  }
 }
 
 /* Gate */

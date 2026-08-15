@@ -4,6 +4,7 @@ import { api } from '../../api/rest.js';
 import { useStore } from '../../state/store.js';
 import { ChangeFolderSheet } from '../sessions/ChangeFolderSheet.js';
 import { highlightToHtml } from '../../util/highlighter.js';
+import { useAutoHideScrollbar } from '../../util/useAutoHideScrollbar.js';
 import {
   ChevronIcon,
   CloseIcon,
@@ -322,6 +323,7 @@ function FilePreview({
   sessionId: string;
   onClose: () => void;
 }) {
+  const bodyScroll = useAutoHideScrollbar<HTMLDivElement>();
   // A class rather than the Fullscreen API, which iOS Safari won't grant to
   // arbitrary elements - and this gets used from a phone.
   const [full, setFull] = useState(false);
@@ -400,7 +402,11 @@ function FilePreview({
             <CloseIcon size={18} />
           </button>
         </div>
-        <div className="fpreview-body">
+        <div
+          className="fpreview-body scroll-autohide"
+          ref={bodyScroll.ref}
+          onScroll={bodyScroll.onScroll}
+        >
           {preview.loading && (
             <div className="fpreview-loading">
               <Spinner size={48} />
@@ -432,9 +438,9 @@ function FilePreview({
             />
           )}
           {!preview.loading && !preview.error && preview.kind === 'markdown' && showRendered && preview.content !== null && (
-            // react-markdown drops raw HTML, so there is nothing to sandbox.
+            // The file's own HTML renders, sanitised with GitHub's schema first.
             <div className="fpreview-md">
-              <MarkdownRenderer text={preview.content} />
+              <MarkdownRenderer text={preview.content} html />
             </div>
           )}
           {!preview.loading && !preview.error && showText && preview.highlightedHtml && (
@@ -454,6 +460,7 @@ function FilePreview({
 
 /** Workspace file tree panel with lazy folder expansion, preview, and download. */
 export function FileTree({ sessionId, onClose }: FileTreeProps) {
+  const listScroll = useAutoHideScrollbar<HTMLDivElement>();
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [cwd, setCwd] = useState('');
   const [loading, setLoading] = useState(true);
@@ -569,7 +576,11 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
         )}
       </div>
       {cwd && <div className="ftree-cwd" title={cwd}>{cwd}</div>}
-      <div className="ftree-list">
+      <div
+        className="ftree-list scroll-autohide"
+        ref={listScroll.ref}
+        onScroll={listScroll.onScroll}
+      >
         {loading && <div className="ftree-loading">Loading…</div>}
         {error && (
           <div className="ftree-error">
