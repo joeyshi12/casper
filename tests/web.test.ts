@@ -18,6 +18,8 @@ import { lineDiff } from '../web/src/util/diff.js';
 import { matchPath } from 'react-router';
 import { SESSION_ROUTE, pathForSession } from '../web/src/util/route.js';
 import { choiceCallOf } from '../web/src/util/choiceCall.js';
+import { upsertSession } from '../web/src/state/sessions.js';
+import { composerPlaceholder } from '../web/src/util/composerPlaceholder.js';
 import { widgetCallOf } from '../web/src/util/widgetCall.js';
 import { lazyImageProps } from '../web/src/util/lazyImage.js';
 import { classifyTurnFailure } from '../web/src/util/turnFailure.js';
@@ -789,5 +791,71 @@ describe('currency versus inline math', () => {
 
   it('leaves an unpaired dollar alone, which markdown already renders literally', () => {
     assert.equal(escapeCurrencyDollars('It cost $50 all in.'), 'It cost $50 all in.');
+  });
+});
+
+describe('session list', () => {
+  const row = (id: string, title: string, updatedAt: string) =>
+    ({
+      sessionId: id,
+      title,
+      cwd: '/tmp',
+      createdAt: updatedAt,
+      updatedAt,
+      liveness: 'dormant',
+      running: false,
+    }) as never;
+
+  it('folds a session\'s own summary into the list, newest first', () => {
+    // A session the list has not caught up with is added, not dropped: this is what stops a
+    // just-created session showing a placeholder title until the next list fetch.
+    const added = upsertSession(
+      [row('a', 'Alpha', '2026-01-01T00:00:00Z')],
+      row('b', 'test', '2026-01-02T00:00:00Z'),
+    );
+    assert.deepEqual(
+      added.map((s) => s.title),
+      ['test', 'Alpha'],
+    );
+
+    // An existing row is replaced rather than duplicated.
+    const replaced = upsertSession(added, row('b', 'renamed', '2026-01-02T00:00:00Z'));
+    assert.equal(replaced.length, 2);
+    assert.deepEqual(
+      replaced.map((s) => s.title),
+      ['renamed', 'Alpha'],
+    );
+  });
+});
+
+describe('composer placeholder', () => {
+  const base = {
+    live: true,
+    connStatus: 'connected' as const,
+    uploading: false,
+    cancelling: false,
+    compacting: false,
+    running: false,
+  };
+
+  it('invites a prompt when there is nothing else to say', () => {
+    assert.equal(composerPlaceholder(base), 'Ask Casper to build something…');
+  });
+
+  it('reports the connection only when there is one to report', () => {
+    // A draft passes live: true with a closed socket, because sending is what creates the
+    // session - it must not claim to be offline.
+    assert.equal(composerPlaceholder({ ...base, connStatus: 'closed' }), 'Ask Casper to build something…');
+    assert.equal(
+      composerPlaceholder({ ...base, live: false, connStatus: 'closed' }),
+      'Offline - reconnecting when possible',
+    );
+    assert.equal(composerPlaceholder({ ...base, live: false, connStatus: 'connecting' }), 'Connecting…');
+  });
+
+  it('prefers what is happening now over the invitation', () => {
+    assert.equal(composerPlaceholder({ ...base, running: true }), 'Casper is working…');
+    assert.equal(composerPlaceholder({ ...base, running: true, uploading: true }), 'Uploading…');
+    assert.equal(composerPlaceholder({ ...base, compacting: true }), 'Compacting conversation…');
   });
 });

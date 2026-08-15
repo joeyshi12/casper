@@ -7,7 +7,7 @@
  * weakness when the window is minutes long. Only failures count - succeeding
  * shouldn't push you toward a lockout.
  */
-export type LimitDecision = { allowed: true } | { allowed: false; retryAfterSeconds: number };
+type LimitDecision = { allowed: true } | { allowed: false; retryAfterSeconds: number };
 
 export class AttemptLimiter {
   private readonly hits = new Map<string, { count: number; resetAt: number }>();

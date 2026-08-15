@@ -9,7 +9,7 @@ import url from 'node:url';
  * upgrade and deletes it on removal, leaving a link dangling. The recorded hash
  * separates our own older output from the user's edits.
  */
-export type AgentResult =
+type AgentResult =
   | { action: 'installed' | 'updated' | 'unchanged'; target: string }
   | { action: 'kept-yours' | 'no-source'; target: string };
 

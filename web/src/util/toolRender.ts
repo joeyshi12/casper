@@ -117,7 +117,7 @@ const IN_TITLE = /@([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/;
  * title is matched against the name before it is trusted, because a shell command can carry
  * something that looks like one: "Running: npm i @casper/web" is the shell tool.
  */
-export function mcpLabel(tool: { name?: string; title?: string }): string | null {
+function mcpLabel(tool: { name?: string; title?: string }): string | null {
   const named = NAMESPACED.exec(tool.name ?? '');
   if (named) return `@${named[1]}/${named[2]}`;
   const titled = IN_TITLE.exec(tool.title ?? '');

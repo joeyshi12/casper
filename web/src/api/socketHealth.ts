@@ -11,7 +11,7 @@ export const PING_AFTER_MS = 25_000;
 /** How long after that to wait for any reply before calling the socket dead. */
 export const PONG_GRACE_MS = 10_000;
 
-export interface SocketSample {
+interface SocketSample {
   /** readyState, or undefined when there is no socket at all. */
   state: number | undefined;
   /** When the current connect attempt started. */

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useMatch, useNavigate } from 'react-router';
 import type { PromptContentBlock } from '@casper/shared';
-import { stripAttachmentsLine } from '@casper/shared';
+import { stripAttachmentsLine, titleFromPrompt } from '@casper/shared';
+import type { CreateSessionRequest } from '@casper/shared';
 import { useStore } from './state/store.js';
 import { api, logout } from './api/rest.js';
 import { SessionSocket, type ConnStatus } from './api/SessionSocket.js';
@@ -15,6 +16,11 @@ type AuthState = 'checking' | 'gate' | 'ready';
 
 // Human names for the control actions the server acks, so a rejection reads as
 // "Model change failed: ..." rather than leaking the wire action name.
+type CreateOpts = Omit<CreateSessionRequest, 'freshWorkspace'>;
+
+/** How long clustered list refreshes wait, so a burst becomes a single request. */
+const LIST_COALESCE_MS = 150;
+
 const ACTION_LABEL: Record<string, string> = {
   prompt: 'Message',
   cancel: 'Stop',
@@ -31,7 +37,11 @@ export function App() {
     if (auth !== 'checking') return;
     api
       .listSessions()
-      .then(() => setAuth('ready'))
+      .then((r) => {
+        // This probe is also the first list fetch, so keep what it returned.
+        useStore.getState().setSessions(r.sessions);
+        setAuth('ready');
+      })
       .catch(() => setAuth('gate'));
   }, [auth]);
 
@@ -69,30 +79,44 @@ function Shell({ onLock }: { onLock: () => void }) {
   const firstPromptRef = useRef<{ id: string; content: PromptContentBlock[] } | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const lastCreateOpts = useRef<{
-    cwd?: string;
-    agentId?: string;
-    modelId?: string;
-  } | null>(null);
+  // What the last create was asked for, so the error screen's Retry can repeat it.
+  const lastCreateOpts = useRef<CreateOpts | null>(null);
   const socketRef = useRef<SessionSocket | null>(null);
   const lastSentRef = useRef<string | null>(null);
   const msgSeqRef = useRef(0);
 
+  // Refreshes cluster - boot, route changes, a turn starting or ending, a reconnect replaying
+  // events - so calls within a short window collapse into one request, and only the newest
+  // reply is applied: a late answer from before a session was named would undo its title.
+  const listSeq = useRef(0);
+  const listTimer = useRef<number | null>(null);
   const refreshSessions = useCallback(() => {
-    api.listSessions().then((r) => store.setSessions(r.sessions)).catch(() => {});
-  }, [store]);
+    if (listTimer.current !== null) return;
+    listTimer.current = window.setTimeout(() => {
+      listTimer.current = null;
+      const seq = ++listSeq.current;
+      api
+        .listSessions()
+        .then((r) => {
+          if (seq === listSeq.current) useStore.getState().setSessions(r.sessions);
+        })
+        .catch(() => {});
+    }, LIST_COALESCE_MS);
+  }, []);
 
   useEffect(() => {
     // Quiet on failure: an empty picker is its own signal.
     api
       .models()
-      .then((r) => store.setModels(r.models))
+      .then((r) => useStore.getState().setModels(r.models))
       .catch(() => {});
     api
       .agents()
-      .then((r) => store.setAgents(r.agents, r.defaultAgentId))
+      .then((r) => useStore.getState().setAgents(r.agents, r.defaultAgentId))
       .catch(() => {});
-    refreshSessions();
+    // The auth probe fetched the list already; this covers the other way in, a
+    // fresh login, where nothing has.
+    if (useStore.getState().sessions.length === 0) refreshSessions();
   }, []);
 
   const closeSocket = useCallback(() => {
@@ -104,9 +128,9 @@ function Shell({ onLock }: { onLock: () => void }) {
   // than looping on reconnects.
   const handleUnauthorized = useCallback(() => {
     closeSocket();
-    store.clearActive();
+    useStore.getState().clearActive();
     onLock();
-  }, [closeSocket, onLock, store]);
+  }, [closeSocket, onLock]);
 
   // The file panel declares which directories it is showing, and the server
   // watches exactly those. Resent on reconnect, since watches live with the
@@ -122,7 +146,8 @@ function Shell({ onLock }: { onLock: () => void }) {
     // to fetch, and no "Opening session" state to show, which is what made the draft
     // look like it reloaded the page.
     async (id: string, adopted?: Awaited<ReturnType<typeof api.getSession>>) => {
-      if (store.activeId === id) return;
+      if (useStore.getState().activeId === id) return;
+      openTarget.current = id;
       closeSocket();
       setConnStatus('connecting');
       if (!adopted) useStore.getState().setLoadingSession(id);
@@ -133,6 +158,7 @@ function Shell({ onLock }: { onLock: () => void }) {
       try {
         detail = await api.getSession(id);
       } catch (err) {
+        if (openTarget.current !== id) return;
         // Fetch failed (network, or the session was deleted): don't strand the
         // UI in "connecting" - reset and surface the error.
         setConnStatus('closed');
@@ -142,13 +168,18 @@ function Shell({ onLock }: { onLock: () => void }) {
         navigate('/', { replace: true });
         return;
       }
-      store.loadDetail(detail, { keepPending: Boolean(adopted) });
+      // Abandoned while fetching: leave whatever the user moved on to alone.
+      if (openTarget.current !== id) return;
+      useStore.getState().loadDetail(detail, { keepPending: Boolean(adopted) });
 
       const socket = new SessionSocket(
         id,
         {
           onEvent: (e) => {
             useStore.getState().applyEvent(e);
+            // A first turn is when the server names an unnamed session, so pick the list
+            // up now instead of leaving the row untitled until the turn ends.
+            if (e.payload.kind === 'turn_started') refreshSessions();
             // kiro persists the session around now, so reconcile the list for its
             // real updatedAt, title and credits. Delayed until that settles.
             if (e.payload.kind === 'turn_ended') {
@@ -158,6 +189,7 @@ function Shell({ onLock }: { onLock: () => void }) {
           onStatus: setConnStatus,
           onResync: async () => {
             const fresh = await api.getSession(id);
+            if (openTarget.current !== id) return;
             useStore.getState().loadDetail(fresh);
             socketRef.current?.reset(fresh.head);
           },
@@ -189,7 +221,7 @@ function Shell({ onLock }: { onLock: () => void }) {
       socketRef.current = socket;
       socket.connect();
     },
-    [closeSocket, handleUnauthorized, navigate, refreshSessions, store],
+    [closeSocket, handleUnauthorized, navigate, refreshSessions],
   );
 
   const backToList = useCallback(() => navigate('/'), [navigate]);
@@ -202,8 +234,10 @@ function Shell({ onLock }: { onLock: () => void }) {
   }, []);
 
 
-  // The route owns which session is open, so cold loads, back/forward and
-  // clicks all arrive here. The ref fires it on URL changes, not renders.
+  // The route owns which session is open, so cold loads, back/forward and clicks all arrive
+  // here. The ref fires it on URL changes rather than renders.
+  const openTarget = useRef<string | null>(null);
+
   const handledRoute = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (handledRoute.current === routeSessionId) return;
@@ -211,14 +245,18 @@ function Shell({ onLock }: { onLock: () => void }) {
     if (routeSessionId) {
       void openSession(routeSessionId);
     } else {
+      openTarget.current = null;
       closeSocket();
-      store.clearActive();
+      useStore.getState().clearActive();
       refreshSessions();
     }
-  }, [routeSessionId, openSession, closeSocket, refreshSessions, store]);
+    // Deliberately not the store object: it changes on every update, and a re-run
+    // between claiming a route and the navigation landing would unclaim it and reopen
+    // the session from scratch.
+  }, [routeSessionId, openSession, closeSocket, refreshSessions]);
 
   const createSession = useCallback(
-    async (opts: { cwd?: string; agentId?: string; modelId?: string }) => {
+    async (opts: CreateOpts) => {
       // Enter the session view right away; it shows "Connecting" until ready.
       closeSocket();
       setConnStatus('connecting');
@@ -272,10 +310,10 @@ function Shell({ onLock }: { onLock: () => void }) {
         refreshSessions();
         return;
       }
-      if (store.activeId === id) backToList();
+      if (useStore.getState().activeId === id) backToList();
       else refreshSessions();
     },
-    [backToList, refreshSessions, store],
+    [backToList, refreshSessions],
   );
 
   const renameSession = useCallback(
@@ -315,11 +353,12 @@ function Shell({ onLock }: { onLock: () => void }) {
   // A new session costs nothing until there is something to say: the chat opens on a
   // draft route, and the first prompt is what creates the session.
   const startDraft = useCallback(() => {
+    openTarget.current = null;
     closeSocket();
-    store.clearActive();
+    useStore.getState().clearActive();
     setCreateError(null);
     navigate(DRAFT_PATH);
-  }, [closeSocket, navigate, store]);
+  }, [closeSocket, navigate]);
 
   const send = useCallback(
     (content: PromptContentBlock[]) => {
@@ -338,7 +377,15 @@ function Shell({ onLock }: { onLock: () => void }) {
       if (isDraft) {
         // Create on demand, then deliver: the socket opens as part of going to the
         // new session, so the prompt waits for it rather than being dropped.
-        void createSession({}).then((created) => {
+        // The pickers are live in a draft, so it is created with whatever they show.
+        const { currentModeId, currentModelId } = useStore.getState();
+        void createSession({
+          agentId: currentModeId,
+          modelId: currentModelId,
+          // Named on creation, so the row never appears as "Untitled session" for the
+          // moment between the session existing and its first turn starting.
+          title: titleFromPrompt(content),
+        }).then((created) => {
           if (created) firstPromptRef.current = { id, content };
           else useStore.getState().markPendingFailed(id, 'Could not start the session.');
         });
@@ -418,10 +465,10 @@ function Shell({ onLock }: { onLock: () => void }) {
   const lock = useCallback(() => {
     void logout();
     closeSocket();
-    store.clearActive();
+    useStore.getState().clearActive();
     navigate('/', { replace: true });
     onLock();
-  }, [closeSocket, onLock, store]);
+  }, [closeSocket, navigate, onLock]);
 
   // Lets a widget send a message as the user. Registered here because this is
   // where the socket lives.

@@ -164,6 +164,7 @@ export function ChatPane({
             onChangeModel={onChangeModel}
             onChangeAgent={onChangeAgent}
             connStatus={connStatus}
+            draft={isDraft}
           />
         </div>
       </div>

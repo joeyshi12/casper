@@ -15,7 +15,7 @@ import {
   type TranscriptToolCall,
 } from '@casper/shared';
 
-import { bumpSessionToTop } from './sessions.js';
+import { bumpSessionToTop, upsertSession } from './sessions.js';
 import { classifyTurnFailure } from '../util/turnFailure.js';
 
 /** A rendered tool call in the transcript (shared shape). */
@@ -120,6 +120,8 @@ export const useStore = create<CasperState>((set, get) => ({
     set((s) => ({
       activeId: d.summary.sessionId,
       loadingSessionId: null,
+      // The detail knows this session's title before the next list fetch does.
+      sessions: upsertSession(s.sessions, d.summary),
       modes: d.modes,
       currentModeId: d.currentModeId,
       currentModelId: d.summary.modelId,
@@ -158,6 +160,8 @@ export const useStore = create<CasperState>((set, get) => ({
       streamingThought: '',
       pending: [],
       sessionNotice: null,
+      currentModeId: undefined,
+      currentModelId: undefined,
     }),
 
   dismissSessionNotice: () => set({ sessionNotice: null }),

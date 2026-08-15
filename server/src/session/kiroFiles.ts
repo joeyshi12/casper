@@ -137,7 +137,8 @@ function summarize(j: KiroSessionJson): SessionSummary {
 
   return {
     sessionId: j.session_id,
-    title: j.title?.trim() || 'Untitled session',
+    // Left empty when kiro has not named it; resolveSessionTitle decides what to show.
+    title: j.title?.trim() ?? '',
     cwd: j.cwd,
     createdAt: j.created_at,
     updatedAt: j.updated_at,

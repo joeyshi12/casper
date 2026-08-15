@@ -24,3 +24,8 @@ export function createWorkspace(): { id: string; dir: string } {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return { id, dir };
 }
+
+/** Whether a working directory is one of ours, whose name is a uuid rather than a word. */
+export function isWorkspacePath(dir: string): boolean {
+  return dir === workspacesRoot() || dir.startsWith(workspacesRoot() + path.sep);
+}

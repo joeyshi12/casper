@@ -91,6 +91,14 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
     api
       .transcriptPage(activeId, offset, limit)
       .then((res) => {
+        // Switched sessions while the page was in flight: these items belong to a
+        // transcript that is no longer on screen.
+        if (useStore.getState().activeId !== activeId) {
+          anchorRef.current = null;
+          loadingOlderRef.current = false;
+          setLoadingOlder(false);
+          return;
+        }
         if (res.items.length > 0) {
           prependItems(res.items); // anchor restored in the layout effect
         } else {

@@ -57,6 +57,9 @@ export function ContextRing({ onCompact }: { onCompact: () => void }) {
   const windowTokens = models.find((m) => m.modelId === currentModelId)?.contextWindowTokens;
   const used = windowTokens ? Math.round((clamped / 100) * windowTokens) : undefined;
 
+  // Nothing to report before a session exists: an empty ring reads as a spinner.
+  if (!activeId) return null;
+
   return (
     <div className="ctx" ref={rootRef}>
       <button

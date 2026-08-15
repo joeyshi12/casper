@@ -69,6 +69,11 @@ export interface CreateSessionRequest {
    * picked: <data dir>/workspaces/<workspace id>.
    */
   freshWorkspace?: boolean;
+  /**
+   * Name the session as it is created. The client knows the first prompt before the
+   * session exists, so passing it here means the row is never listed as untitled.
+   */
+  title?: string;
 }
 
 /** A message entry in a session transcript. */

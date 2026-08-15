@@ -3,7 +3,7 @@ import { config } from '../config.js';
 import { db } from './db.js';
 
 /** A logged-in device. The cookie holds the raw token; we store only its hash. */
-export interface LoginRecord {
+interface LoginRecord {
   /** Stable id used to revoke this device (safe to expose to the client). */
   id: string;
   /** SHA-256 of the session token. The raw token lives only in the cookie. */

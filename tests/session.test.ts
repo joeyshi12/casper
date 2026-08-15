@@ -30,7 +30,7 @@ import {
   workspaceDir,
   workspacesRoot,
 } from '../server/src/session/workspaces.js';
-import { titleFromPrompt } from '../server/src/session/titles.js';
+import { titleFromPrompt, sanitizeTitle } from '@casper/shared';
 
 
 describe('TurnState: observability fold across a full turn', () => {

@@ -7,6 +7,7 @@ import type { ConnStatus } from '../../api/SessionSocket.js';
 import { PlusIcon, ArrowUpIcon, StopIcon, Spinner } from '../common/icons.js';
 import { AgentPicker, ModelPicker } from '../controls/Pickers.js';
 import { ContextRing } from '../observability/ContextRing.js';
+import { composerPlaceholder } from '../../util/composerPlaceholder.js';
 
 /** Image MIME types that can be inlined as ACP image content blocks. */
 const IMAGE_TYPES = new Set([
@@ -37,6 +38,8 @@ interface Props {
   onChangeAgent: (modeId: string) => void;
   /** Live socket status - drives the placeholder and whether prompts can send. */
   connStatus: ConnStatus;
+  /** Composing the first prompt of a session that does not exist yet. */
+  draft?: boolean;
 }
 
 /** ChatGPT-style input: + attach inside, paste, auto-grow, upload-on-send. */
@@ -48,6 +51,7 @@ export function Composer({
   onChangeModel,
   onChangeAgent,
   connStatus,
+  draft,
 }: Props) {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -59,7 +63,9 @@ export function Composer({
   const currentModelId = useStore((s) => s.currentModelId);
   const running = turnStatus === 'running';
   const cancelling = turnStatus === 'cancelling';
-  const live = connStatus === 'connected';
+  // A draft has no socket: sending is what creates the session, so the connection
+  // states below don't apply to it.
+  const live = draft || connStatus === 'connected';
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -238,24 +244,14 @@ export function Composer({
   }, []);
 
 
-  const placeholder =
-    connStatus === 'closed'
-      ? 'Offline - reconnecting when possible'
-      : connStatus === 'reconnecting'
-        ? 'Reconnecting…'
-        : connStatus === 'resyncing'
-          ? 'Resyncing…'
-          : !live
-            ? 'Connecting…'
-            : uploading
-              ? 'Uploading…'
-              : cancelling
-                ? 'Stopping…'
-                : compacting
-                  ? 'Compacting conversation…'
-                  : running
-                    ? 'Casper is working…'
-                    : 'Ask Casper to build something…';
+  const placeholder = composerPlaceholder({
+    live,
+    connStatus,
+    uploading,
+    cancelling,
+    compacting,
+    running,
+  });
 
   const canSend =
     (text.trim() || attachments.length > 0) &&
@@ -306,8 +302,9 @@ export function Composer({
           <button
             className="composer-plus"
             onClick={() => fileInputRef.current?.click()}
-            disabled={!live || uploading}
-            title="Add photos & files"
+            // A draft has no session to upload to yet, so this waits for the first prompt.
+            disabled={draft || !live || uploading}
+            title={draft ? 'Send a message first to attach files' : 'Add photos & files'}
             aria-label="Add photos and files"
           >
             <PlusIcon size={18} />

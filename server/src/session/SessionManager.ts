@@ -18,12 +18,14 @@ import {
   type SessionSummary,
   type SessionUpdateParams,
   type TranscriptItem,
+  resolveSessionTitle,
+  sanitizeTitle,
+  titleFromPrompt,
 } from '@casper/shared';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { createWorkspace } from './workspaces.js';
-import { titleFromPrompt } from './titles.js';
+import { createWorkspace, isWorkspacePath } from './workspaces.js';
 import type { Logger } from '../util/logger.js';
 import { isWithinRoot } from '../util/paths.js';
 import { KiroProcess } from './KiroProcess.js';
@@ -77,7 +79,8 @@ export class Session {
   modelId?: string;
   currentModeId?: string;
   availableModes: AgentMode[] = [];
-  title = 'New session';
+  /** Empty until something names it; resolveSessionTitle owns the fallback. */
+  title = '';
   createdAt = new Date().toISOString();
   updatedAt = new Date().toISOString();
   lastActivity = Date.now();
@@ -147,6 +150,12 @@ function mapNotification(n: JsonRpcNotification): CasperEventPayload | null {
 // opening it fast, and the client fetches older pages on scroll-to-top.
 const TRANSCRIPT_PAGE_SIZE = 80;
 
+/** The first user message in a transcript, if it has one. */
+function firstPromptText(transcript: TranscriptItem[]): string | undefined {
+  const first = transcript.find((it) => it.type === 'message' && it.message.role === 'user');
+  return first?.type === 'message' ? first.message.text : undefined;
+}
+
 export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly log: Logger;
@@ -156,11 +165,28 @@ export class SessionManager {
     this.log = log;
   }
 
+  /**
+   * What a session is called, from every read path. The folder is skipped for a workspace of
+   * ours, whose name is a uuid.
+   */
+  private titleOf(
+    sessionId: string,
+    parts: { kiroTitle?: string; firstPrompt?: string; cwd: string },
+  ): string {
+    return resolveSessionTitle({
+      override: this.store.getTitle(sessionId),
+      kiroTitle: parts.kiroTitle,
+      firstPrompt: parts.firstPrompt,
+      folder: isWorkspacePath(parts.cwd) ? undefined : path.basename(parts.cwd),
+    });
+  }
+
   /** Set a user title override for a session. */
   renameSession(sessionId: string, title: string): void {
-    this.store.setTitle(sessionId, title);
+    const clean = sanitizeTitle(title);
+    this.store.setTitle(sessionId, clean);
     const s = this.sessions.get(sessionId);
-    if (s) s.title = title.trim() || s.title;
+    if (s) s.title = clean || s.title;
   }
 
   /**
@@ -361,6 +387,7 @@ export class SessionManager {
     agentId?: string;
     modelId?: string;
     freshWorkspace?: boolean;
+    title?: string;
   }): Promise<SessionDetail> {
     // A workspace of its own is created before the spawn, so kiro starts in it directly.
     const cwd = opts.freshWorkspace ? createWorkspace().dir : resolveCwd(opts.cwd);
@@ -383,13 +410,13 @@ export class SessionManager {
     }
 
 
-    // Name a session after its working directory, so it reads clearly in the list right
-    // away (kiro's prompt-derived title only appears after the first turn). Stored as a
-    // Casper title override; the user can rename.
-    const folder = opts.freshWorkspace ? '' : path.basename(s.cwd);
-    if (folder) {
-      this.store.setTitle(s.sessionId, folder);
-      s.title = folder;
+    // Name the session before it is returned, so it is never listed as untitled: the
+    // caller's title if it has one - a draft knows its first prompt - otherwise the folder
+    // the user chose. Stored as a Casper title override; the user can rename.
+    const name = sanitizeTitle(opts.title ?? '') || (opts.freshWorkspace ? '' : path.basename(s.cwd));
+    if (name) {
+      this.store.setTitle(s.sessionId, name);
+      s.title = name;
     }
 
     return this.buildDetail(s, []);
@@ -405,11 +432,9 @@ export class SessionManager {
     if (s.running) throw new Error('A turn is already running for this session');
     s.running = true;
     s.lastActivity = Date.now();
-    s.record({ kind: 'turn_started', prompt: content });
-
-    // Name the session after its first prompt, so the row reads as something while
-    // the turn runs. Only when nothing has named it yet: a title the user set, or one
-    // taken from a chosen working directory, is theirs to keep.
+    // Named before the turn is announced, so a client reacting to turn_started already
+    // sees it. Only when nothing has named it yet: a title the user set, or one taken
+    // from a chosen working directory, is theirs to keep.
     if (!this.store.getTitle(s.sessionId)) {
       const title = titleFromPrompt(content);
       if (title) {
@@ -417,6 +442,8 @@ export class SessionManager {
         s.title = title;
       }
     }
+
+    s.record({ kind: 'turn_started', prompt: content });
 
     proc
       .prompt({ sessionId: s.sessionId, prompt: content })
@@ -478,7 +505,10 @@ export class SessionManager {
     for (const p of persisted) {
       byId.set(p.sessionId, {
         ...p,
-        title: this.store.getTitle(p.sessionId) ?? p.title,
+        title: this.titleOf(p.sessionId, {
+          kiroTitle: p.title,
+          cwd: this.store.getCwd(p.sessionId) ?? p.cwd,
+        }),
         cwd: this.store.getCwd(p.sessionId) ?? p.cwd,
       });
     }
@@ -487,7 +517,7 @@ export class SessionManager {
       const base = byId.get(s.sessionId);
       byId.set(s.sessionId, {
         sessionId: s.sessionId,
-        title: this.store.getTitle(s.sessionId) ?? base?.title ?? s.title,
+        title: this.titleOf(s.sessionId, { kiroTitle: base?.title, cwd: s.cwd }),
         cwd: s.cwd,
         createdAt: base?.createdAt ?? s.createdAt,
         updatedAt: base?.updatedAt ?? s.updatedAt,
@@ -513,7 +543,11 @@ export class SessionManager {
     return {
       summary: {
         ...persisted,
-        title: this.store.getTitle(sessionId) ?? persisted.title,
+        title: this.titleOf(sessionId, {
+          kiroTitle: persisted.title,
+          firstPrompt: firstPromptText(transcript),
+          cwd: this.store.getCwd(sessionId) ?? persisted.cwd,
+        }),
         cwd: this.store.getCwd(sessionId) ?? persisted.cwd,
       },
       modes: [],
@@ -550,13 +584,14 @@ export class SessionManager {
     transcript: SessionDetail['transcript'],
   ): SessionDetail {
     const snap = s.turnState.get();
-    const firstMessage = transcript.find((it) => it.type === 'message');
-    const firstText =
-      firstMessage?.type === 'message' ? firstMessage.message.text : undefined;
     return {
       summary: {
         sessionId: s.sessionId,
-        title: this.store.getTitle(s.sessionId) ?? (firstText?.slice(0, 60) || s.title),
+        title: this.titleOf(s.sessionId, {
+          kiroTitle: s.title,
+          firstPrompt: firstPromptText(transcript),
+          cwd: s.cwd,
+        }),
         cwd: s.cwd,
         createdAt: s.createdAt,
         updatedAt: s.updatedAt,

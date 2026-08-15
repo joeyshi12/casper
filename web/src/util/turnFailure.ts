@@ -7,7 +7,7 @@
  * Deliberately narrow: anything unrecognised gets no invented advice, just the
  * raw text under a neutral heading.
  */
-export interface TurnFailure {
+interface TurnFailure {
   /** Short heading for the failure. */
   title: string;
   /** What to do about it, if we can say something useful. */
