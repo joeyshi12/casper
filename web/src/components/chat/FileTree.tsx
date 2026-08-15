@@ -517,19 +517,25 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
     return () => setWatchedPaths([]);
   }, [publish, setWatchedPaths]);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await api.tree(sessionId);
-      setEntries(res.entries);
-      setCwd(res.cwd);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [sessionId]);
+  // A background re-list happens because the directory changed on disk, so it must
+  // not disturb what is on screen: no placeholder, and the rows stay mounted, which
+  // is what keeps folders open.
+  const refresh = useCallback(
+    async (background = false) => {
+      if (!background) setLoading(true);
+      setError(null);
+      try {
+        const res = await api.tree(sessionId);
+        setEntries(res.entries);
+        setCwd(res.cwd);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        if (!background) setLoading(false);
+      }
+    },
+    [sessionId],
+  );
 
   useEffect(() => {
     refresh();
@@ -537,7 +543,7 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
 
   // The top level, on the same signal a folder row uses.
   useEffect(() => {
-    if (rootChanged) void refresh();
+    if (rootChanged) void refresh(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootChanged]);
 
@@ -621,7 +627,9 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
       </div>
       {cwd && <div className="ftree-cwd" title={cwd}>{cwd}</div>}
       <div className="ftree-list">
-        {loading && <div className="ftree-loading">Loading…</div>}
+        {loading && entries.length === 0 && (
+          <div className="ftree-loading">Loading…</div>
+        )}
         {error && (
           <div className="ftree-error">
             {error}
@@ -633,8 +641,7 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
         {!loading && !error && entries.length === 0 && (
           <div className="ftree-empty">No files</div>
         )}
-        {!loading &&
-          !error &&
+        {!error &&
           entries.map((entry) => (
             <TreeEntry
               key={entry.path}
