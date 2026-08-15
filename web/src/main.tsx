@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App.js';
 import './styles/theme.css';
 import './styles/app.css';
+import { startScrollActivity } from './util/scrollActivity.js';
+
+startScrollActivity();
 
 // PWA update handling. The service worker uses skipWaiting + clientsClaim, so a
 // new deploy activates and takes control of open tabs. Without this, the tab

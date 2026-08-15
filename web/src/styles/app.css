@@ -92,38 +92,38 @@
   padding: 6px 8px;
 }
 
-/* Scrollbar visible while the container is scrolling or under the pointer, faded out
-   otherwise. Its width is always reserved, so showing it never reflows the content.
-   Driven by useAutoHideScrollbar, which adds is-scrolling. */
-.scroll-autohide {
+/* Scrollbars everywhere: an 8px gutter whose width is always reserved, with a thumb
+   that is transparent at rest, coloured while its own element scrolls (startScrollActivity
+   marks whatever moved) and brighter under the pointer, which is what stops it vanishing
+   as you reach for it. Reserving the width means revealing the thumb never reflows the
+   content. scrollbar-color inherits, so setting it on body covers Firefox. */
+body {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
-.scroll-autohide.is-scrolling,
-.scroll-autohide:hover {
+.is-scrolling {
   scrollbar-color: var(--n2) transparent;
 }
-.scroll-autohide::-webkit-scrollbar {
+::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-.scroll-autohide::-webkit-scrollbar-track {
+::-webkit-scrollbar-track {
   background: transparent;
 }
-.scroll-autohide::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 4px;
   transition: background 0.3s ease;
 }
-.scroll-autohide.is-scrolling::-webkit-scrollbar-thumb,
-.scroll-autohide:hover::-webkit-scrollbar-thumb {
+.is-scrolling::-webkit-scrollbar-thumb {
   background: var(--n2);
 }
-.scroll-autohide::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover {
   background: var(--n3);
 }
 @media (prefers-reduced-motion: reduce) {
-  .scroll-autohide::-webkit-scrollbar-thumb {
+  ::-webkit-scrollbar-thumb {
     transition: none;
   }
 }
@@ -952,10 +952,6 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  scrollbar-width: none; /* Firefox: hide the scrollbar, keep scrolling */
-}
-.transcript::-webkit-scrollbar {
-  display: none; /* WebKit/Blink */
 }
 /* Direct children are flex items and default to flex-shrink: 1, so a full
    column compresses them (tool cards clip and flatten). Pin them all. */

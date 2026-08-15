@@ -1,6 +1,5 @@
 import { Link } from 'react-router';
 import { pathForSession } from '../../util/route.js';
-import { useAutoHideScrollbar } from '../../util/useAutoHideScrollbar.js';
 import { useEffect, useState } from 'react';
 import type { SessionSummary } from '@casper/shared';
 import { LockIcon, PlusIcon, SearchIcon, Spinner } from '../common/icons.js';
@@ -51,8 +50,6 @@ export function Sidebar({
   onRename,
   onLock,
 }: Props) {
-  const listScroll = useAutoHideScrollbar<HTMLDivElement>();
-
   const [searchOpen, setSearchOpen] = useState(false);
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -142,11 +139,7 @@ export function Sidebar({
         </div>
       </header>
 
-      <div
-        className="sidebar-list scroll-autohide"
-        ref={listScroll.ref}
-        onScroll={listScroll.onScroll}
-      >
+      <div className="sidebar-list">
         {sessions.length === 0 ? (
           <p className="sidebar-empty">
             No sessions yet. Start one and it keeps running while you're away.

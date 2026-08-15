@@ -4,7 +4,6 @@ import { api } from '../../api/rest.js';
 import { useStore } from '../../state/store.js';
 import { ChangeFolderSheet } from '../sessions/ChangeFolderSheet.js';
 import { highlightToHtml } from '../../util/highlighter.js';
-import { useAutoHideScrollbar } from '../../util/useAutoHideScrollbar.js';
 import {
   ChevronIcon,
   CloseIcon,
@@ -323,7 +322,6 @@ function FilePreview({
   sessionId: string;
   onClose: () => void;
 }) {
-  const bodyScroll = useAutoHideScrollbar<HTMLDivElement>();
   // A class rather than the Fullscreen API, which iOS Safari won't grant to
   // arbitrary elements - and this gets used from a phone.
   const [full, setFull] = useState(false);
@@ -402,11 +400,7 @@ function FilePreview({
             <CloseIcon size={18} />
           </button>
         </div>
-        <div
-          className="fpreview-body scroll-autohide"
-          ref={bodyScroll.ref}
-          onScroll={bodyScroll.onScroll}
-        >
+        <div className="fpreview-body">
           {preview.loading && (
             <div className="fpreview-loading">
               <Spinner size={48} />
@@ -460,7 +454,6 @@ function FilePreview({
 
 /** Workspace file tree panel with lazy folder expansion, preview, and download. */
 export function FileTree({ sessionId, onClose }: FileTreeProps) {
-  const listScroll = useAutoHideScrollbar<HTMLDivElement>();
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [cwd, setCwd] = useState('');
   const [loading, setLoading] = useState(true);
@@ -576,11 +569,7 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
         )}
       </div>
       {cwd && <div className="ftree-cwd" title={cwd}>{cwd}</div>}
-      <div
-        className="ftree-list scroll-autohide"
-        ref={listScroll.ref}
-        onScroll={listScroll.onScroll}
-      >
+      <div className="ftree-list">
         {loading && <div className="ftree-loading">Loading…</div>}
         {error && (
           <div className="ftree-error">
