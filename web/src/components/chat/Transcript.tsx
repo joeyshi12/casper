@@ -6,6 +6,7 @@ import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { ToolCallCard } from './ToolCallCard.js';
 import { CompressIcon, Spinner } from '../common/icons.js';
 import { lazyImageProps } from '../../util/lazyImage.js';
+import { isUserScrollUp } from '../../util/followScroll.js';
 import { classifyTurnFailure } from '../../util/turnFailure.js';
 
 // Live media query (its .matches updates as the OS setting changes), so the
@@ -50,9 +51,9 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
   // Following the bottom as new content streams in. Off until the user opts in
   // via the jump-to-latest button.
   const followBottom = useRef(false);
-  // Last observed scrollTop, to tell a user scroll-up from a programmatic
-  // scroll-down (which only ever increases scrollTop).
+  // Previous scrollTop and scroll range, to tell a scroll up from a reflow.
   const lastScrollTop = useRef(0);
+  const lastMaxTop = useRef(0);
   // Session id we have already positioned at the bottom for.
   const initializedFor = useRef<string | null>(null);
   // Pending-message count last seen, to detect a fresh user send.
@@ -137,10 +138,12 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
     if (delta <= 1 || reduceMotion?.matches) {
       el.scrollTop = target; // snap the final pixel (or all of it) and idle
       lastScrollTop.current = el.scrollTop;
+      lastMaxTop.current = target;
       return;
     }
     el.scrollTop += Math.max(10, Math.ceil(delta * 0.3));
     lastScrollTop.current = el.scrollTop;
+    lastMaxTop.current = target;
     followRaf.current = requestAnimationFrame(followTick);
   };
 
@@ -160,6 +163,7 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
       followBottom.current = false;
       bottomRef.current?.scrollIntoView({ block: 'end' });
       lastScrollTop.current = el.scrollTop;
+      lastMaxTop.current = el.scrollHeight - el.clientHeight;
       prevPendingLen.current = pending.length;
       setShowScrollBtn(false);
       return;
@@ -180,12 +184,14 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    // A user scroll-up (scrollTop decreases) stops following. Programmatic
-    // scroll-to-bottom only increases scrollTop, so it never trips this.
-    if (el.scrollTop < lastScrollTop.current - 4) {
+    // A scroll up stops following. Content shrinking (a thought block collapsing
+    // as it commits) also lowers scrollTop, and that must not count.
+    const maxTop = el.scrollHeight - el.clientHeight;
+    if (isUserScrollUp(el.scrollTop, lastScrollTop.current, maxTop, lastMaxTop.current)) {
       followBottom.current = false;
     }
     lastScrollTop.current = el.scrollTop;
+    lastMaxTop.current = maxTop;
     updateScrollBtn(el);
     // Near the top: pull in the previous page of history. Restoring the anchor
     // pushes the view back down past this threshold, so it won't cascade.

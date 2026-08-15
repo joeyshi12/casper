@@ -29,10 +29,7 @@ function themeCss(): string {
   ].join(';');
 }
 
-/**
- * An agent-written widget, rendered inline. Content is patched in as it streams so
- * existing nodes survive, and scripts run once the message is whole.
- */
+/** An agent-written widget, rendered inline in a sandboxed frame. */
 export function WidgetBlock({ code }: { code: string }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);

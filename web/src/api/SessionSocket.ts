@@ -5,6 +5,8 @@ import type {
   ServerMessage,
 } from '@casper/shared';
 
+import { shouldPing, shouldReconnect } from './socketHealth.js';
+
 export type ConnStatus =
   | 'connecting'
   | 'replaying'
@@ -39,6 +41,9 @@ export class SessionSocket {
   private closedByUser = false;
   private backoff = 500;
   private reconnectTimer: number | null = null;
+  private connectingSince = 0;
+  private lastMessageAt = 0;
+  private watchdog: number | null = null;
 
   constructor(
     private readonly sessionId: string,
@@ -50,16 +55,33 @@ export class SessionSocket {
     document.addEventListener('visibilitychange', this.onVisibility);
   }
 
-  // Reconnect only when there's no usable socket. A socket that's still
-  // CONNECTING is already on its way, so leave it alone - retrying here is
-  // what let a phone waking up (which fires 'online' and 'visibilitychange'
-  // back to back) end up with two live sockets.
+  // Reconnect only when the socket is past saving. Leaving a live connect alone is
+  // what stops a waking phone, which fires 'online' and 'visibilitychange' together,
+  // opening two sockets.
   private eager = () => {
     if (this.closedByUser) return;
-    const state = this.ws?.readyState;
-    if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) return;
-    this.connect();
+    if (shouldReconnect(this.sample())) this.connect();
   };
+
+  private sample() {
+    return {
+      state: this.ws?.readyState,
+      connectingSince: this.connectingSince,
+      lastMessageAt: this.lastMessageAt,
+      now: Date.now(),
+    };
+  }
+
+  /** The only thing that notices a socket which neither opens nor closes. */
+  private startWatchdog(): void {
+    if (this.watchdog !== null) return;
+    this.watchdog = window.setInterval(() => {
+      if (this.closedByUser) return;
+      const s = this.sample();
+      if (shouldReconnect(s)) this.connect();
+      else if (shouldPing(s)) this.send({ type: 'ping' });
+    }, 5_000);
+  }
 
   private onVisibility = () => {
     if (document.visibilityState === 'visible') this.eager();
@@ -96,6 +118,9 @@ export class SessionSocket {
       }
     }
 
+    this.connectingSince = Date.now();
+    this.lastMessageAt = Date.now(); // nothing to judge as silence until it opens
+    this.startWatchdog();
     this.handlers.onStatus(this.cursor > 0 ? 'reconnecting' : 'connecting');
 
     // No token in the URL: the same-origin session cookie authenticates the
@@ -117,6 +142,7 @@ export class SessionSocket {
 
     ws.onmessage = (ev) => {
       if (this.ws !== ws) return;
+      this.lastMessageAt = Date.now();
       const msg = JSON.parse(ev.data as string) as ServerMessage;
       switch (msg.type) {
         case 'event':
@@ -198,6 +224,10 @@ export class SessionSocket {
     window.removeEventListener('online', this.eager);
     document.removeEventListener('visibilitychange', this.onVisibility);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.watchdog !== null) {
+      clearInterval(this.watchdog);
+      this.watchdog = null;
+    }
     const ws = this.ws;
     this.ws = null;
     if (ws) {
