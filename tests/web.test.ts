@@ -39,6 +39,16 @@ import {
   imageAttachmentPaths,
   stripAttachmentsLine,
 } from '@casper/shared';
+import { isUserScrollUp } from '../web/src/util/followScroll.js';
+import {
+  CONNECT_TIMEOUT_MS,
+  PING_AFTER_MS,
+  PONG_GRACE_MS,
+  READY,
+  shouldPing,
+  shouldReconnect,
+} from '../web/src/api/socketHealth.js';
+import { SessionSocket } from '../web/src/api/SessionSocket.js';
 
 describe('attachments line (drives image thumbnails; stripped from the bubble)', () => {
   const msg = `${ATTACHMENTS_PREFIX}.casper/uploads/a.png, .casper/uploads/notes.txt\nplease review`;
@@ -427,5 +437,204 @@ describe('choice call parsing', () => {
   it('ignores other tools, and a choice with nothing to choose', () => {
     assert.equal(choiceCallOf({ ...base, name: 'fs_read', input: {} }), null);
     assert.equal(call({ question: 'Which?', options: [{ label: 'only one' }] }), null);
+  });
+});
+
+describe('follow-bottom: a gesture versus a reflow', () => {
+  it('a real scroll up stops following', () => {
+    // The range is unchanged, so the whole drop is the user's.
+    assert.equal(
+      isUserScrollUp({ top: 500, prevTop: 900, maxTop: 1000, prevMaxTop: 1000 }),
+      true,
+    );
+  });
+
+  // The bug this exists for: a thought block collapses when a tool call commits it,
+  // the content gets shorter, and the browser clamps scrollTop to the new maximum.
+  // Read as a scroll up, that switched following off for the rest of the turn and
+  // left the thinking dots and the widget below the fold.
+  it('clamping after the content shrinks does not', () => {
+    assert.equal(
+      isUserScrollUp({ top: 600, prevTop: 900, maxTop: 600, prevMaxTop: 900 }),
+      false,
+    );
+  });
+
+  it('a scroll up during a shrink still counts', () => {
+    // The range lost 300 but scrollTop fell 500, so 200 of it was the user.
+    assert.equal(
+      isUserScrollUp({ top: 400, prevTop: 900, maxTop: 600, prevMaxTop: 900 }),
+      true,
+    );
+  });
+
+  it('ignores sub-pixel jitter', () => {
+    assert.equal(
+      isUserScrollUp({ top: 897, prevTop: 900, maxTop: 1000, prevMaxTop: 1000 }),
+      false,
+    );
+  });
+
+  it('scrolling down never stops following', () => {
+    assert.equal(
+      isUserScrollUp({ top: 950, prevTop: 900, maxTop: 1000, prevMaxTop: 1000 }),
+      false,
+    );
+  });
+});
+
+describe('socket health', () => {
+  const now = 1_000_000;
+  const sample = (over: Partial<Parameters<typeof shouldReconnect>[0]>) => ({
+    state: READY.OPEN as number | undefined,
+    connectingSince: now,
+    lastMessageAt: now,
+    now,
+    ...over,
+  });
+
+  it('reconnects when there is no socket', () => {
+    assert.equal(shouldReconnect(sample({ state: undefined })), true);
+  });
+
+  it('reconnects on a closed or closing socket', () => {
+    assert.equal(shouldReconnect(sample({ state: READY.CLOSED })), true);
+    assert.equal(shouldReconnect(sample({ state: READY.CLOSING })), true);
+  });
+
+  // The guard that leaves a connecting socket alone is what stops a waking phone
+  // opening two of them, so it has to hold for an attempt that is genuinely young.
+  it('leaves a young connect attempt alone', () => {
+    assert.equal(
+      shouldReconnect(sample({ state: READY.CONNECTING, connectingSince: now - 1_000 })),
+      false,
+    );
+  });
+
+  // The bug: a connect frozen across a suspend never opens and never closes, so
+  // nothing scheduled a retry and the status sat on "Reconnecting" for good.
+  it('abandons a connect that never resolved', () => {
+    assert.equal(
+      shouldReconnect(
+        sample({ state: READY.CONNECTING, connectingSince: now - CONNECT_TIMEOUT_MS - 1 }),
+      ),
+      true,
+    );
+  });
+
+  it('keeps an open socket that is still hearing traffic', () => {
+    assert.equal(shouldReconnect(sample({ lastMessageAt: now - 1_000 })), false);
+  });
+
+  it('replaces an open socket that has gone silent past the grace period', () => {
+    const silent = now - (PING_AFTER_MS + PONG_GRACE_MS) - 1;
+    assert.equal(shouldReconnect(sample({ lastMessageAt: silent })), true);
+  });
+
+  it('pings a quiet open socket before giving up on it', () => {
+    const quiet = sample({ lastMessageAt: now - PING_AFTER_MS - 1 });
+    assert.equal(shouldPing(quiet), true);
+    assert.equal(shouldReconnect(quiet), false);
+  });
+
+  it('does not ping a socket that is not open', () => {
+    assert.equal(shouldPing(sample({ state: READY.CONNECTING })), false);
+  });
+});
+
+describe('socket watchdog: a connect that never resolves', () => {
+  /** A socket that connects forever: no open, no close, exactly the frozen case. */
+  class FrozenWs {
+    // The real constructor carries these, and SessionSocket compares against them
+    // when it decides whether to close a socket it is replacing.
+    static readonly CONNECTING = READY.CONNECTING;
+    static readonly OPEN = READY.OPEN;
+    static readonly CLOSING = READY.CLOSING;
+    static readonly CLOSED = READY.CLOSED;
+    static instances: FrozenWs[] = [];
+    readyState = READY.CONNECTING;
+    onopen: (() => void) | null = null;
+    onmessage: ((e: unknown) => void) | null = null;
+    onclose: ((e: unknown) => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor(readonly url: string) {
+      FrozenWs.instances.push(this);
+    }
+    close() {
+      this.readyState = READY.CLOSED;
+    }
+    send() {}
+  }
+
+  /** Drive SessionSocket with our own window, clock and socket. */
+  function harness(run: (tick: () => void, advance: (ms: number) => void) => void) {
+    const g = globalThis as Record<string, unknown>;
+    const saved = {
+      window: g.window,
+      document: g.document,
+      location: g.location,
+      WebSocket: g.WebSocket,
+      now: Date.now,
+    };
+    const intervals: (() => void)[] = [];
+    let clock = 1_000_000;
+    g.window = {
+      addEventListener() {},
+      removeEventListener() {},
+      setInterval: (fn: () => void) => intervals.push(fn),
+      clearInterval() {},
+      setTimeout: () => 0,
+      clearTimeout() {},
+    };
+    g.document = { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' };
+    g.location = { protocol: 'http:', host: 'localhost:4319' };
+    g.WebSocket = FrozenWs;
+    Date.now = () => clock;
+    FrozenWs.instances = [];
+    try {
+      run(
+        () => intervals.forEach((fn) => fn()),
+        (ms) => {
+          clock += ms;
+        },
+      );
+    } finally {
+      Object.assign(g, saved);
+      Date.now = saved.now;
+    }
+  }
+
+  const noop = {
+    onEvent() {},
+    onStatus() {},
+    onResync() {},
+  };
+
+  it('opens a second socket once the first is past the timeout', () => {
+    harness((tick, advance) => {
+      const sock = new SessionSocket('s1', noop, 5);
+      sock.connect();
+      assert.equal(FrozenWs.instances.length, 1, 'one attempt to begin with');
+
+      advance(1_000);
+      tick();
+      assert.equal(FrozenWs.instances.length, 1, 'a young attempt is left alone');
+
+      advance(CONNECT_TIMEOUT_MS);
+      tick();
+      assert.equal(FrozenWs.instances.length, 2, 'the frozen attempt is replaced');
+      assert.equal(FrozenWs.instances[0]!.readyState, READY.CLOSED, 'and the old one closed');
+    });
+  });
+
+  it('reports reconnecting rather than going quiet', () => {
+    harness((tick, advance) => {
+      const seen: string[] = [];
+      const sock = new SessionSocket('s1', { ...noop, onStatus: (st) => seen.push(st) }, 5);
+      sock.connect();
+      advance(CONNECT_TIMEOUT_MS + 1);
+      tick();
+      assert.deepEqual(seen, ['reconnecting', 'reconnecting']);
+    });
   });
 });
