@@ -1,10 +1,7 @@
-/**
- * When a socket needs replacing. Kept pure so the awkward cases - a connect that
- * never resolves, an open socket whose peer is gone - are testable without a
- * browser or a network.
- */
+// When a socket needs replacing, kept pure so a frozen connect and a dead peer are
+// testable without a browser.
 
-/** WebSocket.readyState values, spelled out so this module needs no DOM. */
+/** WebSocket.readyState values, so this module needs no DOM. */
 export const READY = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 } as const;
 
 /** Give up on a connect that has not opened by now. */
@@ -25,11 +22,8 @@ export interface SocketSample {
 }
 
 /**
- * A connecting socket used to be treated as in-flight and left alone, which
- * stopped a waking phone opening a second one. But the browser can freeze a
- * pending connect across a suspend, and then it never opens and never closes:
- * no retry is ever scheduled, and the UI sits on "Reconnecting" forever. So it
- * counts as in-flight only until the timeout.
+ * A connect counts as in-flight only until the timeout: frozen across a suspend it
+ * never opens and never closes, so nothing else would ever schedule a retry.
  */
 export function shouldReconnect(s: SocketSample): boolean {
   if (s.state === undefined || s.state === READY.CLOSED || s.state === READY.CLOSING) {
@@ -38,9 +32,7 @@ export function shouldReconnect(s: SocketSample): boolean {
   if (s.state === READY.CONNECTING) {
     return s.now - s.connectingSince > CONNECT_TIMEOUT_MS;
   }
-  // Open, but silence outlasting a ping and its grace means the peer is gone.
-  // The server pings at the protocol level and drops us; this is the same
-  // judgement from the client's side, which otherwise cannot tell.
+  // Silence outlasting a ping and its grace means the peer is gone.
   return s.now - s.lastMessageAt > PING_AFTER_MS + PONG_GRACE_MS;
 }
 

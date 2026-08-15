@@ -51,8 +51,7 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
   // Following the bottom as new content streams in. Off until the user opts in
   // via the jump-to-latest button.
   const followBottom = useRef(false);
-  // Last observed scrollTop, to tell a user scroll-up from a programmatic
-  // scroll-down (which only ever increases scrollTop).
+  // Previous scrollTop and scroll range, to tell a scroll up from a reflow.
   const lastScrollTop = useRef(0);
   const lastMaxTop = useRef(0);
   // Session id we have already positioned at the bottom for.
@@ -185,19 +184,10 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    // A user scroll-up stops following. scrollTop also falls when the content
-    // shrinks (a thought block collapsing as it commits) and the browser clamps
-    // it to the shorter range, which is not a gesture - so compare the drop
-    // against how much the range itself lost.
+    // A scroll up stops following. Content shrinking (a thought block collapsing
+    // as it commits) also lowers scrollTop, and that must not count.
     const maxTop = el.scrollHeight - el.clientHeight;
-    if (
-      isUserScrollUp({
-        top: el.scrollTop,
-        prevTop: lastScrollTop.current,
-        maxTop,
-        prevMaxTop: lastMaxTop.current,
-      })
-    ) {
+    if (isUserScrollUp(el.scrollTop, lastScrollTop.current, maxTop, lastMaxTop.current)) {
       followBottom.current = false;
     }
     lastScrollTop.current = el.scrollTop;

@@ -55,11 +55,9 @@ export class SessionSocket {
     document.addEventListener('visibilitychange', this.onVisibility);
   }
 
-  /**
-   * Reconnect only when the socket we have is past saving. A connect still in
-   * flight is left alone, which is what stops a waking phone (which fires
-   * 'online' and 'visibilitychange' back to back) opening two live sockets.
-   */
+  // Reconnect only when the socket is past saving. Leaving a live connect alone is
+  // what stops a waking phone, which fires 'online' and 'visibilitychange' together,
+  // opening two sockets.
   private eager = () => {
     if (this.closedByUser) return;
     if (shouldReconnect(this.sample())) this.connect();
@@ -74,10 +72,7 @@ export class SessionSocket {
     };
   }
 
-  /**
-   * The only thing that notices a socket which neither opens nor closes, so it
-   * runs while one exists rather than only on a wake-up.
-   */
+  /** The only thing that notices a socket which neither opens nor closes. */
   private startWatchdog(): void {
     if (this.watchdog !== null) return;
     this.watchdog = window.setInterval(() => {
@@ -124,7 +119,7 @@ export class SessionSocket {
     }
 
     this.connectingSince = Date.now();
-    this.lastMessageAt = Date.now(); // no silence to judge until it opens
+    this.lastMessageAt = Date.now(); // nothing to judge as silence until it opens
     this.startWatchdog();
     this.handlers.onStatus(this.cursor > 0 ? 'reconnecting' : 'connecting');
 

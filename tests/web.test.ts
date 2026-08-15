@@ -441,43 +441,41 @@ describe('choice call parsing', () => {
 });
 
 describe('follow-bottom: a gesture versus a reflow', () => {
+  // The range is unchanged, so the whole drop is the user's.
   it('a real scroll up stops following', () => {
-    // The range is unchanged, so the whole drop is the user's.
     assert.equal(
-      isUserScrollUp({ top: 500, prevTop: 900, maxTop: 1000, prevMaxTop: 1000 }),
+      isUserScrollUp(500, 900, 1000, 1000),
       true,
     );
   });
 
-  // The bug this exists for: a thought block collapses when a tool call commits it,
-  // the content gets shorter, and the browser clamps scrollTop to the new maximum.
-  // Read as a scroll up, that switched following off for the rest of the turn and
-  // left the thinking dots and the widget below the fold.
+  // The bug: a thought block collapsing shrank the content, the browser clamped
+  // scrollTop, and reading that as a scroll up stopped following for the whole turn.
   it('clamping after the content shrinks does not', () => {
     assert.equal(
-      isUserScrollUp({ top: 600, prevTop: 900, maxTop: 600, prevMaxTop: 900 }),
+      isUserScrollUp(600, 900, 600, 900),
       false,
     );
   });
 
+  // The range lost 300 but scrollTop fell 500, so 200 of it was the user.
   it('a scroll up during a shrink still counts', () => {
-    // The range lost 300 but scrollTop fell 500, so 200 of it was the user.
     assert.equal(
-      isUserScrollUp({ top: 400, prevTop: 900, maxTop: 600, prevMaxTop: 900 }),
+      isUserScrollUp(400, 900, 600, 900),
       true,
     );
   });
 
   it('ignores sub-pixel jitter', () => {
     assert.equal(
-      isUserScrollUp({ top: 897, prevTop: 900, maxTop: 1000, prevMaxTop: 1000 }),
+      isUserScrollUp(897, 900, 1000, 1000),
       false,
     );
   });
 
   it('scrolling down never stops following', () => {
     assert.equal(
-      isUserScrollUp({ top: 950, prevTop: 900, maxTop: 1000, prevMaxTop: 1000 }),
+      isUserScrollUp(950, 900, 1000, 1000),
       false,
     );
   });
@@ -502,8 +500,8 @@ describe('socket health', () => {
     assert.equal(shouldReconnect(sample({ state: READY.CLOSING })), true);
   });
 
-  // The guard that leaves a connecting socket alone is what stops a waking phone
-  // opening two of them, so it has to hold for an attempt that is genuinely young.
+  // The guard exists to stop a waking phone opening two sockets, so it has to hold
+  // for an attempt that is genuinely young.
   it('leaves a young connect attempt alone', () => {
     assert.equal(
       shouldReconnect(sample({ state: READY.CONNECTING, connectingSince: now - 1_000 })),
@@ -511,8 +509,7 @@ describe('socket health', () => {
     );
   });
 
-  // The bug: a connect frozen across a suspend never opens and never closes, so
-  // nothing scheduled a retry and the status sat on "Reconnecting" for good.
+  // The bug: frozen across a suspend, it never opens or closes, so nothing retried.
   it('abandons a connect that never resolved', () => {
     assert.equal(
       shouldReconnect(
@@ -543,10 +540,9 @@ describe('socket health', () => {
 });
 
 describe('socket watchdog: a connect that never resolves', () => {
-  /** A socket that connects forever: no open, no close, exactly the frozen case. */
+  /** A socket that connects forever: no open, no close. */
   class FrozenWs {
-    // The real constructor carries these, and SessionSocket compares against them
-    // when it decides whether to close a socket it is replacing.
+    // SessionSocket compares against these when closing a socket it replaces.
     static readonly CONNECTING = READY.CONNECTING;
     static readonly OPEN = READY.OPEN;
     static readonly CLOSING = READY.CLOSING;
