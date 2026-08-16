@@ -11,6 +11,9 @@ import { classifyTurnFailure } from '../../util/turnFailure.js';
 
 // Live media query (its .matches updates as the OS setting changes), so the
 // easing follow can snap instantly for users who ask for reduced motion.
+/** How long a running turn may be quiet before the dots come back. */
+const STALL_MS = 700;
+
 const reduceMotion =
   typeof window !== 'undefined'
     ? window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -44,6 +47,32 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
   const activeId = useStore((s) => s.activeId);
   const remainingOlder = useStore((s) => s.remainingOlder);
   const prependItems = useStore((s) => s.prependItems);
+  // A running turn can go quiet for seconds while the model prepares a tool call - a
+  // widget's code is generated as tool input, so nothing streams meanwhile. Without this
+  // the dots stay hidden for the whole gap, because text arrived earlier in the turn.
+  // Items already on screen when a session opened must not animate - otherwise opening an
+  // old session flashes every card at once. Anything not in this set arrived live.
+  const hydrated = useRef<{ session: string | null; ids: Set<string> }>({
+    session: null,
+    ids: new Set(),
+  });
+  if (hydrated.current.session !== activeId) {
+    hydrated.current = {
+      session: activeId,
+        ids: new Set(
+        items.filter((it) => it.type === 'tool_call').map((it) => it.tool.id),
+      ),
+    };
+  }
+  const arrivedLive = (id: string) => !hydrated.current.ids.has(id);
+
+  const [stalled, setStalled] = useState(false);
+  useEffect(() => {
+    setStalled(false);
+    if (turnStatus !== 'running') return;
+    const timer = setTimeout(() => setStalled(true), STALL_MS);
+    return () => clearTimeout(timer);
+  }, [turnStatus, streamingText, streamingThought, items.length]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Guards a load-older fetch in flight, and the scroll anchor (distance from
@@ -274,7 +303,7 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
             </div>
           )
         ) : item.type === 'tool_call' ? (
-          <ToolCallCard key={item.tool.id} tool={item.tool} />
+          <ToolCallCard key={item.tool.id} tool={item.tool} arriving={arrivedLive(item.tool.id)} />
         ) : item.type === 'turn_error' ? (
           <TurnErrorBlock key={item.id} message={item.message} onRetry={onRetryTurn} />
         ) : (
@@ -303,11 +332,12 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
 
       {streamingText && (
         <div className="msg msg-assistant">
-          <MarkdownRenderer text={streamingText} />
+          <MarkdownRenderer text={streamingText} streaming />
         </div>
       )}
 
-      {(turnStatus === 'running' || waitingToStart) && !streamingText && !streamingThought && (
+      {(turnStatus === 'running' || waitingToStart) &&
+          (stalled || (!streamingText && !streamingThought)) && (
         <div className="thinking">
           <span className="thinking-dot" />
           <span className="thinking-dot" />
@@ -369,7 +399,7 @@ function ThoughtBlock({ text, live = false }: { text: string; live?: boolean }) 
       </button>
       {open && (
         <div className="thought-body">
-          <MarkdownRenderer text={text} />
+          <MarkdownRenderer text={text} streaming={live} />
         </div>
       )}
     </div>

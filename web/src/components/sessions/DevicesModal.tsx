@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { DeviceInfo } from '@casper/shared';
 import { api } from '../../api/rest.js';
 
@@ -78,7 +79,9 @@ export function DevicesModal({ onClose, onSelfRevoked }: Props) {
     }
   };
 
-  return (
+  // Rendered at the top of the document: the sidebar is transformed while it slides, and a
+  // transformed ancestor makes fixed positioning relative to it rather than the viewport.
+  return createPortal(
     <div className="search-backdrop" onClick={onClose}>
       <div
         className="search-modal"
@@ -128,6 +131,7 @@ export function DevicesModal({ onClose, onSelfRevoked }: Props) {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

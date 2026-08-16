@@ -109,7 +109,14 @@ const imageUrl = (absolutePath: string) =>
  * input/output view. Collapsed by default (failures start open) with an
  * informative header so the transcript stays compact.
  */
-export function ToolCallCard({ tool }: { tool: ToolCallView }) {
+export function ToolCallCard({
+  tool,
+  arriving = false,
+}: {
+  tool: ToolCallView;
+  /** Arrived during this turn rather than with the transcript, so it fades in. */
+  arriving?: boolean;
+}) {
   // A widget or template is the point of its own call, not a tool to inspect.
   if (widgetCallOf(tool)) return <WidgetToolCall tool={tool} />;
   const choice = choiceCallOf(tool);
@@ -121,7 +128,7 @@ export function ToolCallCard({ tool }: { tool: ToolCallView }) {
   const imagePaths = extractImagePaths(tool.input);
 
   return (
-    <div className={`toolcall toolcall-${status}`}>
+    <div className={`toolcall toolcall-${status} ${arriving ? 'is-arriving' : ''}`}>
       <button className="toolcall-head" onClick={() => setOpen((o) => !o)}>
         <span className={`toolcall-dot dot-${status}`} />
         <span className="toolcall-title">{toolLabel(tool)}</span>

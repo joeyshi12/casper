@@ -88,6 +88,39 @@
   }
 }
 
+/* Each word of streamed text mounts with this, so text arrives instead of popping in.
+   Open WebUI uses 100ms opacity-only (.fade-in-token in its app.css); the slight blur and
+   the longer 200ms read closer to Claude without being slow enough to lag the stream.
+   `both` holds the end state, so a word that has arrived costs nothing further. */
+@keyframes fade-word {
+  from {
+    opacity: 0;
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+.fade-word {
+  display: inline;
+  animation: fade-word 0.2s ease-out both;
+}
+/* A card that arrived during this turn rises into place, the way Open WebUI fades in its
+   status lines. Transform only, so nothing around it moves. */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.toolcall.is-arriving {
+  animation: card-in 0.2s ease-out both;
+}
 /* Sidebar */
 .sidebar-head {
   display: flex;

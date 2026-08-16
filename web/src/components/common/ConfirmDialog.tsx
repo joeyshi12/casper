@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 interface Props {
   title: string;
@@ -29,7 +30,9 @@ export function ConfirmDialog({
     return () => document.removeEventListener('keydown', onKey);
   }, [onCancel]);
 
-  return (
+  // Rendered at the top of the document: it can be opened from the session panel, which is
+  // transformed while it slides, and that would scope fixed positioning to the panel.
+  return createPortal(
     <div
       className="confirm-backdrop"
       onClick={(e) => {
@@ -52,6 +55,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { SessionSummary } from '@casper/shared';
 import { fuzzyScore } from '../../util/fuzzy.js';
 import { SearchIcon } from '../common/icons.js';
@@ -57,7 +58,9 @@ export function SearchModal({ sessions, onOpen, onClose }: Props) {
     }
   };
 
-  return (
+  // Rendered at the top of the document: the sidebar is transformed while it slides, and a
+  // transformed ancestor makes fixed positioning relative to it rather than the viewport.
+  return createPortal(
     <div className="search-backdrop" onClick={onClose}>
       <div
         className="search-modal"
@@ -98,6 +101,7 @@ export function SearchModal({ sessions, onOpen, onClose }: Props) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

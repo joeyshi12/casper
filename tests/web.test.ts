@@ -20,6 +20,7 @@ import { SESSION_ROUTE, pathForSession } from '../web/src/util/route.js';
 import { choiceCallOf } from '../web/src/util/choiceCall.js';
 import { upsertSession } from '../web/src/state/sessions.js';
 import { composerPlaceholder } from '../web/src/util/composerPlaceholder.js';
+import { splitWords, rehypeFadeWords } from '../web/src/util/rehypeFadeWords.js';
 import { widgetCallOf } from '../web/src/util/widgetCall.js';
 import { lazyImageProps } from '../web/src/util/lazyImage.js';
 import { classifyTurnFailure } from '../web/src/util/turnFailure.js';
@@ -857,5 +858,39 @@ describe('composer placeholder', () => {
     assert.equal(composerPlaceholder({ ...base, running: true }), 'Casper is working…');
     assert.equal(composerPlaceholder({ ...base, running: true, uploading: true }), 'Uploading…');
     assert.equal(composerPlaceholder({ ...base, compacting: true }), 'Compacting conversation…');
+  });
+});
+
+describe('streamed word fade', () => {
+  it('wraps words and leaves the whitespace between them bare', () => {
+    const out = splitWords('two words') as { type: string; tagName?: string; value?: string }[];
+    assert.deepEqual(
+      out.map((n) => n.tagName ?? n.value),
+      ['span', ' ', 'span'],
+    );
+    // The wrapper is what the animation hangs off; the text has to survive intact.
+    assert.equal(JSON.stringify(out[0]).includes('fade-word'), true);
+    assert.equal(splitWords('one').length, 1);
+    assert.deepEqual(splitWords(''), []);
+  });
+
+  it('leaves code alone, since splitting it would break highlighting', () => {
+    const tree = {
+      type: 'root',
+      children: [
+        { type: 'element', tagName: 'p', children: [{ type: 'text', value: 'hello there' }] },
+        { type: 'element', tagName: 'pre', children: [{ type: 'text', value: 'const a = 1;' }] },
+      ],
+    };
+    rehypeFadeWords()(tree);
+    const [para, pre] = tree.children as { children: { type: string; tagName?: string }[] }[];
+    assert.deepEqual(
+      para.children.map((c) => c.tagName ?? c.type),
+      ['span', 'text', 'span'],
+    );
+    assert.deepEqual(
+      pre.children.map((c) => c.type),
+      ['text'],
+    );
   });
 });
