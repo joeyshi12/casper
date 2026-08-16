@@ -34,3 +34,24 @@ export function choiceCallOf(tool: ToolCallView): ChoiceData | null {
   if (!question || options.length < 2) return null;
   return { question, options };
 }
+
+export interface ChoiceOutcome {
+  /** Label of the option the user took, if they took one. */
+  picked: string | null;
+  /** They said something else instead, so the question has been left behind. */
+  superseded: boolean;
+}
+
+/**
+ * What became of a choice, judged by the first thing the user said after it appeared: one of
+ * the options, or something else entirely. Either way the question is closed - offering
+ * buttons for a moment that has passed invites answering a question twice.
+ */
+export function choiceOutcome(
+  options: ChoiceData['options'],
+  reply: string | null,
+): ChoiceOutcome {
+  if (reply === null) return { picked: null, superseded: false };
+  const hit = options.find((o) => o.prompt.trim() === reply.trim());
+  return hit ? { picked: hit.label, superseded: false } : { picked: null, superseded: true };
+}

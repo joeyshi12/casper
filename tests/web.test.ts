@@ -17,7 +17,7 @@ import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
 import { lineDiff } from '../web/src/util/diff.js';
 import { matchPath } from 'react-router';
 import { SESSION_ROUTE, pathForSession } from '../web/src/util/route.js';
-import { choiceCallOf } from '../web/src/util/choiceCall.js';
+import { choiceCallOf, choiceOutcome } from '../web/src/util/choiceCall.js';
 import { upsertSession } from '../web/src/state/sessions.js';
 import { composerPlaceholder } from '../web/src/util/composerPlaceholder.js';
 import { splitWords, rehypeFadeWords } from '../web/src/util/rehypeFadeWords.js';
@@ -892,5 +892,32 @@ describe('streamed word fade', () => {
       pre.children.map((c) => c.type),
       ['text'],
     );
+  });
+});
+
+describe('choice outcome', () => {
+  const options = [
+    { label: 'Ship it', prompt: 'Ship it as 0.9.5.' },
+    { label: 'Hold', prompt: 'Hold off for now.' },
+  ];
+
+  it('stays open until the user says something', () => {
+    assert.deepEqual(choiceOutcome(options, null), { picked: null, superseded: false });
+  });
+
+  it('records the option taken, ignoring surrounding whitespace', () => {
+    assert.deepEqual(choiceOutcome(options, '  Ship it as 0.9.5. '), {
+      picked: 'Ship it',
+      superseded: false,
+    });
+  });
+
+  it('closes without a pick when the user typed something else', () => {
+    // The moment has passed: the buttons would otherwise still be live under an answer
+    // that ignored them.
+    assert.deepEqual(choiceOutcome(options, 'actually, what about the icons?'), {
+      picked: null,
+      superseded: true,
+    });
   });
 });
