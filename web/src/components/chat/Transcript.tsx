@@ -36,6 +36,9 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
   const streamingText = useStore((s) => s.streamingText);
   const streamingThought = useStore((s) => s.streamingThought);
   const pending = useStore((s) => s.pending);
+  // A prompt that has left the composer but has no turn yet: a draft is still creating its
+  // session, or its socket is still opening. The dots say the app is working on it.
+  const waitingToStart = pending.some((pm) => pm.status === 'sending');
   const turnStatus = useStore((s) => s.observability.turnStatus);
   const compacting = useStore((s) => s.observability.compacting);
   const activeId = useStore((s) => s.activeId);
@@ -304,7 +307,7 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
         </div>
       )}
 
-      {turnStatus === 'running' && !streamingText && !streamingThought && (
+      {(turnStatus === 'running' || waitingToStart) && !streamingText && !streamingThought && (
         <div className="thinking">
           <span className="thinking-dot" />
           <span className="thinking-dot" />

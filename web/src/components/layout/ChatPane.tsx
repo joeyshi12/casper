@@ -48,6 +48,9 @@ export function ChatPane({
   onCompact,
 }: Props) {
   const title = useStore((s) => s.sessions.find((x) => x.sessionId === s.activeId)?.title);
+  // The hero belongs to an empty draft: sending hands over to the transcript at once, so the
+  // message shows while the session is still being created.
+  const composing = useStore((st) => isDraft && st.pending.length === 0 && st.items.length === 0);
   const activeId = useStore((s) => s.activeId);
   const sessionNotice = useStore((s) => s.sessionNotice);
   const dismissSessionNotice = useStore((s) => s.dismissSessionNotice);
@@ -106,6 +109,61 @@ export function ChatPane({
     );
   }
 
+  // Prompt, then a single bar: config on the left, live stats on the right.
+  const composer = (
+    <div className="composer-wrap">
+      {sessionNotice && (
+        <div className="notice-banner" role="alert">
+          <span className="notice-icon" aria-hidden>
+            ⚠
+          </span>
+          <div className="notice-text">
+            <p className="notice-title">{sessionNotice.title}</p>
+            {sessionNotice.fix && <p className="notice-sub">{sessionNotice.fix}</p>}
+          </div>
+          <button
+            className="notice-x"
+            onClick={dismissSessionNotice}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
+      <Composer
+        sessionId={activeId}
+        onSend={onSend}
+        onCancel={onCancel}
+        onCompact={onCompact}
+        onChangeModel={onChangeModel}
+        onChangeAgent={onChangeAgent}
+        connStatus={connStatus}
+        draft={isDraft}
+      />
+    </div>
+  );
+
+  // A draft has no transcript, so the wordmark and the prompt sit together in the middle,
+  // the way a new chat reads before anything has been said.
+  const draftBody = (
+    <div className="chat-draft">
+      <div className="draft-hero">
+        <img className="draft-logo" src="/logo.svg" alt="" />
+        <h1 className="draft-title">Casper</h1>
+      </div>
+      {composer}
+    </div>
+  );
+
+  const sessionBody = (
+    <>
+      <div className="chat-body">
+        <Transcript onRetry={onRetry} onRetryTurn={onRetryTurn} />
+      </div>
+      {composer}
+    </>
+  );
+
   return (
     <main className={`chatpane chatpane-split ${showTree ? 'has-tree' : ''}`}>
       <div className="chat-col">
@@ -113,9 +171,12 @@ export function ChatPane({
           <button className="backbtn" onClick={onBack} aria-label="Back to sessions">
             ‹
           </button>
-          <span className="chat-title" title={title}>
-            {isDraft ? 'New session' : title ?? 'Session'}
-          </span>
+          {/* In a draft the hero below carries the name, so the bar stays empty. */}
+          {!isDraft && (
+            <span className="chat-title" title={title}>
+              {title ?? 'Session'}
+            </span>
+          )}
           {/* A draft has no socket yet, so a red "Offline" dot would be a lie. */}
           {!isDraft && <ConnDot status={connStatus} />}
           {/* A draft has no workspace yet, so there is nothing to browse. */}
@@ -132,41 +193,7 @@ export function ChatPane({
           )}
         </header>
 
-        <div className="chat-body">
-          <Transcript onRetry={onRetry} onRetryTurn={onRetryTurn} />
-        </div>
-
-        {/* Prompt, then a single bar: config on the left, live stats on the right. */}
-        <div className="composer-wrap">
-          {sessionNotice && (
-            <div className="notice-banner" role="alert">
-              <span className="notice-icon" aria-hidden>
-                ⚠
-              </span>
-              <div className="notice-text">
-                <p className="notice-title">{sessionNotice.title}</p>
-                {sessionNotice.fix && <p className="notice-sub">{sessionNotice.fix}</p>}
-              </div>
-              <button
-                className="notice-x"
-                onClick={dismissSessionNotice}
-                aria-label="Dismiss"
-              >
-                ×
-              </button>
-            </div>
-          )}
-          <Composer
-            sessionId={activeId}
-            onSend={onSend}
-            onCancel={onCancel}
-            onCompact={onCompact}
-            onChangeModel={onChangeModel}
-            onChangeAgent={onChangeAgent}
-            connStatus={connStatus}
-            draft={isDraft}
-          />
-        </div>
+        {composing ? draftBody : sessionBody}
       </div>
 
       {activeId && (
