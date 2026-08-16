@@ -9,14 +9,38 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Not the plugin's default .webmanifest: the server's MIME table already covers .json.
+      manifestFilename: 'manifest.json',
       manifest: {
         name: 'Casper',
         short_name: 'Casper',
         description: 'Web client for kiro-cli over ACP',
         theme_color: '#282a36',
         background_color: '#282a36',
+        // Defaults to "browser", which installs a shortcut with the full browser UI.
         display: 'standalone',
-        icons: [{ src: '/casper.png', sizes: '32x32', type: 'image/png' }],
+        start_url: '/',
+        // Must cover every route, or Android shows a URL bar mid-session.
+        scope: '/',
+        orientation: 'any',
+        icons: [
+          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          // Android crops to the launcher shape, so the mark sits in a square of
+          // 410/sqrt(2) - inside the safe circle, whose corners a 410px square would lose.
+          {
+            src: '/icons/maskable-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+          {
+            src: '/icons/maskable-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+        ],
       },
       workbox: {
         // Take control immediately and drop old precaches so a rebuilt app

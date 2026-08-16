@@ -64,6 +64,14 @@ export async function buildApp(): Promise<CasperApp> {
     await app.register(fastifyStatic, {
       root: config.webDist,
     });
+    // The manifest and icons are requested by name, not by content hash, so a stale copy in a
+    // browser or proxy would mask an icon change. Hashed /assets/ keep the plugin's defaults.
+    app.addHook('onSend', async (req, reply) => {
+      const path = req.url.split('?')[0] ?? '';
+      if (path === '/manifest.json' || path.startsWith('/icons/')) {
+        reply.header('cache-control', 'public, max-age=300');
+      }
+    });
     // SPA fallback: serve index.html for client-side routes only. API/WS and
     // anything that looks like a static asset (under /assets/ or with a file
     // extension) must 404 rather than fall back to index.html - otherwise a
