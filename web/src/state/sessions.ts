@@ -12,7 +12,14 @@ export function upsertSession(
   sessions: SessionSummary[],
   summary: SessionSummary,
 ): SessionSummary[] {
-  return [...sessions.filter((s) => s.sessionId !== summary.sessionId), summary].sort(byRecent);
+  const existing = sessions.find((s) => s.sessionId === summary.sessionId);
+  // Keep the later timestamp: the list and a session's own detail each learn about activity
+  // by a different route, so opening a session must not walk its row backwards in time.
+  const row =
+    existing && existing.updatedAt.localeCompare(summary.updatedAt) > 0
+      ? { ...summary, updatedAt: existing.updatedAt }
+      : summary;
+  return [...sessions.filter((s) => s.sessionId !== summary.sessionId), row].sort(byRecent);
 }
 
 /**

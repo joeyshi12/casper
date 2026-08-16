@@ -827,6 +827,16 @@ describe('session list', () => {
       ['renamed', 'Alpha'],
     );
   });
+
+  it('never walks a row backwards in time', () => {
+    // The list and a session's own detail learn about activity by different routes, so
+    // opening a session used to replace a fresh timestamp with an older one.
+    const listed = [row('b', 'test', '2026-01-02T09:00:00Z')];
+    const stale = upsertSession(listed, row('b', 'test', '2026-01-02T08:00:00Z'));
+    assert.equal(stale[0]!.updatedAt, '2026-01-02T09:00:00Z');
+    const fresher = upsertSession(listed, row('b', 'test', '2026-01-02T10:00:00Z'));
+    assert.equal(fresher[0]!.updatedAt, '2026-01-02T10:00:00Z');
+  });
 });
 
 describe('composer placeholder', () => {

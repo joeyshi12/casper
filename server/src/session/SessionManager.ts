@@ -116,6 +116,9 @@ export class Session {
    * a stale 'idle'.
    */
   record(payload: CasperEventPayload): CasperEvent {
+    // Any event is activity: without this, updatedAt stayed at whatever it was when
+    // the session was opened, and the detail reported a time older than the list.
+    this.updatedAt = new Date().toISOString();
     this.turnState.apply(payload);
     return this.store.append(payload);
   }
@@ -149,6 +152,11 @@ function mapNotification(n: JsonRpcNotification): CasperEventPayload | null {
 // A large session's full transcript is multiple MB; loading just the tail keeps
 // opening it fast, and the client fetches older pages on scroll-to-top.
 const TRANSCRIPT_PAGE_SIZE = 80;
+
+/** The later of two ISO timestamps: kiro's file and our own activity each move separately. */
+function newerOf(a: string | undefined, b: string): string {
+  return a && a.localeCompare(b) > 0 ? a : b;
+}
 
 /** The first user message in a transcript, if it has one. */
 function firstPromptText(transcript: TranscriptItem[]): string | undefined {
@@ -520,7 +528,7 @@ export class SessionManager {
         title: this.titleOf(s.sessionId, { kiroTitle: base?.title, cwd: s.cwd }),
         cwd: s.cwd,
         createdAt: base?.createdAt ?? s.createdAt,
-        updatedAt: base?.updatedAt ?? s.updatedAt,
+        updatedAt: newerOf(base?.updatedAt, s.updatedAt),
         liveness: s.proc ? 'live' : 'dormant',
         agentId: s.agentId ?? base?.agentId,
         modelId: s.modelId ?? base?.modelId,
