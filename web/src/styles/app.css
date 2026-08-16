@@ -121,6 +121,34 @@
 .toolcall.is-arriving {
   animation: card-in 0.2s ease-out both;
 }
+/* Still working: the label's own colour sweeps across it, the way Open WebUI marks pending
+   text - busy without a spinner. */
+@keyframes label-shimmer {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -20% 0;
+  }
+}
+.thought-label.is-live {
+  /* The band fades the letters out rather than brightening them, and its ends match the
+     resting colour, so the label does not jump when the animation stops. */
+  background: linear-gradient(
+    100deg,
+    var(--n3) 0%,
+    var(--n3) 35%,
+    color-mix(in srgb, var(--n3) 20%, transparent) 50%,
+    var(--n3) 65%,
+    var(--n3) 100%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: label-shimmer 1.6s linear infinite;
+}
+
 /* Sidebar */
 .sidebar-head {
   display: flex;
@@ -1160,16 +1188,16 @@
   font-size: 14px;
   line-height: 1;
 }
-.thought-body,
-.thought-body .md,
-.thought-body .md p,
-.thought-body .md li {
+.thought-body {
   margin-top: 4px;
   font-size: 14px;
   /* Muted so reasoning recedes behind the actual output (--n5). --n3 is the
      greyest text tone. */
   color: var(--n3);
   font-style: italic;
+}
+.thought-text {
+  white-space: pre-wrap;
 }
 
 /* Compaction divider - marks where kiro condensed the history into a summary. */

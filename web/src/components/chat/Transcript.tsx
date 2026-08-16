@@ -47,9 +47,8 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
   const activeId = useStore((s) => s.activeId);
   const remainingOlder = useStore((s) => s.remainingOlder);
   const prependItems = useStore((s) => s.prependItems);
-  // A running turn can go quiet for seconds while the model prepares a tool call - a
-  // widget's code is generated as tool input, so nothing streams meanwhile. Without this
-  // the dots stay hidden for the whole gap, because text arrived earlier in the turn.
+  // A running turn goes quiet while the model prepares a tool call - a widget's code is
+  // tool input, so nothing streams - and text from earlier would otherwise hide the dots.
   // Items already on screen when a session opened must not animate - otherwise opening an
   // old session flashes every card at once. Anything not in this set arrived live.
   const hydrated = useRef<{ session: string | null; ids: Set<string> }>({
@@ -385,21 +384,23 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
 });
 
 /**
- * A collapsible reasoning block. Kiro's "thinking" content is the model's
- * private reasoning; we render it dimmed and distinct from spoken output.
- * Collapsed by default for committed thoughts; expanded while streaming live.
+ * A collapsible reasoning block, dimmed and distinct from spoken output, and collapsed
+ * whether or not it is still being written.
  */
 function ThoughtBlock({ text, live = false }: { text: string; live?: boolean }) {
-  const [open, setOpen] = useState(live);
+  // Collapsed even while being written: the shimmer says it is working.
+  const [open, setOpen] = useState(false);
   return (
     <div className={`thought ${live ? 'is-live' : ''}`}>
       <button className="thought-head" onClick={() => setOpen((o) => !o)}>
         <span className="thought-chevron">{open ? '▾' : '▸'}</span>
-        <span className="thought-label">Thinking</span>
+        <span className={`thought-label ${live ? 'is-live' : ''}`}>Thinking</span>
       </button>
       {open && (
         <div className="thought-body">
-          <MarkdownRenderer text={text} streaming={live} />
+          {/* Plain text, not markdown: the body mounts whole, so a code fence in it would
+              render uncoloured and then recolour when the highlighter answers. */}
+          <div className="thought-text">{text}</div>
         </div>
       )}
     </div>
