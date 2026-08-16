@@ -18,6 +18,9 @@ type AuthState = 'checking' | 'gate' | 'ready';
 // "Model change failed: ..." rather than leaking the wire action name.
 type CreateOpts = Omit<CreateSessionRequest, 'freshWorkspace'>;
 
+/** Matches the stylesheet's breakpoint: under this the panel is a drawer over the chat. */
+const MOBILE_MAX = 768;
+
 /** How long clustered list refreshes wait, so a burst becomes a single request. */
 const LIST_COALESCE_MS = 150;
 
@@ -77,7 +80,6 @@ function Shell({ onLock }: { onLock: () => void }) {
   const [connStatus, setConnStatus] = useState<ConnStatus>('closed');
   // A draft's first prompt, held until the new session's socket is connected.
   const firstPromptRef = useRef<{ id: string; content: PromptContentBlock[] } | null>(null);
-  const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   // What the last create was asked for, so the error screen's Retry can repeat it.
   const lastCreateOpts = useRef<CreateOpts | null>(null);
@@ -261,7 +263,6 @@ function Shell({ onLock }: { onLock: () => void }) {
       closeSocket();
       setConnStatus('connecting');
       setCreateError(null);
-      setCreating(true);
       lastCreateOpts.current = opts;
       try {
         const detail = await api.createSession({
@@ -280,13 +281,10 @@ function Shell({ onLock }: { onLock: () => void }) {
         void openSession(id, detail);
         return true;
       } catch (err) {
-        // Keep the user on the chat pane and show what went wrong; `creating`
-        // stays true so `hasActive` holds the view open for the error screen.
+        // Keep the user on the chat pane and show what went wrong.
         setConnStatus('closed');
         setCreateError(err instanceof Error ? err.message : 'Failed to create session');
         return false;
-      } finally {
-        setCreating(false);
       }
     },
     [closeSocket, navigate, openSession, refreshSessions],
@@ -487,33 +485,48 @@ function Shell({ onLock }: { onLock: () => void }) {
 
   // Mobile shows one pane at a time and the list is home, so landing on the default
   // draft must not push the chat over it - only an explicit new-session tap does.
-  const hasActive =
-    isDraftRoute ||
-    store.activeId !== null ||
-    store.loadingSessionId !== null ||
-    creating ||
-    createError !== null;
+  // The panel is a column beside the chat where there is room, and a drawer over it where
+  // there is not. Either way, the chat is what you land on.
+  const [navOpen, setNavOpen] = useState(() => window.innerWidth > MOBILE_MAX);
+  const closeNavOnMobile = useCallback(() => {
+    if (window.innerWidth <= MOBILE_MAX) setNavOpen(false);
+  }, []);
 
   return (
-    <div className={`layout ${hasActive ? 'has-active' : ''}`}>
+    <div className={`layout ${navOpen ? 'nav-open' : ''}`}>
       <Sidebar
         sessions={store.sessions}
         activeId={store.activeId}
         loadingId={store.loadingSessionId}
-        onOpen={markLoading}
-        onNew={startDraft}
+        onOpen={(id) => {
+          markLoading(id);
+          closeNavOnMobile();
+        }}
+        onNew={() => {
+          startDraft();
+          closeNavOnMobile();
+        }}
         onDelete={deleteSession}
         onRename={renameSession}
         onLock={lock}
       />
+      {/* Only the drawer needs dismissing; a wide screen gives the panel its own column. */}
+      {navOpen && (
+        <button
+          className="nav-scrim"
+          aria-label="Close session panel"
+          onClick={() => setNavOpen(false)}
+        />
+      )}
       <ChatPane
+        navOpen={navOpen}
+        onToggleNav={() => setNavOpen((o) => !o)}
         isDraft={isDraft}
         loadingSessionId={store.loadingSessionId}
         connStatus={connStatus}
         createError={createError}
         onRetryCreate={retryCreate}
         onDismissError={dismissCreateError}
-        onBack={backToList}
         onSend={send}
         onRetry={retrySend}
         onRetryTurn={retryTurn}

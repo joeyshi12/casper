@@ -6,7 +6,7 @@ import { Transcript } from '../chat/Transcript.js';
 import { FileTree } from '../chat/FileTree.js';
 import { Composer } from '../chat/Composer.js';
 import { ConnDot } from '../common/ConnBanner.js';
-import { Spinner, FilesIcon } from '../common/icons.js';
+import { Spinner, FilesIcon, MenuIcon } from '../common/icons.js';
 
 interface Props {
   /** A session being composed: no id yet, created by the first prompt. */
@@ -19,7 +19,8 @@ interface Props {
   createError: string | null;
   onRetryCreate: () => void;
   onDismissError: () => void;
-  onBack: () => void;
+  navOpen: boolean;
+  onToggleNav: () => void;
   onSend: (content: PromptContentBlock[]) => void;
   onRetry: (id: string, text: string) => void;
   /** Re-send a prompt after a failed turn. */
@@ -38,7 +39,8 @@ export function ChatPane({
   createError,
   onRetryCreate,
   onDismissError,
-  onBack,
+  navOpen,
+  onToggleNav,
   onSend,
   onRetry,
   onRetryTurn,
@@ -70,8 +72,13 @@ export function ChatPane({
     return (
       <main className="chatpane">
         <header className="chat-head">
-          <button className="backbtn" onClick={onBack} aria-label="Back to sessions">
-            ‹
+          <button
+            className="navbtn"
+            onClick={onToggleNav}
+            aria-label={navOpen ? 'Hide sessions' : 'Show sessions'}
+            aria-expanded={navOpen}
+          >
+            <MenuIcon size={20} />
           </button>
           <span className="chat-title">Opening session…</span>
         </header>
@@ -88,8 +95,13 @@ export function ChatPane({
     return (
       <main className="chatpane">
         <header className="chat-head">
-          <button className="backbtn" onClick={onBack} aria-label="Back to sessions">
-            ‹
+          <button
+            className="navbtn"
+            onClick={onToggleNav}
+            aria-label={navOpen ? 'Hide sessions' : 'Show sessions'}
+            aria-expanded={navOpen}
+          >
+            <MenuIcon size={20} />
           </button>
           <span className="chat-title">New session</span>
         </header>
@@ -168,8 +180,13 @@ export function ChatPane({
     <main className={`chatpane chatpane-split ${showTree ? 'has-tree' : ''}`}>
       <div className="chat-col">
         <header className="chat-head">
-          <button className="backbtn" onClick={onBack} aria-label="Back to sessions">
-            ‹
+          <button
+            className="navbtn"
+            onClick={onToggleNav}
+            aria-label={navOpen ? 'Hide sessions' : 'Show sessions'}
+            aria-expanded={navOpen}
+          >
+            <MenuIcon size={20} />
           </button>
           {/* In a draft the hero below carries the name, so the bar stays empty. */}
           {!isDraft && (

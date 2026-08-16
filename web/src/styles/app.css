@@ -22,6 +22,11 @@
   flex-direction: column;
   border-right: 1px solid var(--n1);
   background: var(--n0);
+  /* Collapses by width rather than display, so it can animate out like the file panel. */
+  overflow: hidden;
+  /* visibility is discrete: on at the start of opening, off at the end of closing, so the
+     panel is visible for the whole animation either way. */
+  transition: width 0.2s ease, opacity 0.2s ease, border-color 0.2s ease, visibility 0.2s;
 }
 
 .chatpane {
@@ -33,22 +38,53 @@
 }
 
 /* Mobile: sidebar is the home screen; opening a session swaps to the chat. */
+/* Collapsed: no width, so the chat takes the space, and nothing inside can be tabbed to. */
+.layout:not(.nav-open) .sidebar {
+  width: 0;
+  opacity: 0;
+  border-right-color: transparent;
+  visibility: hidden;
+}
+
+.nav-scrim {
+  display: none;
+}
+
 @media (max-width: 768px) {
+  /* Floats over the chat rather than pushing it aside: nothing to navigate back to. */
   .sidebar {
-    width: 100%;
-    border-right: none;
+    position: fixed;
+    z-index: 40;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(86vw, 320px);
+    box-shadow: 0 0 40px rgb(0 0 0 / 0.5);
+    /* Slides at full width, so the rows don't reflow while it moves. */
+    transition: transform 0.2s ease, visibility 0.2s;
   }
-  .layout.has-active .sidebar {
-    display: none;
+  .layout:not(.nav-open) .sidebar {
+    width: min(86vw, 320px);
+    opacity: 1;
+    transform: translateX(-100%);
   }
-  .layout:not(.has-active) .chatpane {
-    display: none;
+  .layout.nav-open .sidebar {
+    transform: translateX(0);
   }
+  /* Dismisses the drawer with a tap. Only here: a wide screen has nothing to dismiss. */
+  .nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    border: none;
+    background: rgb(0 0 0 / 0.5);
+    animation: scrim-in 0.2s ease;
   }
-/* Desktop: the back arrow is redundant next to a permanent sidebar. */
-@media (min-width: 769px) {
-  .backbtn {
-    display: none;
+  @keyframes scrim-in {
+    from {
+      opacity: 0;
+    }
   }
 }
 
@@ -340,13 +376,19 @@
   border-bottom: 1px solid var(--n1);
   background: var(--n-abyss);
 }
-.backbtn {
-  font-size: 22px;
-  line-height: 1;
-  color: var(--frost);
+/* Shows and hides the session panel, at every width. */
+.navbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 34px;
   height: 40px;
   flex-shrink: 0;
+  color: var(--n4);
+  border-radius: var(--r-sm);
+}
+.navbtn:hover {
+  color: var(--n6);
 }
 .chat-title {
   flex: 1;
@@ -1663,8 +1705,12 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .toolcall-chevron,
-  .collapse {
+  .collapse,
+  .sidebar {
     transition: none;
+  }
+  .nav-scrim {
+    animation: none;
   }
 }
 .toolcall-body {
@@ -2245,7 +2291,8 @@
   justify-content: center;
   align-items: center;
   gap: 30px;
-  padding: 0 16px 6vh;
+  /* Lifted above centre by the bottom padding, clamped so a short window still fits. */
+  padding: 0 16px clamp(40px, 16vh, 180px);
   overflow-y: auto;
 }
 .draft-hero {
