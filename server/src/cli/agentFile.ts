@@ -36,15 +36,12 @@ export interface KiroAgent {
   model: string | null;
 }
 
-/**
- * Markdown on disk, so a prompt edit diffs line by line. Read rather than imported:
- * tsx hands a .md import to the JS parser.
- */
+/** Plain text on disk so an edit diffs line by line, and read rather than imported. */
 export function agentPrompt(): string | null {
   const here = path.dirname(url.fileURLToPath(import.meta.url));
   const candidates = [
-    path.resolve(here, 'agents/prompt.md'), // bundled: beside server.js
-    path.resolve(here, '../../../assets/agents/prompt.md'), // from source
+    path.resolve(here, 'agents/prompt.txt'), // bundled: beside server.js
+    path.resolve(here, '../../../assets/agents/prompt.txt'), // from source
   ];
   const found = candidates.find((c) => fs.existsSync(c));
   return found ? fs.readFileSync(found, 'utf8').trimEnd() : null;
@@ -67,7 +64,7 @@ function mcpServerPath(): string | null {
 export function agentConfig(prompt: string, mcp: string | null): KiroAgent {
   return {
     name: 'casper',
-    description: 'Casper \u2014 a coding agent for developing from the chat web interface.',
+    description: 'Casper \u2014 an AI assistant you talk to over a web interface.',
     prompt,
     mcpServers: {
       casper: mcp

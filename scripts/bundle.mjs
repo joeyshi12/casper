@@ -63,10 +63,10 @@ fs.cpSync(webSrc, path.join(outDir, 'web'), { recursive: true });
 
 // files: ["dist/"] can't reach ../assets, so the prompt has to live inside the bundle.
 // The rest of the agent file is an object literal in agentFile.ts, compiled in.
-const promptSrc = path.join(root, 'assets/agents/prompt.md');
+const promptSrc = path.join(root, 'assets/agents/prompt.txt');
 if (!fs.existsSync(promptSrc)) throw new Error(`missing ${promptSrc}`);
 fs.mkdirSync(path.join(outDir, 'agents'), { recursive: true });
-fs.copyFileSync(promptSrc, path.join(outDir, 'agents/prompt.md'));
+fs.copyFileSync(promptSrc, path.join(outDir, 'agents/prompt.txt'));
 
 // npm picks up README and LICENSE from the package directory only, and both live at
 // the repo root - without copying them in, the npm page has no readme and the tarball

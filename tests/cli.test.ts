@@ -319,8 +319,8 @@ describe('doctor: casper mcp', () => {
 describe('shipped agent config', () => {
   const prompt = agentPrompt();
 
-  it('finds the prompt markdown', () => {
-    assert.ok(prompt, 'agentPrompt() found no prompt.md');
+  it('finds the prompt text', () => {
+    assert.ok(prompt, 'agentPrompt() found no prompt.txt');
     assert.ok(prompt!.length > 1000, 'prompt is suspiciously short');
     assert.ok(!prompt!.endsWith('\n'), 'trailing newline would churn the stamp');
   });

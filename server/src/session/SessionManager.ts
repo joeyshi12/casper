@@ -164,6 +164,15 @@ function firstPromptText(transcript: TranscriptItem[]): string | undefined {
   return first?.type === 'message' ? first.message.text : undefined;
 }
 
+/**
+ * A session kiro created or loaded, now with no file and no process, was deleted out from
+ * under us. Left in memory it re-lists forever. One kiro never touched isn't a ghost: a
+ * brand-new session has no file yet.
+ */
+function isGhost(s: Session, hasFile: boolean): boolean {
+  return !hasFile && s.hasBeenLive && !s.proc;
+}
+
 export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly log: Logger;
@@ -523,6 +532,10 @@ export class SessionManager {
     for (const s of this.sessions.values()) {
       const snap = s.turnState.get();
       const base = byId.get(s.sessionId);
+      if (isGhost(s, base !== undefined)) {
+        this.evict(s.sessionId);
+        continue;
+      }
       byId.set(s.sessionId, {
         sessionId: s.sessionId,
         title: this.titleOf(s.sessionId, { kiroTitle: base?.title, cwd: s.cwd }),
