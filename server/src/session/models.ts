@@ -23,6 +23,26 @@ interface RawModel {
 let cache: ModelInfo[] | null = null;
 
 /**
+ * The model kiro starts new chats with, from `settings chat.defaultModel`. This is what
+ * a session actually gets when Casper passes no --model, and it differs from the list's
+ * own default_model ('auto'), so the picker would otherwise name the wrong one.
+ */
+async function configuredDefault(): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync(config.kiroBin, [
+      'settings',
+      'chat.defaultModel',
+      '-f',
+      'json',
+    ]);
+    const value = JSON.parse(stdout) as unknown;
+    return typeof value === 'string' && value ? value : undefined;
+  } catch {
+    return undefined; // unset, or a kiro without the key
+  }
+}
+
+/**
  * Fetch the available model list via `kiro-cli chat --list-models -f json`.
  * Cached for the process lifetime (the list is essentially static).
  */
@@ -33,8 +53,13 @@ export async function listModels(log: MiniLogger): Promise<ModelInfo[]> {
     ['chat', '--list-models', '-f', 'json'],
     { maxBuffer: 4 * 1024 * 1024 },
   );
-  // The first model kiro lists (`auto`) is its default.
-  const parsed = JSON.parse(stdout) as { models: RawModel[] };
+  const parsed = JSON.parse(stdout) as { models: RawModel[]; default_model?: string };
+  const configured = await configuredDefault();
+  // Only honour the setting if the model is actually listed, so an unknown id can't
+  // leave the picker with nothing marked.
+  const preferred = parsed.models.some((m) => m.model_id === configured)
+    ? configured
+    : parsed.default_model;
   cache = parsed.models.map((m, i) => ({
     modelId: m.model_id,
     modelName: m.model_name,
@@ -42,9 +67,9 @@ export async function listModels(log: MiniLogger): Promise<ModelInfo[]> {
     contextWindowTokens: m.context_window_tokens,
     rateMultiplier: m.rate_multiplier,
     rateUnit: m.rate_unit,
-    isDefault: m.default_model ?? i === 0,
+    isDefault: preferred ? m.model_id === preferred : (m.default_model ?? i === 0),
   }));
-  log.info({ count: cache.length }, 'loaded model list');
+  log.info({ count: cache.length, default: preferred }, 'loaded model list');
   return cache;
 }
 
