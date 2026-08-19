@@ -1334,6 +1334,19 @@ describe('session controller', () => {
 
   const settle = () => new Promise((r) => setTimeout(r, 5));
 
+  /**
+   * Wait for something a real timer will bring about. A fixed sleep raced two chained
+   * timers - the turn-ended delay, then the list coalesce - and lost on a loaded CI box.
+   */
+  const waitFor = async (what: string, ok: () => boolean, timeoutMs = 2000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (ok()) return;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    assert.fail(`timed out waiting for ${what}`);
+  };
+
   beforeEach(() => {
     useStore.getState().clearActive();
     useStore.setState({ sessions: [], connStatus: 'closed', createError: null });
@@ -1558,8 +1571,10 @@ describe('session controller', () => {
     ]);
 
     // The safety net clears a compact that never reported back.
-    await new Promise((r) => setTimeout(r, 20));
-    assert.equal(useStore.getState().observability.compacting, false);
+    await waitFor(
+      'the compact safety net',
+      () => useStore.getState().observability.compacting === false,
+    );
   });
 
   it('a turn ending reconciles the list once kiro has persisted it', async () => {
@@ -1575,14 +1590,14 @@ describe('session controller', () => {
     } as unknown as CasperEvent);
 
     assert.deepEqual(rest.calls, [], 'not immediately: kiro has not written the file yet');
-    await settle();
+    await waitFor('the delayed list refresh', () => rest.calls.length > 0);
     assert.deepEqual(rest.calls, ['listSessions']);
   });
 
   it('the pickers load through the same port the tests substitute', async () => {
     const { controller, rest } = build();
     controller.loadPickers();
-    await settle();
+    await waitFor('both picker fetches', () => rest.calls.length === 2);
     assert.deepEqual(rest.calls.sort(), ['agents', 'models']);
   });
 
