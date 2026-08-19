@@ -15,7 +15,7 @@ export type ConnStatus =
   | 'resyncing'
   | 'closed';
 
-interface SessionSocketHandlers {
+export interface SessionSocketHandlers {
   onEvent: (event: CasperEvent) => void;
   onStatus: (status: ConnStatus) => void;
   /** Cursor is stale - caller should refetch the full session, then call reset(head). */
@@ -136,7 +136,6 @@ export class SessionSocket {
       if (this.ws !== ws) return;
       this.backoff = 500;
       this.handlers.onStatus('replaying');
-      this.send({ type: 'hello', sessionId: this.sessionId, cursor: this.cursor });
     };
 
     ws.onmessage = (ev) => {

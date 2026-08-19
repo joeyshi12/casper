@@ -4,14 +4,17 @@
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type {
   CasperEvent,
   CasperEventPayload,
   DirListing,
+  ServerMessage,
   SessionDetail,
   SessionSummary,
+  TreeResponse,
 } from '@casper/shared';
 import Fastify from 'fastify';
 import { useStore } from '../web/src/state/store.js';
@@ -20,6 +23,7 @@ import { AttemptLimiter } from '../server/src/util/rateLimit.js';
 import { SessionManager, Session } from '../server/src/session/SessionManager.js';
 import { describeError } from '../server/src/acp/errors.js';
 import { registerFsRoutes } from '../server/src/routes/fs.js';
+import { registerWorkspaceRoutes } from '../server/src/routes/workspace.js';
 import { KiroProcess } from '../server/src/session/KiroProcess.js';
 import {
   confineToRoot,
@@ -28,6 +32,13 @@ import {
   realConfineToRoot,
 } from '../server/src/util/paths.js';
 import { classifyKind, looksBinary } from '../server/src/util/filekind.js';
+import {
+  classifyDirent,
+  resolveAbsolutePath,
+  resolveSessionPath,
+} from '../server/src/util/confinedFile.js';
+import { EventStore } from '../server/src/session/EventStore.js';
+import { handleConnection, type GatewaySessions } from '../server/src/ws/gateway.js';
 import { noopLogger } from './helpers.js';
 import {
   createDirWatchers,
@@ -509,5 +520,423 @@ describe('directory watchers', () => {
     await watchers.sync(['../../etc']);
     assert.deepEqual(watchers.watching(), []);
     watchers.close();
+  });
+});
+
+// The predicates above are the primitives; these cover the sequence the file
+// routes actually run - lexical confine, then symlink confine, then stat, then
+// the kind check - and the status each step answers with.
+describe('confined file access (the sequence every file route runs)', () => {
+  let cwd: string;
+  let outside: string;
+  let fileRoot: string;
+
+  const sessions = { getSessionCwd: async () => cwd };
+  const noSession = {
+    getSessionCwd: async (): Promise<string> => {
+      throw new Error('Session not found');
+    },
+  };
+
+  before(() => {
+    fileRoot = config.fileRoot;
+    cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-ws-')));
+    outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-outside-')));
+    fs.writeFileSync(path.join(cwd, 'a.txt'), 'hello');
+    fs.mkdirSync(path.join(cwd, 'sub'));
+    fs.writeFileSync(path.join(outside, 'secret.txt'), 'SECRET');
+    fs.symlinkSync(outside, path.join(cwd, 'link-out'));
+    fs.symlinkSync(path.join(cwd, 'nowhere'), path.join(cwd, 'broken'));
+  });
+
+  after(() => {
+    config.fileRoot = fileRoot;
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
+  it('a session that does not exist is 404, before any path work', async () => {
+    const r = await resolveSessionPath(noSession, 'nope', 'a.txt', 'file');
+    assert.deepEqual(r, { ok: false, status: 404, error: 'Session not found' });
+  });
+
+  it('download and preview require a path; the tree does not', async () => {
+    const asFile = await resolveSessionPath(sessions, 's', '', 'file');
+    assert.deepEqual(asFile, { ok: false, status: 400, error: 'path parameter is required' });
+
+    const asDir = await resolveSessionPath(sessions, 's', '', 'directory');
+    assert.ok(asDir.ok && asDir.real === cwd, 'empty path lists the workspace itself');
+  });
+
+  it('traversal out of the workspace is 400, not 404', async () => {
+    const r = await resolveSessionPath(sessions, 's', '../etc/passwd', 'file');
+    assert.deepEqual(r, { ok: false, status: 400, error: 'Invalid path' });
+  });
+
+  it('a leading slash is stripped rather than read as absolute', async () => {
+    const r = await resolveSessionPath(sessions, 's', '//a.txt', 'file');
+    assert.ok(r.ok && r.real === path.join(cwd, 'a.txt'));
+    assert.ok(r.ok && r.relative === 'a.txt');
+  });
+
+  it('a missing file is 404 and a directory asked for as a file is 400', async () => {
+    const missing = await resolveSessionPath(sessions, 's', 'gone.txt', 'file');
+    assert.deepEqual(missing, { ok: false, status: 404, error: 'File not found' });
+
+    const dir = await resolveSessionPath(sessions, 's', 'sub', 'file');
+    assert.deepEqual(dir, { ok: false, status: 400, error: 'Path is not a file' });
+  });
+
+  it('a file asked for as a directory 404s the way readdir would have', async () => {
+    const r = await resolveSessionPath(sessions, 's', 'a.txt', 'directory');
+    assert.deepEqual(r, { ok: false, status: 404, error: 'Directory not found' });
+  });
+
+  // The lexical root (the workspace) and the real root (fileRoot) are separate
+  // on purpose: a project may symlink to somewhere else the user can read.
+  it('a symlink leaving the workspace but staying inside fileRoot is served', async () => {
+    const r = await resolveSessionPath(sessions, 's', 'link-out/secret.txt', 'file');
+    assert.ok(r.ok, 'expected the symlinked file to resolve');
+    assert.equal(r.real, path.join(outside, 'secret.txt'));
+  });
+
+  it('the same symlink is refused once fileRoot no longer contains its target', async () => {
+    config.fileRoot = cwd;
+    try {
+      const r = await resolveSessionPath(sessions, 's', 'link-out/secret.txt', 'file');
+      assert.deepEqual(r, { ok: false, status: 404, error: 'File not found' });
+    } finally {
+      config.fileRoot = fileRoot;
+    }
+  });
+
+  it('a deleted workspace explains itself instead of saying "not found"', async () => {
+    const doomed = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-gone-')));
+    fs.rmSync(doomed, { recursive: true, force: true });
+    const r = await resolveSessionPath(
+      { getSessionCwd: async () => doomed },
+      's',
+      '',
+      'directory',
+    );
+    assert.equal(r.ok, false);
+    assert.match(r.ok ? '' : r.error, /Workspace folder no longer exists/);
+  });
+
+  it('absolute paths answer 403 outside the roots and 404 when missing', async () => {
+    config.fileRoot = cwd;
+    try {
+      const escaped = await resolveAbsolutePath(path.join(outside, 'secret.txt'), 'file');
+      assert.deepEqual(escaped, { ok: false, status: 403, error: 'Path outside allowed root' });
+
+      const missing = await resolveAbsolutePath(path.join(cwd, 'gone.txt'), 'file');
+      assert.deepEqual(missing, { ok: false, status: 404, error: 'File not found' });
+
+      const found = await resolveAbsolutePath(path.join(cwd, 'a.txt'), 'file');
+      assert.ok(found.ok && found.stat.size === 5);
+    } finally {
+      config.fileRoot = fileRoot;
+    }
+  });
+
+  // Uploads live in the data directory, so a narrowed fileRoot must not hide
+  // them - and the symlink check has to use the same pair of roots to match.
+  it('the data directory stays reachable when fileRoot is narrowed', async () => {
+    const upload = path.join(config.casperDataDir, 'confine-probe.txt');
+    config.fileRoot = cwd;
+    try {
+      fs.mkdirSync(config.casperDataDir, { recursive: true });
+      fs.writeFileSync(upload, 'x');
+      const r = await resolveAbsolutePath(upload, 'file');
+      assert.ok(r.ok, 'expected a file under casperDataDir to resolve');
+    } finally {
+      config.fileRoot = fileRoot;
+      fs.rmSync(upload, { force: true });
+    }
+  });
+
+  describe('directory entries', () => {
+    const entryNamed = async (name: string, roots = [config.fileRoot]) => {
+      const dirents = await fsp.readdir(cwd, { withFileTypes: true });
+      const entry = dirents.find((d) => d.name === name);
+      assert.ok(entry, `no dirent named ${name}`);
+      return classifyDirent(cwd, entry, roots);
+    };
+
+    it('a file and a directory are classified as themselves', async () => {
+      assert.deepEqual(await entryNamed('a.txt'), {
+        kind: 'file',
+        real: path.join(cwd, 'a.txt'),
+      });
+      assert.deepEqual(await entryNamed('sub'), {
+        kind: 'directory',
+        real: path.join(cwd, 'sub'),
+      });
+    });
+
+    // Dirent.isDirectory() is false for a symlink even when it points at one.
+    it('a symlink is classified by what it points at, and reports the target', async () => {
+      assert.deepEqual(await entryNamed('link-out'), { kind: 'directory', real: outside });
+    });
+
+    it('a broken symlink is skipped', async () => {
+      assert.equal(await entryNamed('broken'), null);
+    });
+
+    it('a symlink whose target escapes the roots is skipped', async () => {
+      assert.equal(await entryNamed('link-out', [cwd]), null);
+    });
+  });
+});
+
+describe('ws gateway connection', () => {
+  // A socket double: records what the server sent and lets a test push messages
+  // in. Satisfies GatewaySocket structurally, so no casting through the type.
+  const fakeSocket = () => {
+    const sent: ServerMessage[] = [];
+    const listeners: { message?: (raw: Buffer) => void; pong?: () => void; close?: () => void } =
+      {};
+    let closed: { code?: number; reason?: string } | null = null;
+    return {
+      sent,
+      closed: () => closed,
+      readyState: 1,
+      OPEN: 1,
+      send: (data: string) => sent.push(JSON.parse(data) as ServerMessage),
+      close: (code?: number, reason?: string) => {
+        closed = { code, reason };
+      },
+      terminate: () => {},
+      ping: () => {},
+      on(event: 'message' | 'pong' | 'close', cb: (raw: Buffer) => void) {
+        listeners[event] = cb as never;
+        return this;
+      },
+      deliver: (msg: unknown) => listeners.message?.(Buffer.from(JSON.stringify(msg))),
+      deliverRaw: (raw: string) => listeners.message?.(Buffer.from(raw)),
+      hangUp: () => listeners.close?.(),
+    };
+  };
+
+  const stubSessions = (store: EventStore, over: Partial<GatewaySessions> = {}) => {
+    const calls: string[] = [];
+    const sessions: GatewaySessions & { calls: string[] } = {
+      calls,
+      ensureOpen: async () => ({}),
+      getStore: () => store,
+      onEvent: () => () => calls.push('unsubscribed'),
+      getSessionCwd: async () => os.tmpdir(),
+      runPrompt: async () => calls.push('runPrompt'),
+      cancel: () => calls.push('cancel'),
+      setMode: async () => calls.push('setMode'),
+      setModel: async () => calls.push('setModel'),
+      execCommand: async () => calls.push('execCommand'),
+      ...over,
+    };
+    return sessions;
+  };
+
+  const settle = () => new Promise((r) => setTimeout(r, 10));
+
+  it('replays only what the client has not seen, then says it is caught up', async () => {
+    const store = new EventStore('s1');
+    for (let i = 0; i < 3; i++) {
+      store.append({ kind: 'turn_ended', stopReason: 'end_turn' } as unknown as CasperEventPayload);
+    }
+    const socket = fakeSocket();
+    handleConnection(socket, stubSessions(store), 's1', 2);
+    await settle();
+
+    const seqs = socket.sent
+      .filter((m): m is Extract<ServerMessage, { type: 'event' }> => m.type === 'event')
+      .map((m) => m.event.seq);
+    assert.deepEqual(seqs, [3], 'events at or before the cursor must not be resent');
+    assert.deepEqual(socket.sent.at(-1), { type: 'replay_complete', head: 3 });
+  });
+
+  it('tells a client whose cursor predates the buffer to resync', async () => {
+    // After a restart the buffer is empty but the client still holds a cursor
+    // from the previous lifetime: those events are gone, so it must refetch.
+    const store = new EventStore('s1');
+    const socket = fakeSocket();
+    handleConnection(socket, stubSessions(store), 's1', 7);
+    await settle();
+    assert.equal(socket.sent[0]?.type, 'resync');
+    assert.deepEqual(socket.sent.at(-1), { type: 'replay_complete', head: 0 });
+  });
+
+  it('a control action is acknowledged, and a failure carries the reason', async () => {
+    const store = new EventStore('s1');
+    const socket = fakeSocket();
+    handleConnection(socket, stubSessions(store), 's1', 0);
+    await settle();
+
+    socket.deliver({ type: 'set_model', modelId: 'm1' });
+    await settle();
+    assert.deepEqual(socket.sent.at(-1), { type: 'ack', action: 'set_model', ok: true });
+
+    const failing = fakeSocket();
+    handleConnection(
+      failing,
+      stubSessions(store, {
+        runPrompt: async () => {
+          throw new Error('no capacity');
+        },
+      }),
+      's1',
+      0,
+    );
+    await settle();
+    failing.deliver({ type: 'prompt', content: [] });
+    await settle();
+    assert.deepEqual(failing.sent.at(-1), {
+      type: 'ack',
+      action: 'prompt',
+      ok: false,
+      error: 'no capacity',
+    });
+  });
+
+  it('rejects malformed and unknown messages without closing the socket', async () => {
+    const store = new EventStore('s1');
+    const socket = fakeSocket();
+    handleConnection(socket, stubSessions(store), 's1', 0);
+    await settle();
+
+    socket.deliverRaw('{not json');
+    assert.deepEqual(socket.sent.at(-1), { type: 'error', message: 'Invalid JSON' });
+
+    socket.deliver({ type: 'hello' });
+    assert.deepEqual(socket.sent.at(-1), { type: 'error', message: 'Unknown message type' });
+    assert.equal(socket.closed(), null);
+  });
+
+  it('a message arriving before the session is open is ignored, not rejected', async () => {
+    const store = new EventStore('s1');
+    const socket = fakeSocket();
+    let release: (() => void) | undefined;
+    handleConnection(
+      socket,
+      stubSessions(store, { ensureOpen: () => new Promise((r) => (release = () => r({}))) }),
+      's1',
+      0,
+    );
+
+    socket.deliver({ type: 'set_model', modelId: 'm1' });
+    assert.deepEqual(socket.sent, [], 'nothing should be sent before replay finishes');
+    release?.();
+    await settle();
+    assert.ok(socket.sent.some((m) => m.type === 'replay_complete'));
+  });
+
+  it('a session that will not open closes the socket with the reason', async () => {
+    const store = new EventStore('s1');
+    const socket = fakeSocket();
+    handleConnection(
+      socket,
+      stubSessions(store, {
+        ensureOpen: async () => {
+          throw new Error('session is a ghost');
+        },
+      }),
+      's1',
+      0,
+    );
+    await settle();
+    assert.deepEqual(socket.sent[0], { type: 'error', message: 'session is a ghost' });
+    assert.equal(socket.closed()?.code, 1011);
+  });
+
+  it('closing releases the event subscription', async () => {
+    const store = new EventStore('s1');
+    const socket = fakeSocket();
+    const sessions = stubSessions(store);
+    handleConnection(socket, sessions, 's1', 0);
+    await settle();
+    socket.hangUp();
+    assert.deepEqual(sessions.calls, ['unsubscribed']);
+  });
+});
+
+// The handlers are thin over confinedFile now, so these check the wiring: that
+// each route asks for the right thing and passes the status straight through.
+describe('workspace file routes', () => {
+  let cwd: string;
+  let app: Awaited<ReturnType<typeof buildApp>>;
+
+  const buildApp = async (dir: string) => {
+    const instance = Fastify();
+    registerWorkspaceRoutes(instance, { getSessionCwd: async () => dir });
+    await instance.ready();
+    return instance;
+  };
+
+  before(async () => {
+    cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-routes-')));
+    fs.writeFileSync(path.join(cwd, 'note.md'), '# hi');
+    fs.mkdirSync(path.join(cwd, 'src'));
+    app = await buildApp(cwd);
+  });
+
+  after(async () => {
+    await app.close();
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  const get = (route: string, p?: string) =>
+    app.inject({
+      method: 'GET',
+      url: `/api/sessions/s1/${route}`,
+      query: p === undefined ? {} : { path: p },
+    });
+
+  it('the tree lists the workspace, directories first', async () => {
+    const res = await get('tree');
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as TreeResponse;
+    assert.deepEqual(
+      body.entries.map((e) => [e.name, e.type]),
+      [
+        ['src', 'directory'],
+        ['note.md', 'file'],
+      ],
+    );
+  });
+
+  it('the tree refuses to walk out of the workspace', async () => {
+    const res = await get('tree', '../..');
+    assert.equal(res.statusCode, 400);
+    assert.equal((res.json() as { error: string }).error, 'Invalid path');
+  });
+
+  it('download and preview require a path and serve the file', async () => {
+    assert.equal((await get('download')).statusCode, 400);
+    assert.equal((await get('preview')).statusCode, 400);
+
+    const dl = await get('download', 'note.md');
+    assert.equal(dl.statusCode, 200);
+    assert.match(dl.headers['content-disposition'] as string, /attachment; filename="note.md"/);
+
+    const pv = await get('preview', 'note.md');
+    assert.equal(pv.statusCode, 200);
+    assert.equal(pv.body, '# hi');
+  });
+
+  it('a directory is not downloadable, and a missing file is 404', async () => {
+    assert.equal((await get('download', 'src')).statusCode, 400);
+    assert.equal((await get('download', 'gone.md')).statusCode, 404);
+  });
+
+  it('a deleted workspace says so instead of returning an empty tree', async () => {
+    const doomed = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-doomed-')));
+    const instance = await buildApp(doomed);
+    fs.rmSync(doomed, { recursive: true, force: true });
+    try {
+      const res = await instance.inject({ method: 'GET', url: '/api/sessions/s1/tree' });
+      assert.equal(res.statusCode, 404);
+      assert.match((res.json() as { error: string }).error, /Workspace folder no longer exists/);
+    } finally {
+      await instance.close();
+    }
   });
 });

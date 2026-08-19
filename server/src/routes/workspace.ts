@@ -1,11 +1,17 @@
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
+import type { Dirent } from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { FileEntry, TreeResponse } from '@casper/shared';
-import type { SessionManager } from '../session/SessionManager.js';
 import { config } from '../config.js';
-import { confineToRoot, realConfineToRoot } from '../util/paths.js';
+import {
+  classifyDirent,
+  replyWith,
+  resolveSessionPath,
+  workspaceNotFound,
+  type SessionCwdSource,
+} from '../util/confinedFile.js';
 import { classifyKind, mimeForExt, looksBinary } from '../util/filekind.js';
 
 /** Maximum file size for downloads (100 MB). */
@@ -48,7 +54,7 @@ function hexdump(buf: Buffer): string {
 
 export function registerWorkspaceRoutes(
   app: FastifyInstance,
-  manager: SessionManager,
+  manager: SessionCwdSource,
 ): void {
   /**
    * GET /api/sessions/:id/tree?path=<relative>&depth=1
@@ -60,96 +66,44 @@ export function registerWorkspaceRoutes(
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
     '/api/sessions/:id/tree',
     async (req, reply) => {
-      let cwd: string;
-      try {
-        cwd = await manager.getSessionCwd(req.params.id);
-      } catch {
-        reply.code(404);
-        return { error: 'Session not found' };
-      }
+      const resolved = await resolveSessionPath(
+        manager,
+        req.params.id,
+        req.query.path,
+        'directory',
+      );
+      if (!resolved.ok) return replyWith(reply, resolved);
+      const { cwd, relative, real: realTarget } = resolved;
 
-      const relative = (req.query.path ?? '').replace(/^\/+/, '');
-      const target = confineToRoot(cwd, relative);
-      if (!target) {
-        reply.code(400);
-        return { error: 'Invalid path' };
-      }
-
-      // A session's workspace can be moved or deleted after it was created (the
-      // cwd is persisted with the session). Report that distinctly, so the tree
-      // explains why it's empty instead of showing a bare "not found".
-      const workspaceMissing = async (): Promise<boolean> => {
-        try {
-          return !(await fs.stat(cwd)).isDirectory();
-        } catch {
-          return true;
-        }
-      };
-      const notFound = async (): Promise<{ error: string }> => {
-        reply.code(404);
-        return (await workspaceMissing())
-          ? { error: `Workspace folder no longer exists: ${cwd}` }
-          : { error: 'Directory not found' };
-      };
-
-      // Symlink-safe: reject if the real target escapes fileRoot.
-      const realTarget = await realConfineToRoot(config.fileRoot, target);
-      if (!realTarget) {
-        return notFound();
-      }
-
-      let dirents: import('node:fs').Dirent<string>[];
+      let dirents: Dirent[];
       try {
         dirents = await fs.readdir(realTarget, { withFileTypes: true, encoding: 'utf8' });
       } catch {
-        return notFound();
+        return replyWith(reply, await workspaceNotFound(cwd));
       }
 
       const entries: FileEntry[] = [];
       for (const d of dirents) {
-        const name = d.name as string;
-        const entryRelative = relative ? `${relative}/${name}` : name;
-        const entryAbsolute = path.join(realTarget, name);
+        const target = await classifyDirent(realTarget, d, [config.fileRoot]);
+        if (!target) continue;
 
-        // Dirent.isDirectory()/isFile() reflect the entry's own type, so a
-        // symlink reports false for both even when it points at a real
-        // directory or file - resolve it first to find out what it actually
-        // is. A symlink whose target escapes fileRoot or no longer exists is
-        // skipped rather than shown.
-        let kind: 'directory' | 'file' | null = d.isDirectory()
-          ? 'directory'
-          : d.isFile()
-            ? 'file'
-            : null;
-        let statTarget = entryAbsolute;
-        if (kind === null && d.isSymbolicLink()) {
-          const real = await realConfineToRoot(config.fileRoot, entryAbsolute);
-          if (!real) continue;
-          try {
-            const st = await fs.stat(real);
-            kind = st.isDirectory() ? 'directory' : st.isFile() ? 'file' : null;
-            statTarget = real;
-          } catch {
-            continue;
-          }
+        const entryRelative = relative ? `${relative}/${d.name}` : d.name;
+        if (target.kind === 'directory') {
+          entries.push({ name: d.name, path: entryRelative, type: 'directory' });
+          continue;
         }
-        if (kind === null) continue;
 
-        if (kind === 'directory') {
-          entries.push({ name, path: entryRelative, type: 'directory' });
-        } else {
-          try {
-            const stat = await fs.stat(statTarget);
-            entries.push({
-              name,
-              path: entryRelative,
-              type: 'file',
-              size: stat.size,
-              modifiedAt: stat.mtime.toISOString(),
-            });
-          } catch {
-            // Skip files we can't stat (e.g. broken symlinks).
-          }
+        try {
+          const stat = await fs.stat(target.real);
+          entries.push({
+            name: d.name,
+            path: entryRelative,
+            type: 'file',
+            size: stat.size,
+            modifiedAt: stat.mtime.toISOString(),
+          });
+        } catch {
+          // Skip files we can't stat (e.g. broken symlinks).
         }
       }
 
@@ -173,45 +127,9 @@ export function registerWorkspaceRoutes(
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
     '/api/sessions/:id/download',
     async (req, reply) => {
-      let cwd: string;
-      try {
-        cwd = await manager.getSessionCwd(req.params.id);
-      } catch {
-        reply.code(404);
-        return { error: 'Session not found' };
-      }
-
-      const relative = (req.query.path ?? '').replace(/^\/+/, '');
-      if (!relative) {
-        reply.code(400);
-        return { error: 'path parameter is required' };
-      }
-
-      const target = confineToRoot(cwd, relative);
-      if (!target) {
-        reply.code(400);
-        return { error: 'Invalid path' };
-      }
-
-      // Symlink-safe: reject if the real target escapes fileRoot.
-      const realTarget = await realConfineToRoot(config.fileRoot, target);
-      if (!realTarget) {
-        reply.code(404);
-        return { error: 'File not found' };
-      }
-
-      let stat: Awaited<ReturnType<typeof fs.stat>>;
-      try {
-        stat = await fs.stat(realTarget);
-      } catch {
-        reply.code(404);
-        return { error: 'File not found' };
-      }
-
-      if (!stat.isFile()) {
-        reply.code(400);
-        return { error: 'Path is not a file' };
-      }
+      const resolved = await resolveSessionPath(manager, req.params.id, req.query.path, 'file');
+      if (!resolved.ok) return replyWith(reply, resolved);
+      const { real: realTarget, stat } = resolved;
 
       if (stat.size > MAX_DOWNLOAD_BYTES) {
         reply.code(413);
@@ -245,45 +163,9 @@ export function registerWorkspaceRoutes(
   app.get<{ Params: { id: string }; Querystring: { path?: string; raw?: string } }>(
     '/api/sessions/:id/preview',
     async (req, reply) => {
-      let cwd: string;
-      try {
-        cwd = await manager.getSessionCwd(req.params.id);
-      } catch {
-        reply.code(404);
-        return { error: 'Session not found' };
-      }
-
-      const relative = (req.query.path ?? '').replace(/^\/+/, '');
-      if (!relative) {
-        reply.code(400);
-        return { error: 'path parameter is required' };
-      }
-
-      const target = confineToRoot(cwd, relative);
-      if (!target) {
-        reply.code(400);
-        return { error: 'Invalid path' };
-      }
-
-      // Symlink-safe: reject if the real target escapes fileRoot.
-      const realTarget = await realConfineToRoot(config.fileRoot, target);
-      if (!realTarget) {
-        reply.code(404);
-        return { error: 'File not found' };
-      }
-
-      let stat: Awaited<ReturnType<typeof fs.stat>>;
-      try {
-        stat = await fs.stat(realTarget);
-      } catch {
-        reply.code(404);
-        return { error: 'File not found' };
-      }
-
-      if (!stat.isFile()) {
-        reply.code(400);
-        return { error: 'Path is not a file' };
-      }
+      const resolved = await resolveSessionPath(manager, req.params.id, req.query.path, 'file');
+      if (!resolved.ok) return replyWith(reply, resolved);
+      const { real: realTarget, stat } = resolved;
 
       const ext = path.extname(realTarget).toLowerCase();
       const mime = mimeForExt(ext);
