@@ -38,7 +38,9 @@ npm run typecheck              # all workspaces
 ## Commits and PRs
 
 - Commit only when asked. Push only when asked: each push is authorised once, not standing permission.
-- Pushes go straight to `main`; this project doesn't use PRs.
+- Work lands through a PR from a branch, not a push to `main`. Keep titles under 70 characters and put
+  the detail in the description: what changed, what was tested, anything left blocked.
+- A stack sets each PR's base to the branch below it, so every diff is one commit.
 - The body says what was wrong and why the change fixes it, wrapped at ~90 columns.
 
 ## Security
