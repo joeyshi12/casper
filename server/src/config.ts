@@ -33,6 +33,7 @@ const KNOWN_KEYS = new Set([
   'token',
   'sessionTtlSeconds',
   'kiroBin',
+  'kiroSessionsDir',
   'defaultCwd',
   'maxLiveSessions',
   'defaultAgent',
@@ -182,8 +183,18 @@ export const config = {
    * or SSH keys.
    */
   fileRoot: path.resolve(setting('CASPER_FILE_ROOT', 'fileRoot', '/')),
-  /** Directory where kiro-cli persists its own session files. */
-  kiroSessionsDir: path.join(home, '.kiro', 'sessions', 'cli'),
+  /**
+   * Directory where kiro-cli persists its own session files. Overridable for the
+   * same reason as every other path here: a non-default kiro home, a container,
+   * or a test that must not write into the real one.
+   */
+  kiroSessionsDir: path.resolve(
+    setting(
+      'CASPER_KIRO_SESSIONS_DIR',
+      'kiroSessionsDir',
+      path.join(home, '.kiro', 'sessions', 'cli'),
+    ),
+  ),
   /** Where casper.db lives. Env-only: it says where data is, and the config
    *  file isn't there. */
   casperDataDir: dataDirPath(),

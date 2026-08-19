@@ -14,7 +14,11 @@ import {
   type KiroSubagentListParams,
   type PromptContentBlock,
   type SessionDetail,
+  type SessionLoadParams,
+  type SessionNewParams,
   type SessionNewResult,
+  type SessionPromptParams,
+  type SessionPromptResult,
   type SessionSummary,
   type SessionUpdateParams,
   type TranscriptItem,
@@ -67,6 +71,37 @@ function resolveCwd(input?: string): string {
   return abs;
 }
 
+/**
+ * The process surface SessionManager drives. Wide because it genuinely uses all
+ * of it, not because KiroProcess is shallow - and a seam this shape is what lets
+ * eviction, capacity and session-id adoption be tested without spawning anything.
+ */
+export interface ManagedProcess {
+  on(event: 'notification', cb: (n: JsonRpcNotification) => void): unknown;
+  on(event: 'exit', cb: (code: number | null, signal: string | null) => void): unknown;
+  initialize(): Promise<unknown>;
+  newSession(params: SessionNewParams): Promise<SessionNewResult>;
+  loadSession(params: SessionLoadParams): Promise<SessionNewResult>;
+  prompt(params: SessionPromptParams): Promise<SessionPromptResult>;
+  stderrTail(): string;
+  cancel(sessionId: string): void;
+  setMode(sessionId: string, modeId: string): Promise<unknown>;
+  setModel(sessionId: string, modelId: string): Promise<unknown>;
+  execCommand(sessionId: string, command: string, args?: string): Promise<unknown>;
+  dispose(): void;
+  disposeAndWait(timeoutMs?: number): Promise<void>;
+}
+
+export type SpawnProcess = (
+  opts: { cwd: string; agent?: string; model?: string },
+  log: Logger,
+) => ManagedProcess;
+
+export interface SessionManagerOptions {
+  /** Substitute the child process. Defaults to a real kiro-cli. */
+  spawn?: SpawnProcess;
+}
+
 // A session's server-side state. The store, turn state, and metadata exist as
 // soon as it's opened; the kiro-cli child (`proc`) is spawned lazily, only when
 // an action needs it. Viewing a session never spawns a process.
@@ -88,9 +123,9 @@ export class Session {
   // True once kiro has created or loaded this session id.
   private everLive = false;
 
-  proc?: KiroProcess;
+  proc?: ManagedProcess;
   // In-flight spawn, so concurrent actions share one process.
-  spawning?: Promise<KiroProcess>;
+  spawning?: Promise<ManagedProcess>;
   // True while kiro is replaying history during session/load. The transcript is
   // already hydrated from disk, so replayed notifications must not be appended
   // to the live store (doing so floods the chat with duplicate tool calls).
@@ -177,9 +212,11 @@ export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly log: Logger;
   private readonly store = new SessionStore();
+  private readonly spawnProcess: SpawnProcess;
 
-  constructor(log: Logger) {
+  constructor(log: Logger, opts: SessionManagerOptions = {}) {
     this.log = log;
+    this.spawnProcess = opts.spawn ?? ((o, l) => new KiroProcess(o, l));
   }
 
   /**
@@ -301,7 +338,7 @@ export class SessionManager {
   // Lazy process spawning
   // -------------------------------------------------------------------------
 
-  private wire(s: Session, proc: KiroProcess): void {
+  private wire(s: Session, proc: ManagedProcess): void {
     proc.on('notification', (n: JsonRpcNotification) => {
       // Drop kiro's history replay during session/load: the transcript is
       // already hydrated from disk, so appending these would duplicate every
@@ -323,13 +360,13 @@ export class SessionManager {
   }
 
   /** Get (or spawn + initialize + create/load) the kiro process for a session. */
-  private async ensureProc(s: Session): Promise<KiroProcess> {
+  private async ensureProc(s: Session): Promise<ManagedProcess> {
     if (s.proc) return s.proc;
     if (s.spawning) return s.spawning;
 
     s.spawning = (async () => {
       await this.ensureCapacity();
-      const proc = new KiroProcess(
+      const proc = this.spawnProcess(
         { cwd: s.cwd, agent: s.agentId, model: s.modelId },
         this.log,
       );
@@ -516,61 +553,92 @@ export class SessionManager {
   // Listing / detail - never spawns.
   // -------------------------------------------------------------------------
 
+  /**
+   * The one place a SessionSummary is assembled. kiro's file and Casper's live
+   * state each hold part of the truth, so every read path - list, detail, and a
+   * freshly created session - projects them through here rather than picking a
+   * precedence per field on its own. Mirrors resolveSessionTitle, which already
+   * owns the title half of the same decision.
+   *
+   * `persisted` is kiro's own summary, absent for a session with no file yet.
+   * `live` is the in-memory session, absent for a dormant one. The overloads
+   * require one of them, so the assertions below cannot fire.
+   */
+  private summaryOf(
+    live: Session,
+    persisted: SessionSummary | undefined,
+    transcript?: TranscriptItem[],
+  ): SessionSummary;
+  private summaryOf(
+    live: undefined,
+    persisted: SessionSummary,
+    transcript?: TranscriptItem[],
+  ): SessionSummary;
+  private summaryOf(
+    live: Session | undefined,
+    persisted: SessionSummary | undefined,
+    transcript?: TranscriptItem[],
+  ): SessionSummary {
+    const sessionId = live?.sessionId ?? persisted!.sessionId;
+    const snap = live?.turnState.get();
+    // A live session's cwd already carries the override, applied in ensureOpen.
+    const cwd = live?.cwd ?? this.store.getCwd(sessionId) ?? persisted!.cwd;
+
+    return {
+      sessionId,
+      title: this.titleOf(sessionId, {
+        // kiro's file is what kiro called it; the live copy is only a cache of it.
+        kiroTitle: persisted?.title || live?.title,
+        firstPrompt: transcript && firstPromptText(transcript),
+        cwd,
+      }),
+      cwd,
+      createdAt: persisted?.createdAt ?? live!.createdAt,
+      // kiro's file and our own activity move separately.
+      updatedAt: live ? newerOf(persisted?.updatedAt, live.updatedAt) : persisted!.updatedAt,
+      liveness: live?.proc ? 'live' : 'dormant',
+      agentId: live?.agentId ?? persisted?.agentId,
+      modelId: live?.modelId ?? persisted?.modelId,
+      running: live?.running ?? false,
+      // A dormant session's totals live in kiro's file; a live one's snapshot
+      // starts at zero until the first turn reports, so fall back to the file.
+      creditsSpent: snap?.creditsSpent || persisted?.creditsSpent,
+      contextUsagePercentage:
+        snap?.contextUsagePercentage || persisted?.contextUsagePercentage,
+    };
+  }
+
   async listSessions(): Promise<SessionSummary[]> {
     const persisted = await listPersistedSessions(this.log);
+    const files = new Map(persisted.map((p) => [p.sessionId, p]));
     const byId = new Map<string, SessionSummary>();
     for (const p of persisted) {
-      byId.set(p.sessionId, {
-        ...p,
-        title: this.titleOf(p.sessionId, {
-          kiroTitle: p.title,
-          cwd: this.store.getCwd(p.sessionId) ?? p.cwd,
-        }),
-        cwd: this.store.getCwd(p.sessionId) ?? p.cwd,
-      });
+      byId.set(p.sessionId, this.summaryOf(undefined, p));
     }
     for (const s of this.sessions.values()) {
-      const snap = s.turnState.get();
-      const base = byId.get(s.sessionId);
-      if (isGhost(s, base !== undefined)) {
+      if (isGhost(s, files.has(s.sessionId))) {
         this.evict(s.sessionId);
         continue;
       }
-      byId.set(s.sessionId, {
-        sessionId: s.sessionId,
-        title: this.titleOf(s.sessionId, { kiroTitle: base?.title, cwd: s.cwd }),
-        cwd: s.cwd,
-        createdAt: base?.createdAt ?? s.createdAt,
-        updatedAt: newerOf(base?.updatedAt, s.updatedAt),
-        liveness: s.proc ? 'live' : 'dormant',
-        agentId: s.agentId ?? base?.agentId,
-        modelId: s.modelId ?? base?.modelId,
-        running: s.running,
-        creditsSpent: snap.creditsSpent || base?.creditsSpent,
-        contextUsagePercentage:
-          snap.contextUsagePercentage || base?.contextUsagePercentage,
-      });
+      byId.set(s.sessionId, this.summaryOf(s, files.get(s.sessionId)));
     }
     return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
   async getDetail(sessionId: string): Promise<SessionDetail> {
-    const transcript = await hydrateTranscript(sessionId);
-    const s = this.sessions.get(sessionId);
-    if (s) return this.buildDetail(s, transcript);
+    // Both reads in parallel: a live session needs the file too, so its summary
+    // gets the same fallbacks the list gives it and the two cannot disagree.
+    const [transcript, persisted] = await Promise.all([
+      hydrateTranscript(sessionId),
+      readPersistedSession(sessionId),
+    ]);
 
-    const persisted = await readPersistedSession(sessionId);
+    const s = this.sessions.get(sessionId);
+    if (s) return this.buildDetail(s, transcript, persisted ?? undefined);
+
     if (!persisted) throw new Error(`Unknown session: ${sessionId}`);
     return {
-      summary: {
-        ...persisted,
-        title: this.titleOf(sessionId, {
-          kiroTitle: persisted.title,
-          firstPrompt: firstPromptText(transcript),
-          cwd: this.store.getCwd(sessionId) ?? persisted.cwd,
-        }),
-        cwd: this.store.getCwd(sessionId) ?? persisted.cwd,
-      },
+      summary: this.summaryOf(undefined, persisted, transcript),
       modes: [],
       currentModeId: persisted.agentId,
       transcript: transcript.slice(-TRANSCRIPT_PAGE_SIZE),
@@ -603,26 +671,11 @@ export class SessionManager {
   private buildDetail(
     s: Session,
     transcript: SessionDetail['transcript'],
+    persisted?: SessionSummary,
   ): SessionDetail {
     const snap = s.turnState.get();
     return {
-      summary: {
-        sessionId: s.sessionId,
-        title: this.titleOf(s.sessionId, {
-          kiroTitle: s.title,
-          firstPrompt: firstPromptText(transcript),
-          cwd: s.cwd,
-        }),
-        cwd: s.cwd,
-        createdAt: s.createdAt,
-        updatedAt: s.updatedAt,
-        liveness: s.proc ? 'live' : 'dormant',
-        agentId: s.agentId,
-        modelId: s.modelId,
-        running: s.running,
-        creditsSpent: snap.creditsSpent,
-        contextUsagePercentage: snap.contextUsagePercentage,
-      },
+      summary: this.summaryOf(s, persisted, transcript),
       modes: s.availableModes,
       currentModeId: s.currentModeId,
       // Only the tail is sent on load; replayHead/title use the full transcript.
