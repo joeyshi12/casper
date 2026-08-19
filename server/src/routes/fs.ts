@@ -166,8 +166,11 @@ export function registerFsRoutes(app: FastifyInstance): void {
         return { error: 'Image too large' };
       }
 
+      // no-cache, not max-age: the file can be rewritten at any time, so the
+      // browser must revalidate rather than trust a freshness window. Matches
+      // the workspace preview policy; unchanged files still cost only a 304.
       const etag = `W/"${stat.size}-${stat.mtimeMs}"`;
-      reply.header('Cache-Control', 'private, max-age=3600');
+      reply.header('Cache-Control', 'private, no-cache');
       reply.header('ETag', etag);
       reply.header('Last-Modified', stat.mtime.toUTCString());
 
