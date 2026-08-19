@@ -5,7 +5,8 @@ import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM, requestInterceptor } from 'jsdom';
 import { buildWidgetShell, WIDGET_CDNS } from '../web/src/components/chat/widgetShell.js';
-import { sendWidgetPrompt, setPromptSender } from '../web/src/state/promptBridge.js';
+import { sendWidgetPrompt } from '../web/src/state/sessionController.js';
+import { useStore } from '../web/src/state/store.js';
 
 /** The shell in a real DOM, driven over postMessage exactly as WidgetBlock drives it. */
 function mountWidget() {
@@ -54,19 +55,23 @@ describe('widget shell', () => {
 });
 
 describe('widget prompt bridge', () => {
-  it('does nothing when no session is listening', () => {
-    setPromptSender(null);
+  it('does nothing when there is no session to send into', () => {
+    useStore.setState({ activeId: null, pending: [] });
     assert.equal(sendWidgetPrompt('hello'), false);
   });
 
   it('forwards trimmed text and caps the length', () => {
-    const seen: string[] = [];
-    setPromptSender((t) => seen.push(t));
+    // A widget only exists inside a session, and the bubble it produces is the
+    // observable effect of the bridge.
+    useStore.setState({ activeId: 's1', pending: [] });
     assert.equal(sendWidgetPrompt('  hi  '), true);
     assert.equal(sendWidgetPrompt('x'.repeat(5000)), true);
     assert.equal(sendWidgetPrompt('   '), false);
-    setPromptSender(null);
-    assert.deepEqual(seen, ['hi', 'x'.repeat(4000)]);
+    assert.deepEqual(
+      useStore.getState().pending.map((p) => p.text),
+      ['hi', 'x'.repeat(4000)],
+    );
+    useStore.setState({ activeId: null, pending: [] });
   });
 });
 
