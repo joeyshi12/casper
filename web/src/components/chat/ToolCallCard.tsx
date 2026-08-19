@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode, type TransitionEvent } from 'react';
+import { memo, useEffect, useState, type ReactNode, type TransitionEvent } from 'react';
 import type { ToolCallView } from '../../state/store.js';
 import { highlightToHtml } from '../../util/highlighter.js';
 import { lineDiff, type DiffLine } from '../../util/diff.js';
@@ -109,7 +109,7 @@ const imageUrl = (absolutePath: string) =>
  * input/output view. Collapsed by default (failures start open) with an
  * informative header so the transcript stays compact.
  */
-export function ToolCallCard({
+function ToolCallCardBody({
   tool,
   arriving = false,
 }: {
@@ -525,3 +525,10 @@ function DiffView({ diff }: { diff: DiffLine[] }) {
     </div>
   );
 }
+
+/**
+ * Memoized: the transcript re-renders on every streamed chunk, and a card's body work is
+ * not cheap - classification, JSON dumps, and a line diff for writes. The store replaces
+ * only the tool object that changed, so the other cards' props stay identical.
+ */
+export const ToolCallCard = memo(ToolCallCardBody);
