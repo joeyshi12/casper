@@ -327,11 +327,15 @@ export function registerWorkspaceRoutes(
       // renders them directly (in an <img> or the built-in PDF viewer).
       if (isImage || isPdf) {
         // Transcript images re-render on every reload and every reconnect
-        // replay, so without this the browser refetches each one in full every
-        // time. Matches the /api/fs/image cache policy. The validator is
+        // replay, so without a validator the browser refetches each one in full
+        // every time. Matches the /api/fs/image cache policy. The validator is
         // size+mtime rather than a content hash to avoid reading the file.
+        //
+        // no-cache, not max-age: workspace files are mutable, and a freshness
+        // window serves a stale body without ever asking. Revalidating every
+        // time still costs only an empty 304 when nothing changed.
         const etag = `W/"${stat.size}-${stat.mtimeMs}"`;
-        reply.header('Cache-Control', 'private, max-age=3600');
+        reply.header('Cache-Control', 'private, no-cache');
         reply.header('ETag', etag);
         reply.header('Last-Modified', stat.mtime.toUTCString());
 
