@@ -13,6 +13,12 @@ import type {
 } from '@casper/shared';
 import { emptyObservabilitySnapshot } from '@casper/shared';
 import { useStore } from '../web/src/state/store.js';
+import {
+  SessionController,
+  type CreateSocket,
+  type SessionApi,
+} from '../web/src/state/sessionController.js';
+import type { SessionSocketHandlers } from '../web/src/api/SessionSocket.js';
 import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
 import { lineDiff } from '../web/src/util/diff.js';
 import { matchPath } from 'react-router';
@@ -42,7 +48,11 @@ import {
   imageAttachmentPaths,
   stripAttachmentsLine,
 } from '@casper/shared';
-import { isUserScrollUp } from '../web/src/util/followScroll.js';
+import {
+  TranscriptViewport,
+  type ViewportContent,
+  type ViewportFlags,
+} from '../web/src/util/transcriptViewport.js';
 import {
   CONNECT_TIMEOUT_MS,
   PING_AFTER_MS,
@@ -475,43 +485,320 @@ describe('choice call parsing', () => {
   });
 });
 
-describe('follow-bottom: a gesture versus a reflow', () => {
-  // The range is unchanged, so the whole drop is the user's.
-  it('a real scroll up stops following', () => {
-    assert.equal(
-      isUserScrollUp(500, 900, 1000, 1000),
-      true,
-    );
+describe('transcript viewport', () => {
+  /** A scroll container as three numbers, which is all the viewport reads. */
+  const fakeElement = (scrollHeight: number, clientHeight: number, scrollTop = 0) => ({
+    scrollTop,
+    scrollHeight,
+    clientHeight,
   });
 
-  // The bug: a thought block collapsing shrank the content, the browser clamped
-  // scrollTop, and reading that as a scroll up stopped following for the whole turn.
-  it('clamping after the content shrinks does not', () => {
+  /** Animation frames stepped by hand, so following is observable frame by frame. */
+  const manualFrames = () => {
+    const queue: (() => void)[] = [];
+    return {
+      port: {
+        request: (cb: () => void) => {
+          queue.push(cb);
+          return queue.length;
+        },
+        cancel: () => {},
+      },
+      pending: () => queue.length,
+      step: () => queue.shift()?.(),
+    };
+  };
+
+  const build = (
+    el: ReturnType<typeof fakeElement>,
+    over: { pages?: TranscriptItem[][]; reducedMotion?: boolean } = {},
+  ) => {
+    const frames = manualFrames();
+    const requests: Array<{ sessionId: string; offset: number; limit: number }> = [];
+    const prepended: TranscriptItem[][] = [];
+    let resolvePage: ((items: TranscriptItem[]) => void) | undefined;
+    let flags: ViewportFlags = { loadingOlder: false, showScrollButton: false };
+    let round = 0;
+
+    const viewport = new TranscriptViewport({
+      element: () => el,
+      fetchPage: (sessionId, offset, limit) => {
+        requests.push({ sessionId, offset, limit });
+        const canned = over.pages?.[round++];
+        if (canned) return Promise.resolve(canned);
+        return new Promise<TranscriptItem[]>((r) => (resolvePage = r));
+      },
+      prepend: (items) => prepended.push(items),
+      onFlags: (f) => {
+        flags = f;
+      },
+      frames: frames.port,
+      reducedMotion: () => over.reducedMotion ?? false,
+    });
+
+    return {
+      viewport,
+      frames,
+      requests,
+      prepended,
+      flags: () => flags,
+      resolvePage: (items: TranscriptItem[]) => resolvePage?.(items),
+    };
+  };
+
+  const content = (over: Partial<ViewportContent> = {}): ViewportContent => ({
+    sessionId: 's1',
+    itemCount: 10,
+    pendingCount: 0,
+    remainingOlder: 0,
+    ...over,
+  });
+
+  const page = (n: number): TranscriptItem[] =>
+    Array.from(
+      { length: n },
+      (_, i) =>
+        ({ type: 'message', message: { id: `old-${i}`, role: 'user', text: 'x' } }) as TranscriptItem,
+    );
+
+  /** Run any in-flight follow loop to completion, so the next arm is observable. */
+  const settle = (h: ReturnType<typeof build>) => {
+    for (let i = 0; i < 200 && h.frames.pending() > 0; i++) h.frames.step();
+  };
+
+  /** Following is only visible through its effect: it asks for a frame. */
+  const isFollowing = (
+    h: ReturnType<typeof build>,
+    snap: ViewportContent = content({ itemCount: 11 }),
+  ) => {
+    settle(h);
+    h.viewport.onContent(snap);
+    const armed = h.frames.pending() > 0;
+    settle(h);
+    return armed;
+  };
+
+  describe('first content', () => {
+    it('jumps to the latest message without turning follow on', () => {
+      const el = fakeElement(2000, 600);
+      const h = build(el);
+      h.viewport.onContent(content());
+
+      assert.equal(el.scrollTop, 1400, 'sits at the bottom');
+      assert.equal(h.flags().showScrollButton, false);
+      assert.equal(isFollowing(h), false, 'opening a session must not start following');
+    });
+
+    it('does nothing until there is something to show', () => {
+      const el = fakeElement(600, 600);
+      const h = build(el);
+      h.viewport.onContent(content({ itemCount: 0 }));
+      assert.equal(el.scrollTop, 0);
+    });
+  });
+
+  describe('a gesture versus a reflow', () => {
+    /**
+     * Put the view at `from` with follow on, then move it to `to`. `maxBefore` and
+     * `maxAfter` are the scroll range either side, so a shrink can be told from a
+     * gesture. No frame is stepped in between, so nothing moves but the gesture.
+     */
+    const scrolled = (from: number, to: number, maxBefore: number, maxAfter: number) => {
+      const el = fakeElement(maxBefore + 600, 600);
+      const h = build(el);
+      h.viewport.onContent(content()); // opens at the bottom, follow off
+
+      // Seed the previous position while follow is off, so seeding it is not read
+      // as the scroll under test.
+      el.scrollTop = from;
+      h.viewport.onScroll();
+
+      // A fresh send re-arms follow without touching scrollTop.
+      h.viewport.onContent(content({ pendingCount: 1 }));
+
+      el.scrollTop = to;
+      el.scrollHeight = maxAfter + 600;
+      h.viewport.onScroll();
+      return h;
+    };
+
+    it('a real scroll up stops following', () => {
+      assert.equal(isFollowing(scrolled(900, 500, 1000, 1000)), false);
+    });
+
+    // The bug: a thought block collapsing shrank the content, the browser clamped
+    // scrollTop, and reading that as a scroll up stopped following for the turn.
+    it('clamping after the content shrinks does not', () => {
+      assert.equal(isFollowing(scrolled(900, 600, 900, 600)), true);
+    });
+
+    it('a scroll up during a shrink still counts', () => {
+      assert.equal(isFollowing(scrolled(900, 400, 900, 600)), false);
+    });
+
+    it('ignores sub-pixel jitter', () => {
+      assert.equal(isFollowing(scrolled(900, 897, 1000, 1000)), true);
+    });
+
+    it('scrolling down never stops following', () => {
+      assert.equal(isFollowing(scrolled(900, 950, 1000, 1000)), true);
+    });
+  });
+
+  describe('following', () => {
+    it('resumes when the user sends, and eases toward the bottom', () => {
+      const el = fakeElement(2000, 600);
+      const h = build(el);
+      h.viewport.onContent(content());
+      el.scrollHeight = 4000; // a reply streamed in
+
+      h.viewport.onContent(content({ pendingCount: 1 }));
+      assert.equal(h.frames.pending(), 1, 'a fresh send re-arms follow');
+      const before = el.scrollTop;
+      h.frames.step();
+      assert.ok(el.scrollTop > before, 'moved toward the bottom');
+      assert.ok(el.scrollTop < 3400, 'eased rather than jumped');
+    });
+
+    it('snaps in one frame when reduced motion is asked for', () => {
+      const el = fakeElement(2000, 600);
+      const h = build(el, { reducedMotion: true });
+      h.viewport.onContent(content());
+      el.scrollHeight = 4000;
+
+      h.viewport.onContent(content({ pendingCount: 1 }));
+      h.frames.step();
+      assert.equal(el.scrollTop, 3400, 'straight to the bottom, no animation');
+    });
+
+    it('the jump-to-latest button follows and hides itself', () => {
+      const el = fakeElement(4000, 600, 0);
+      const h = build(el);
+      h.viewport.onContent(content()); // opens at the bottom
+      el.scrollTop = 0; // the user went back up through the history
+      h.viewport.onScroll();
+      assert.equal(h.flags().showScrollButton, true, 'far from the bottom');
+
+      h.viewport.jumpToLatest();
+      assert.equal(h.flags().showScrollButton, false);
+      assert.equal(isFollowing(h), true);
+      assert.equal(el.scrollTop, 3400, 'and it ends up at the bottom');
+    });
+  });
+
+  describe('older pages', () => {
+    it('anchors the view across a prepend rather than letting it jump', () => {
+      const el = fakeElement(2000, 600, 100);
+      const h = build(el, { pages: [page(80)] });
+      h.viewport.onContent(content({ remainingOlder: 200 }));
+
+      el.scrollTop = 100; // near the top
+      h.viewport.onScroll();
+      assert.equal(h.flags().loadingOlder, true);
+      assert.deepEqual(h.requests, [{ sessionId: 's1', offset: 120, limit: 80 }]);
+
+      return Promise.resolve().then(() => {
+        assert.equal(h.prepended.length, 1, 'the page reached the store');
+        // React has rendered the prepend, so the container is taller.
+        el.scrollHeight = 4000;
+        h.viewport.restoreAnchor();
+        // Distance from the bottom was 1900 before; it must still be 1900.
+        assert.equal(el.scrollTop, 2100);
+        assert.equal(el.scrollHeight - el.scrollTop, 1900);
+        assert.equal(h.flags().loadingOlder, false);
+      });
+    });
+
+    it('walks the window down to index 0 and stops', async () => {
+      const el = fakeElement(2000, 600, 100);
+      const h = build(el, { pages: [page(80), page(80), page(40)] });
+      let remaining = 200;
+
+      for (const expected of [120, 40, 0]) {
+        h.viewport.onContent(content({ remainingOlder: remaining }));
+        el.scrollTop = 100;
+        h.viewport.onScroll();
+        await Promise.resolve();
+        assert.equal(h.requests.at(-1)?.offset, expected);
+        remaining -= h.requests.at(-1)!.limit;
+        el.scrollHeight += 1000;
+        h.viewport.restoreAnchor();
+      }
+      assert.equal(remaining, 0);
+
+      // Nothing older left: scrolling to the top asks for no more pages.
+      h.viewport.onContent(content({ remainingOlder: 0 }));
+      el.scrollTop = 0;
+      h.viewport.onScroll();
+      assert.equal(h.requests.length, 3);
+    });
+
+    it('asks for one page at a time', async () => {
+      const el = fakeElement(2000, 600, 100);
+      const h = build(el);
+      h.viewport.onContent(content({ remainingOlder: 200 }));
+
+      el.scrollTop = 100;
+      h.viewport.onScroll();
+      h.viewport.onScroll();
+      h.viewport.onScroll();
+      assert.equal(h.requests.length, 1, 'a fetch in flight blocks another');
+      h.resolvePage(page(80));
+      await Promise.resolve();
+      assert.equal(h.prepended.length, 1);
+    });
+
+    // The page belongs to a transcript that is no longer on screen.
+    it('discards a page that arrives after the session changed', async () => {
+      const el = fakeElement(2000, 600, 100);
+      const h = build(el);
+      h.viewport.onContent(content({ sessionId: 's1', remainingOlder: 200 }));
+      el.scrollTop = 100;
+      h.viewport.onScroll();
+      assert.deepEqual(h.requests, [{ sessionId: 's1', offset: 120, limit: 80 }]);
+
+      h.viewport.onContent(content({ sessionId: 's2', remainingOlder: 0 }));
+      h.resolvePage(page(80));
+      await Promise.resolve();
+
+      assert.deepEqual(h.prepended, [], "the old session's page must not be prepended");
+      assert.equal(h.flags().loadingOlder, false);
+
+      // And the anchor was dropped, so a later restore cannot move the new view.
+      const at = el.scrollTop;
+      h.viewport.restoreAnchor();
+      assert.equal(el.scrollTop, at);
+    });
+
+    it('an empty page ends the walk without moving the view', async () => {
+      const el = fakeElement(2000, 600, 100);
+      const h = build(el, { pages: [[]] });
+      h.viewport.onContent(content({ remainingOlder: 200 }));
+      el.scrollTop = 100;
+      h.viewport.onScroll();
+      await Promise.resolve();
+
+      assert.deepEqual(h.prepended, []);
+      assert.equal(h.flags().loadingOlder, false);
+      h.viewport.restoreAnchor();
+      assert.equal(el.scrollTop, 100);
+    });
+  });
+
+  it('a new session starts with follow off and nothing in flight', () => {
+    const el = fakeElement(2000, 600);
+    const h = build(el);
+    h.viewport.onContent(content());
+    h.viewport.jumpToLatest();
+    assert.equal(isFollowing(h), true);
+
+    h.viewport.reset();
+    assert.equal(h.flags().loadingOlder, false);
+    assert.equal(h.flags().showScrollButton, false);
     assert.equal(
-      isUserScrollUp(600, 900, 600, 900),
+      isFollowing(h, content({ sessionId: 's2', itemCount: 0 })),
       false,
-    );
-  });
-
-  // The range lost 300 but scrollTop fell 500, so 200 of it was the user.
-  it('a scroll up during a shrink still counts', () => {
-    assert.equal(
-      isUserScrollUp(400, 900, 600, 900),
-      true,
-    );
-  });
-
-  it('ignores sub-pixel jitter', () => {
-    assert.equal(
-      isUserScrollUp(897, 900, 1000, 1000),
-      false,
-    );
-  });
-
-  it('scrolling down never stops following', () => {
-    assert.equal(
-      isUserScrollUp(950, 900, 1000, 1000),
-      false,
+      'switching sessions must not inherit follow',
     );
   });
 });
@@ -929,5 +1216,405 @@ describe('choice outcome', () => {
       picked: null,
       superseded: true,
     });
+  });
+});
+
+// None of this was reachable before the lifecycle moved out of Shell: it lived in
+// a component the test runner cannot import, behind refs nothing could observe.
+describe('session controller', () => {
+  const detailFor = (id: string, head = 0): SessionDetail =>
+    ({
+      summary: { sessionId: id, title: `title-${id}`, updatedAt: '', modelId: 'auto' },
+      transcript: [],
+      transcriptTotal: 0,
+      head,
+      modes: [],
+      currentModeId: 'casper',
+      observability: emptyObservabilitySnapshot(),
+    }) as unknown as SessionDetail;
+
+  /** Records what the controller did to its socket, and lets a test answer back. */
+  const socketDouble = () => {
+    const calls: string[] = [];
+    let handlers: SessionSocketHandlers | null = null;
+    let deliverable = true;
+    return {
+      calls,
+      handlers: () => {
+        assert.ok(handlers, 'no socket was created');
+        return handlers;
+      },
+      refuseDelivery: () => {
+        deliverable = false;
+      },
+      create: ((id: string, h: SessionSocketHandlers, cursor: number) => {
+        handlers = h;
+        calls.push(`create:${id}@${cursor}`);
+        return {
+          connect: () => calls.push('connect'),
+          close: () => calls.push('close'),
+          reset: (head: number) => calls.push(`reset:${head}`),
+          prompt: () => {
+            calls.push('prompt');
+            return deliverable;
+          },
+          cancel: () => calls.push('cancel'),
+          setMode: (m: string) => calls.push(`setMode:${m}`),
+          setModel: (m: string) => calls.push(`setModel:${m}`),
+          watchPaths: (p: string[]) => calls.push(`watch:${p.join(',')}`),
+          execCommand: (c: string) => calls.push(`exec:${c}`),
+        };
+      }) as CreateSocket,
+    };
+  };
+
+  const apiDouble = (over: Partial<SessionApi> = {}) => {
+    const calls: string[] = [];
+    const base: SessionApi = {
+      listSessions: async () => {
+        calls.push('listSessions');
+        return { sessions: [] } as unknown as Awaited<ReturnType<SessionApi['listSessions']>>;
+      },
+      getSession: async (id) => {
+        calls.push(`getSession:${id}`);
+        return detailFor(id);
+      },
+      createSession: async () => {
+        calls.push('createSession');
+        return detailFor('created-1');
+      },
+      deleteSession: async (id) => {
+        calls.push(`deleteSession:${id}`);
+      },
+      renameSession: async (id, title) => {
+        calls.push(`renameSession:${id}:${title}`);
+      },
+      models: async () => {
+        calls.push('models');
+        return { models: [] } as unknown as Awaited<ReturnType<SessionApi['models']>>;
+      },
+      agents: async () => {
+        calls.push('agents');
+        return { agents: [], defaultAgentId: 'casper' } as unknown as Awaited<
+          ReturnType<SessionApi['agents']>
+        >;
+      },
+    };
+    return { calls, api: { ...base, ...over } };
+  };
+
+  const navDouble = () => {
+    const to: string[] = [];
+    const locked: true[] = [];
+    return {
+      to,
+      locked,
+      host: {
+        navigate: (path: string, opts?: { replace?: boolean }) =>
+          to.push(opts?.replace ? `${path} (replace)` : path),
+        onLock: () => locked.push(true),
+      },
+    };
+  };
+
+  const build = (over: { api?: Partial<SessionApi> } = {}) => {
+    const socket = socketDouble();
+    const rest = apiDouble(over.api);
+    const nav = navDouble();
+    const controller = new SessionController({
+      api: rest.api,
+      createSocket: socket.create,
+      listCoalesceMs: 0,
+      turnEndedRefreshMs: 1,
+      compactTimeoutMs: 5,
+    });
+    controller.attach(nav.host);
+    return { controller, socket, rest, nav };
+  };
+
+  const settle = () => new Promise((r) => setTimeout(r, 5));
+
+  /**
+   * Wait for something a real timer will bring about. A fixed sleep raced two chained
+   * timers - the turn-ended delay, then the list coalesce - and lost on a loaded CI box.
+   */
+  const waitFor = async (what: string, ok: () => boolean, timeoutMs = 2000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (ok()) return;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    assert.fail(`timed out waiting for ${what}`);
+  };
+
+  beforeEach(() => {
+    useStore.getState().clearActive();
+    useStore.setState({ sessions: [], connStatus: 'closed', createError: null });
+  });
+
+  it('opens a session: fetches it, seeds the store, connects at its head', async () => {
+    const { controller, socket } = build();
+    await controller.openSession('s1');
+
+    assert.equal(useStore.getState().activeId, 's1');
+    assert.equal(useStore.getState().loadingSessionId, null);
+    assert.deepEqual(socket.calls, ['create:s1@0', 'connect']);
+  });
+
+  it('uses the detail it already has, with no fetch and no loading flash', async () => {
+    const { controller, socket, rest } = build();
+    await controller.openSession('s9', detailFor('s9', 4));
+
+    assert.deepEqual(rest.calls, [], 'an adopted detail must not be refetched');
+    assert.deepEqual(socket.calls, ['create:s9@4', 'connect']);
+  });
+
+  // The bug this guards: switching away mid-fetch used to let the abandoned
+  // session's detail land and overwrite the one the user moved to.
+  it('drops a detail that arrives after the user moved on', async () => {
+    let releaseFirst: ((d: SessionDetail) => void) | undefined;
+    const { controller } = build({
+      api: {
+        getSession: async (id) =>
+          id === 'slow'
+            ? new Promise<SessionDetail>((r) => (releaseFirst = r))
+            : detailFor(id),
+      },
+    });
+
+    const first = controller.openSession('slow');
+    await controller.openSession('quick');
+    releaseFirst?.(detailFor('slow'));
+    await first;
+
+    assert.equal(useStore.getState().activeId, 'quick');
+  });
+
+  it('a session that will not open sends the user home rather than stranding them', async () => {
+    const { controller, nav } = build({
+      api: {
+        getSession: async () => {
+          throw new Error('gone');
+        },
+      },
+    });
+    await controller.openSession('missing');
+
+    assert.equal(useStore.getState().connStatus, 'closed');
+    assert.equal(useStore.getState().loadingSessionId, null);
+    assert.deepEqual(nav.to, ['/ (replace)']);
+  });
+
+  it('creating a session claims its route, so syncRoute leaves it alone', async () => {
+    const { controller, nav, rest, socket } = build();
+    assert.equal(await controller.createSession({}), true);
+    await settle();
+
+    assert.deepEqual(nav.to, ['/sessions/created-1']);
+    assert.equal(useStore.getState().activeId, 'created-1');
+    const fetches = rest.calls.filter((c) => c.startsWith('getSession'));
+    assert.deepEqual(fetches, [], 'the created detail is adopted, not refetched');
+
+    // The route arriving must not reopen what is already open.
+    const before = socket.calls.length;
+    controller.syncRoute('created-1', false);
+    await settle();
+    assert.equal(socket.calls.length, before, 'no second socket for the same session');
+  });
+
+  it("a draft's first prompt waits for the socket, then goes", async () => {
+    const { controller, socket } = build();
+    controller.syncRoute(null, true);
+    await settle();
+
+    controller.send([{ type: 'text', text: 'first words' }]);
+    await settle();
+
+    assert.equal(useStore.getState().pending.length, 1);
+    assert.equal(useStore.getState().pending[0]?.text, 'first words');
+    assert.ok(!socket.calls.includes('prompt'), 'nothing sent before the socket is up');
+
+    socket.handlers().onStatus('connected');
+    assert.ok(socket.calls.includes('prompt'), 'the held prompt goes once connected');
+    assert.equal(useStore.getState().pending[0]?.status, 'sending');
+  });
+
+  it('a create that fails explains itself on the bubble and the pane', async () => {
+    const { controller } = build({
+      api: {
+        createSession: async () => {
+          throw new Error('working directory is a file');
+        },
+      },
+    });
+    controller.syncRoute(null, true);
+    controller.send([{ type: 'text', text: 'hello' }]);
+    await settle();
+
+    assert.match(useStore.getState().createError ?? '', /working directory is a file/);
+    assert.equal(useStore.getState().pending[0]?.status, 'failed');
+    assert.match(useStore.getState().pending[0]?.error ?? '', /Could not start the session/);
+    assert.equal(useStore.getState().connStatus, 'closed');
+  });
+
+  it('a send that never left the browser says so on the bubble', async () => {
+    const { controller, socket } = build();
+    await controller.openSession('s1');
+    socket.refuseDelivery();
+
+    controller.send([{ type: 'text', text: 'into the void' }]);
+    const pending = useStore.getState().pending[0];
+    assert.equal(pending?.status, 'failed');
+    assert.match(pending?.error ?? '', /Not connected/);
+  });
+
+  it("a rejected prompt carries the server's reason to the bubble", async () => {
+    const { controller, socket } = build();
+    await controller.openSession('s1');
+    controller.send([{ type: 'text', text: 'go' }]);
+
+    socket.handlers().onAck?.('prompt', false, 'A turn is already running for this session');
+    const pending = useStore.getState().pending[0];
+    assert.equal(pending?.status, 'failed');
+    assert.match(pending?.error ?? '', /already running/);
+  });
+
+  it('retrying a failed send puts the same bubble back to sending', async () => {
+    const { controller, socket } = build();
+    await controller.openSession('s1');
+    socket.refuseDelivery();
+    controller.send([{ type: 'text', text: 'retry me' }]);
+    const id = useStore.getState().pending[0]!.id;
+    assert.equal(useStore.getState().pending[0]?.status, 'failed');
+
+    controller.retrySend(id, 'retry me');
+    const after = useStore.getState().pending.find((p) => p.id === id);
+    assert.equal(after?.status, 'failed', 'still failed: the socket is still refusing');
+    assert.equal(useStore.getState().pending.length, 1, 'and no duplicate bubble');
+  });
+
+  it('an expired cookie tears the session down and shows the gate', async () => {
+    const { controller, socket, nav } = build();
+    await controller.openSession('s1');
+    socket.handlers().onUnauthorized?.();
+
+    assert.equal(useStore.getState().activeId, null);
+    assert.deepEqual(nav.locked, [true]);
+    assert.ok(socket.calls.includes('close'));
+  });
+
+  it('a resync refetches the transcript and moves the cursor with it', async () => {
+    const { controller, socket } = build({ api: { getSession: async (id) => detailFor(id, 12) } });
+    await controller.openSession('s1');
+    await socket.handlers().onResync();
+
+    assert.ok(socket.calls.includes('reset:12'));
+    assert.equal(useStore.getState().appliedSeq, 12);
+  });
+
+  it('leaving the route closes the socket and clears the session', async () => {
+    const { controller, socket } = build();
+    await controller.openSession('s1');
+    controller.syncRoute(null, false);
+
+    assert.equal(useStore.getState().activeId, null);
+    assert.ok(socket.calls.includes('close'));
+  });
+
+  it('deleting the open session goes home; deleting another only refreshes', async () => {
+    const { controller, nav, rest } = build();
+    await controller.openSession('s1');
+
+    await controller.deleteSession('s1');
+    assert.deepEqual(nav.to, ['/']);
+
+    nav.to.length = 0;
+    await controller.deleteSession('other');
+    assert.deepEqual(nav.to, [], 'deleting a different session must not navigate');
+    assert.ok(rest.calls.includes('deleteSession:other'));
+  });
+
+  it('a rename shows immediately and is persisted after', async () => {
+    useStore.setState({
+      sessions: [{ sessionId: 's1', title: 'old' } as unknown as SessionSummary],
+    });
+    const { controller, rest } = build();
+    await controller.renameSession('s1', 'new name');
+
+    assert.equal(useStore.getState().sessions[0]?.title, 'new name');
+    assert.ok(rest.calls.includes('renameSession:s1:new name'));
+  });
+
+  it('control actions reach the socket and show optimistically', async () => {
+    const { controller, socket } = build();
+    await controller.openSession('s1');
+    useStore.setState({
+      observability: { ...useStore.getState().observability, turnStatus: 'running' },
+    });
+
+    controller.cancel();
+    assert.equal(useStore.getState().observability.turnStatus, 'cancelling');
+
+    controller.changeModel('claude-opus-5');
+    assert.equal(useStore.getState().currentModelId, 'claude-opus-5');
+
+    controller.changeAgent('kiro_default');
+    assert.equal(useStore.getState().currentModeId, 'kiro_default');
+
+    controller.compact();
+    assert.equal(useStore.getState().observability.compacting, true);
+    assert.deepEqual(socket.calls.slice(-4), [
+      'cancel',
+      'setModel:claude-opus-5',
+      'setMode:kiro_default',
+      'exec:compact',
+    ]);
+
+    // The safety net clears a compact that never reported back.
+    await waitFor(
+      'the compact safety net',
+      () => useStore.getState().observability.compacting === false,
+    );
+  });
+
+  it('a turn ending reconciles the list once kiro has persisted it', async () => {
+    const { controller, socket, rest } = build();
+    await controller.openSession('s1');
+    rest.calls.length = 0;
+
+    socket.handlers().onEvent({
+      seq: 1,
+      sessionId: 's1',
+      ts: new Date().toISOString(),
+      payload: { kind: 'turn_ended', stopReason: 'end_turn' },
+    } as unknown as CasperEvent);
+
+    assert.deepEqual(rest.calls, [], 'not immediately: kiro has not written the file yet');
+    await waitFor('the delayed list refresh', () => rest.calls.length > 0);
+    assert.deepEqual(rest.calls, ['listSessions']);
+  });
+
+  it('the pickers load through the same port the tests substitute', async () => {
+    const { controller, rest } = build();
+    controller.loadPickers();
+    await waitFor('both picker fetches', () => rest.calls.length === 2);
+    assert.deepEqual(rest.calls.sort(), ['agents', 'models']);
+  });
+
+  // A widget lives in a transcript, but a draft is a real place to send from: the
+  // message creates the session, exactly as one typed into the composer would.
+  it('a widget can send into a draft, but not into nothing', async () => {
+    const { controller } = build();
+    useStore.setState({ activeId: null });
+
+    controller.syncRoute(null, false);
+    assert.equal(controller.canSend, false, 'no session and no draft: nowhere to send');
+
+    controller.syncRoute(null, true);
+    assert.equal(controller.canSend, true, 'a draft accepts a message');
+
+    controller.syncRoute(null, false);
+    await controller.openSession('s1');
+    assert.equal(controller.canSend, true, 'and so does an open session');
   });
 });

@@ -32,6 +32,7 @@ import {
   realConfineToRoot,
 } from '../server/src/util/paths.js';
 import { classifyKind, looksBinary } from '../server/src/util/filekind.js';
+import { closeDb } from '../server/src/session/db.js';
 import {
   classifyDirent,
   resolveAbsolutePath,
@@ -45,6 +46,18 @@ import {
   diffWatchSet,
   MAX_WATCHES,
 } from '../server/src/ws/dirWatchers.js';
+
+// Each test file gets its own data directory. The runner gives each file its own process,
+// so anything sharing one casper.db contends for its write lock - "database is locked" on a
+// loaded CI box. Set before the first db() call, which is what opens it.
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-data-routes-'));
+(config as { casperDataDir: string }).casperDataDir = dataDir;
+closeDb();
+
+after(() => {
+  closeDb();
+  fs.rmSync(dataDir, { recursive: true, force: true });
+});
 
 describe('path confinement (bounds all file-serving endpoints)', () => {
   it('isWithinRoot: nested path allowed', () => assert.ok(isWithinRoot('/home/joey', '/home/joey/a/b')));

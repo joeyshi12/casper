@@ -38,6 +38,18 @@ const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-kiro-sessions-
 const sessionsCwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-session-cwd-')));
 (config as { kiroSessionsDir: string }).kiroSessionsDir = sessionsDir;
 
+// Each test file gets its own data directory. The runner gives each file its own process,
+// so anything sharing one casper.db contends for its write lock - "database is locked" on a
+// loaded CI box. Set before the first db() call, which is what opens it.
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-data-session-'));
+(config as { casperDataDir: string }).casperDataDir = dataDir;
+closeDb();
+
+after(() => {
+  closeDb();
+  fs.rmSync(dataDir, { recursive: true, force: true });
+});
+
 after(() => {
   fs.rmSync(sessionsDir, { recursive: true, force: true });
   fs.rmSync(sessionsCwd, { recursive: true, force: true });

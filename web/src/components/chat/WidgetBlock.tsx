@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { buildWidgetShell } from './widgetShell.js';
-import { sendWidgetPrompt } from '../../state/promptBridge.js';
+import { sendWidgetPrompt } from '../../state/sessionController.js';
 
 // Built once: React reloads the frame when srcDoc changes.
 const SHELL = buildWidgetShell();

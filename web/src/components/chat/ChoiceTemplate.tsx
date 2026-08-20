@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../../state/store.js';
-import { sendWidgetPrompt } from '../../state/promptBridge.js';
+import { sendWidgetPrompt } from '../../state/sessionController.js';
 import { choiceOutcome, type ChoiceData } from '../../util/choiceCall.js';
 
 /**

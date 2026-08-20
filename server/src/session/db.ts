@@ -45,8 +45,10 @@ function open(): DatabaseSync {
   fs.mkdirSync(config.casperDataDir, { recursive: true, mode: 0o700 });
   const file = path.join(config.casperDataDir, 'casper.db');
   const d = new DatabaseSync(file);
-  // WAL so a reader never blocks the writer; both are this one process, but it
-  // also survives an unclean shutdown better than a rewritten JSON file did.
+  // WAL so a reader never blocks the writer, and it survives an unclean shutdown
+  // better than a rewritten JSON file did. Writers still take an exclusive lock, so
+  // two processes on one file contend - which is why each test file points
+  // casperDataDir at its own directory rather than sharing this one.
   d.exec('PRAGMA journal_mode = WAL');
   d.exec(SCHEMA);
   // The logins table holds the hashes the auth cookie is checked against, so the

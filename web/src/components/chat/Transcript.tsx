@@ -1,12 +1,14 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '../../state/store.js';
-import { olderPageRequest } from '../../state/pagination.js';
 import { api } from '../../api/rest.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { ToolCallCard } from './ToolCallCard.js';
 import { CompressIcon, Spinner } from '../common/icons.js';
 import { lazyImageProps } from '../../util/lazyImage.js';
-import { isUserScrollUp } from '../../util/followScroll.js';
+import {
+  TranscriptViewport,
+  type ViewportFlags,
+} from '../../util/transcriptViewport.js';
 import { classifyTurnFailure } from '../../util/turnFailure.js';
 
 // Live media query (its .matches updates as the OS setting changes), so the
@@ -46,7 +48,6 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
   const compacting = useStore((s) => s.observability.compacting);
   const activeId = useStore((s) => s.activeId);
   const remainingOlder = useStore((s) => s.remainingOlder);
-  const prependItems = useStore((s) => s.prependItems);
   // A running turn goes quiet while the model prepares a tool call - a widget's code is
   // tool input, so nothing streams - and text from earlier would otherwise hide the dots.
   // Items already on screen when a session opened must not animate - otherwise opening an
@@ -72,188 +73,59 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
     const timer = setTimeout(() => setStalled(true), STALL_MS);
     return () => clearTimeout(timer);
   }, [turnStatus, streamingText, streamingThought, items.length]);
-  const bottomRef = useRef<HTMLDivElement>(null);
+
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Guards a load-older fetch in flight, and the scroll anchor (distance from
-  // bottom) captured at fetch time so the viewport stays put across a prepend.
-  const loadingOlderRef = useRef(false);
-  const anchorRef = useRef<number | null>(null);
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  // Following the bottom as new content streams in. Off until the user opts in
-  // via the jump-to-latest button.
-  const followBottom = useRef(false);
-  // Previous scrollTop and scroll range, to tell a scroll up from a reflow.
-  const lastScrollTop = useRef(0);
-  const lastMaxTop = useRef(0);
-  // Session id we have already positioned at the bottom for.
-  const initializedFor = useRef<string | null>(null);
-  // Pending-message count last seen, to detect a fresh user send.
-  const prevPendingLen = useRef(0);
-  // Coalesces follow-scrolls to at most one per animation frame.
-  const followRaf = useRef(0);
-  const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [flags, setFlags] = useState<ViewportFlags>({
+    loadingOlder: false,
+    showScrollButton: false,
+  });
 
-  // Each session starts with autoscroll off (covers switching to an empty
-  // session, where the content effect's init branch does not run).
+  // Follow, anchoring across a prepend, and older-page loading are one concern and
+  // live in the viewport. Created once: it holds the scroll state across renders.
+  const viewportRef = useRef<TranscriptViewport | null>(null);
+  if (!viewportRef.current) {
+    viewportRef.current = new TranscriptViewport({
+      element: () => scrollRef.current,
+      fetchPage: (sessionId, offset, limit) =>
+        api.transcriptPage(sessionId, offset, limit).then((r) => r.items),
+      prepend: (older) => useStore.getState().prependItems(older),
+      onFlags: setFlags,
+      reducedMotion: () => reduceMotion?.matches ?? false,
+    });
+  }
+  const viewport = viewportRef.current;
+
   useEffect(() => {
-    followBottom.current = false;
-    prevPendingLen.current = 0;
-    loadingOlderRef.current = false;
-    anchorRef.current = null;
-    setLoadingOlder(false);
-    setShowScrollBtn(false);
-    return () => {
-      if (followRaf.current) cancelAnimationFrame(followRaf.current);
-      followRaf.current = 0;
-    };
-  }, [activeId]);
+    viewport.reset();
+    return () => viewport.dispose();
+  }, [activeId, viewport]);
 
-  // Load an older page when the user scrolls near the top. The viewport is
-  // anchored to its distance-from-bottom (captured before the fetch) and
-  // restored after the prepend renders, so inserting content above does not
-  // make the view jump.
-  const loadOlder = () => {
-    const el = scrollRef.current;
-    if (!el || !activeId || loadingOlderRef.current || remainingOlder <= 0) return;
-    loadingOlderRef.current = true;
-    setLoadingOlder(true);
-    const { offset, limit } = olderPageRequest(remainingOlder, 80);
-    anchorRef.current = el.scrollHeight - el.scrollTop;
-    api
-      .transcriptPage(activeId, offset, limit)
-      .then((res) => {
-        // Switched sessions while the page was in flight: these items belong to a
-        // transcript that is no longer on screen.
-        if (useStore.getState().activeId !== activeId) {
-          anchorRef.current = null;
-          loadingOlderRef.current = false;
-          setLoadingOlder(false);
-          return;
-        }
-        if (res.items.length > 0) {
-          prependItems(res.items); // anchor restored in the layout effect
-        } else {
-          anchorRef.current = null;
-          loadingOlderRef.current = false;
-          setLoadingOlder(false);
-        }
-      })
-      .catch(() => {
-        anchorRef.current = null;
-        loadingOlderRef.current = false;
-        setLoadingOlder(false);
-        console.error('could not load earlier transcript page');
-      });
-  };
+  useEffect(() => {
+    viewport.onContent({
+      sessionId: activeId,
+      itemCount: items.length,
+      pendingCount: pending.length,
+      remainingOlder,
+    });
+  }, [items, streamingText, streamingThought, pending, activeId, compacting, remainingOlder, viewport]);
 
-  // After a prepend, restore the anchored scroll position before paint.
+  // Before paint, so a prepend never shows as a jump.
   useLayoutEffect(() => {
-    if (anchorRef.current == null) return;
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight - anchorRef.current;
-    anchorRef.current = null;
-    loadingOlderRef.current = false;
-    setLoadingOlder(false);
-  }, [items]);
-
-  const updateScrollBtn = (el: HTMLDivElement) => {
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setShowScrollBtn(distanceFromBottom > 240);
-  };
-
-  // Follow the bottom with one rAF loop easing scrollTop toward it. Position-based, unlike CSS
-  // smooth-scroll + repeated scrollIntoView, which restarts an eased animation from a moving
-  // target every frame and so pulses: each frame covers a fraction of the remaining distance,
-  // only ever downward. It stops when caught up; the content effect re-arms it.
-  const followTick = () => {
-    followRaf.current = 0;
-    const el = scrollRef.current;
-    if (!el || !followBottom.current) return;
-    const target = el.scrollHeight - el.clientHeight;
-    const delta = target - el.scrollTop;
-    if (delta <= 1 || reduceMotion?.matches) {
-      el.scrollTop = target; // snap the final pixel (or all of it) and idle
-      lastScrollTop.current = el.scrollTop;
-      lastMaxTop.current = target;
-      return;
-    }
-    el.scrollTop += Math.max(10, Math.ceil(delta * 0.3));
-    lastScrollTop.current = el.scrollTop;
-    lastMaxTop.current = target;
-    followRaf.current = requestAnimationFrame(followTick);
-  };
-
-  const scheduleFollow = () => {
-    if (followRaf.current) return; // loop already running
-    followRaf.current = requestAnimationFrame(followTick);
-  };
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    // First content for a freshly opened session: jump to the latest message
-    // instantly (animating a scroll through the whole history is disorienting),
-    // with no follow.
-    if (initializedFor.current !== activeId && items.length > 0) {
-      initializedFor.current = activeId;
-      followBottom.current = false;
-      bottomRef.current?.scrollIntoView({ block: 'end' });
-      lastScrollTop.current = el.scrollTop;
-      lastMaxTop.current = el.scrollHeight - el.clientHeight;
-      prevPendingLen.current = pending.length;
-      setShowScrollBtn(false);
-      return;
-    }
-    // A new pending message means the user just sent a prompt: resume following
-    // so their message and the streamed reply smoothly scroll into view.
-    if (pending.length > prevPendingLen.current) {
-      followBottom.current = true;
-    }
-    prevPendingLen.current = pending.length;
-    if (followBottom.current) {
-      scheduleFollow();
-    } else {
-      updateScrollBtn(el);
-    }
-  }, [items, streamingText, streamingThought, pending, activeId, compacting]);
-
-  const onScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    // A scroll up stops following. Content shrinking (a thought block collapsing
-    // as it commits) also lowers scrollTop, and that must not count.
-    const maxTop = el.scrollHeight - el.clientHeight;
-    if (isUserScrollUp(el.scrollTop, lastScrollTop.current, maxTop, lastMaxTop.current)) {
-      followBottom.current = false;
-    }
-    lastScrollTop.current = el.scrollTop;
-    lastMaxTop.current = maxTop;
-    updateScrollBtn(el);
-    // Near the top: pull in the previous page of history. Restoring the anchor
-    // pushes the view back down past this threshold, so it won't cascade.
-    if (el.scrollTop < 300 && !loadingOlderRef.current && remainingOlder > 0) {
-      loadOlder();
-    }
-  };
-
-  const scrollToBottom = () => {
-    followBottom.current = true;
-    setShowScrollBtn(false);
-    scheduleFollow();
-  };
+    viewport.restoreAnchor();
+  }, [items, viewport]);
 
   const empty =
     items.length === 0 && !streamingText && !streamingThought && pending.length === 0;
 
   return (
     <div className="transcript-wrap">
-    {loadingOlder && (
+    {flags.loadingOlder && (
       <div className="loading-older" role="status">
         <Spinner size={14} />
         <span>Loading earlier messages…</span>
       </div>
     )}
-    <div className="transcript" ref={scrollRef} onScroll={onScroll}>
+    <div className="transcript" ref={scrollRef} onScroll={() => viewport.onScroll()}>
       {empty && (
         <div className="transcript-empty">
           <p className="empty-title">Casper is here.</p>
@@ -355,12 +227,11 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
         </div>
       )}
 
-      <div ref={bottomRef} />
     </div>
-      {showScrollBtn && (
+      {flags.showScrollButton && (
         <button
           className="scroll-to-bottom"
-          onClick={scrollToBottom}
+          onClick={() => viewport.jumpToLatest()}
           aria-label="Scroll to latest"
           title="Scroll to latest"
         >

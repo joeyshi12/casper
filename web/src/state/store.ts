@@ -17,6 +17,7 @@ import {
 
 import { bumpSessionToTop, upsertSession } from './sessions.js';
 import { classifyTurnFailure } from '../util/turnFailure.js';
+import type { ConnStatus } from '../api/SessionSocket.js';
 
 /** A rendered tool call in the transcript (shared shape). */
 export type ToolCallView = TranscriptToolCall;
@@ -71,6 +72,10 @@ interface CasperState {
   streamingThought: string; // in-flight reasoning chunk not yet committed
   pending: PendingMessage[]; // user messages sent locally, awaiting server echo
   sessionNotice: SessionNotice | null;
+  /** Socket state for the active session, so the pane can say what it is doing. */
+  connStatus: ConnStatus;
+  /** Why creating a session failed, shown on the chat pane with a retry. */
+  createError: string | null;
 
   // actions
   bumpFsPath: (path: string) => void;
@@ -86,6 +91,17 @@ interface CasperState {
   addPending: (id: string, text: string) => void;
   markPendingFailed: (id: string, error?: string) => void;
   dismissSessionNotice: () => void;
+  setConnStatus: (status: ConnStatus) => void;
+  setCreateError: (message: string | null) => void;
+  // Optimistic transitions. Here rather than at the call site because applyEvent
+  // owns the same fields when the server's echo arrives, and a transition split
+  // across two modules is one nobody can read in one place.
+  markCancelling: () => void;
+  setCurrentModel: (modelId: string) => void;
+  setCurrentAgent: (modeId: string) => void;
+  setCompacting: (compacting: boolean) => void;
+  markPendingSending: (id: string) => void;
+  renameSessionRow: (id: string, title: string) => void;
 }
 
 export const useStore = create<CasperState>((set, get) => ({
@@ -106,6 +122,57 @@ export const useStore = create<CasperState>((set, get) => ({
   streamingThought: '',
   pending: [],
   sessionNotice: null,
+  connStatus: 'closed',
+  createError: null,
+
+  setConnStatus: (connStatus) => set({ connStatus }),
+  setCreateError: (createError) => set({ createError }),
+
+  // Optimistic feedback: the Stop button flips to "Stopping…" until the server
+  // confirms with turn_ended / turn_error, which reset to idle.
+  markCancelling: () =>
+    set((s) =>
+      s.observability.turnStatus === 'running'
+        ? { observability: { ...s.observability, turnStatus: 'cancelling' } }
+        : {},
+    ),
+
+  setCurrentModel: (currentModelId) => set({ currentModelId }),
+
+  // Optimistic in both the picker (currentModeId) and the sidebar row (agentId),
+  // so neither waits for the next listSessions.
+  setCurrentAgent: (modeId) =>
+    set((s) => ({
+      currentModeId: modeId,
+      sessions: s.activeId
+        ? s.sessions.map((sess) =>
+            sess.sessionId === s.activeId ? { ...sess, agentId: modeId } : sess,
+          )
+        : s.sessions,
+    })),
+
+  // No-op when already in that state, so the safety-net clear cannot undo a real
+  // completion or cost a render for nothing.
+  setCompacting: (compacting) =>
+    set((s) =>
+      s.observability.compacting === compacting
+        ? {}
+        : { observability: { ...s.observability, compacting } },
+    ),
+
+  markPendingSending: (id) =>
+    set((s) => ({
+      pending: s.pending.map((p) =>
+        p.id === id ? { ...p, status: 'sending' as const, error: undefined } : p,
+      ),
+    })),
+
+  renameSessionRow: (id, title) =>
+    set((s) => ({
+      sessions: s.sessions.map((sess) =>
+        sess.sessionId === id ? { ...sess, title } : sess,
+      ),
+    })),
 
   bumpFsPath: (path) =>
     set((s) => ({ fsVersion: { ...s.fsVersion, [path]: (s.fsVersion[path] ?? 0) + 1 } })),
