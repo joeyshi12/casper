@@ -4,31 +4,16 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { DirListing } from '@casper/shared';
 import { config } from '../config.js';
-import { confineToRoot, realConfineToRoot } from '../util/paths.js';
-
-/** Allowed image MIME types for the file serving endpoint. */
-const IMAGE_MIMES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.bmp': 'image/bmp',
-  '.ico': 'image/x-icon',
-  '.avif': 'image/avif',
-};
+import {
+  absoluteRoots,
+  classifyDirent,
+  replyWith,
+  resolveAbsolutePath,
+} from '../util/confinedFile.js';
+import { classifyKind, mimeForExt } from '../util/filekind.js';
 
 /** Max image file size (20 MB). */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
-
-/**
- * Confine to fileRoot, or to the data directory - uploads live there, and a narrowed
- * CASPER_FILE_ROOT would otherwise hide the user's own attachments.
- */
-function confinedPath(input: string): string | null {
-  return confineToRoot(config.fileRoot, input) ?? confineToRoot(config.casperDataDir, input);
-}
 
 // Suggests directory paths for the New Session working-directory input. Given a
 // partial path, it lists directories in the parent that match the last segment.
@@ -55,40 +40,25 @@ export function registerFsRoutes(app: FastifyInstance): void {
         .then((s) => (s.isDirectory() ? ('directory' as const) : ('file' as const)))
         .catch(() => 'missing' as const);
 
-      // Confine the directory being listed to fileRoot so this can't be used to
-      // enumerate arbitrary filesystem locations.
-      if (confinedPath(dir) === null) {
-        reply.code(403);
-        return { error: 'Path outside allowed root' };
-      }
-
-      // Symlink-safe: if the dir resolves (through symlinks) outside fileRoot,
-      // or doesn't exist, return no suggestions rather than leaking anything.
-      const realDir = await realConfineToRoot(config.fileRoot, dir);
-      if (!realDir) {
+      // Confine the directory being listed so this can't be used to enumerate
+      // arbitrary filesystem locations. A path that resolves (through symlinks)
+      // outside the roots, or doesn't exist, yields no suggestions rather than
+      // leaking anything.
+      const listing = await resolveAbsolutePath(dir, 'directory');
+      if (!listing.ok) {
+        if (listing.status === 403) return replyWith(reply, listing);
         return { dir, entries: [], target: resolved, targetKind };
       }
+      const realDir = listing.real;
 
       let entries: string[] = [];
       try {
         const dirents = await fs.readdir(realDir, { withFileTypes: true });
         const candidates = dirents.filter((d) => !d.name.startsWith('.'));
-        // Dirent.isDirectory() reflects the entry's own type, so a symlink
-        // reports false even when it points at a directory - stat() follows
-        // the link to find out what it actually is. A symlink whose target
-        // escapes fileRoot or no longer exists is skipped rather than shown.
         const checks = await Promise.all(
           candidates.map(async (d) => {
-            if (d.isDirectory()) return d.name;
-            if (!d.isSymbolicLink()) return null;
-            const full = path.join(realDir, d.name);
-            const real = await realConfineToRoot(config.fileRoot, full);
-            if (!real) return null;
-            try {
-              return (await fs.stat(real)).isDirectory() ? d.name : null;
-            } catch {
-              return null;
-            }
+            const target = await classifyDirent(realDir, d, absoluteRoots());
+            return target?.kind === 'directory' ? d.name : null;
           }),
         );
         entries = checks
@@ -126,40 +96,17 @@ export function registerFsRoutes(app: FastifyInstance): void {
         return { error: 'path must be absolute' };
       }
 
-      // Resolve and confine to fileRoot so this can't read arbitrary files
-      // (e.g. system files or SSH keys) outside the allowed boundary.
-      const resolved = confinedPath(filePath);
-      if (resolved === null) {
-        reply.code(403);
-        return { error: 'Path outside allowed root' };
-      }
-
-      const ext = path.extname(resolved).toLowerCase();
-      const mime = IMAGE_MIMES[ext];
-      if (!mime) {
+      // Extension allowlist first: pure input validation, no filesystem access.
+      // classifyKind reads the same table the ACP image blocks use.
+      const ext = path.extname(filePath).toLowerCase();
+      if (classifyKind(filePath) !== 'image') {
         reply.code(400);
         return { error: `Not a supported image type: ${ext}` };
       }
 
-      // Symlink-safe: reject if the real path escapes fileRoot.
-      const real = await realConfineToRoot(config.fileRoot, resolved);
-      if (!real) {
-        reply.code(404);
-        return { error: 'File not found' };
-      }
-
-      let stat: Awaited<ReturnType<typeof fs.stat>>;
-      try {
-        stat = await fs.stat(real);
-      } catch {
-        reply.code(404);
-        return { error: 'File not found' };
-      }
-
-      if (!stat.isFile()) {
-        reply.code(400);
-        return { error: 'Path is not a file' };
-      }
+      const resolvedImage = await resolveAbsolutePath(filePath, 'file');
+      if (!resolvedImage.ok) return replyWith(reply, resolvedImage);
+      const { real, stat } = resolvedImage;
 
       if (stat.size > MAX_IMAGE_BYTES) {
         reply.code(413);
@@ -179,7 +126,7 @@ export function registerFsRoutes(app: FastifyInstance): void {
         return reply.send();
       }
 
-      reply.header('Content-Type', mime);
+      reply.header('Content-Type', mimeForExt(ext));
       reply.header('Content-Length', stat.size);
       return reply.send(createReadStream(real));
     },

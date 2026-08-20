@@ -109,13 +109,6 @@ export interface CasperEvent {
 // Client -> Server messages
 // ---------------------------------------------------------------------------
 
-export interface ClientHello {
-  type: 'hello';
-  sessionId: string;
-  /** Last applied seq. 0 (or omitted) = fresh, replay from start of buffer. */
-  cursor?: number;
-}
-
 export interface ClientPrompt {
   type: 'prompt';
   content: PromptContentBlock[];
@@ -155,7 +148,6 @@ export interface ClientWatchPaths {
 }
 
 export type ClientMessage =
-  | ClientHello
   | ClientPrompt
   | ClientCancel
   | ClientSetMode
