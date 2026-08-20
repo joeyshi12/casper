@@ -52,10 +52,12 @@ npm run typecheck              # all workspaces
   concerns even when they arrive together.
 - Work lands through a PR from a branch, not a push to `main`. Keep titles under 70 characters and put
   the detail in the description: what changed, what was tested, anything left blocked.
-- More than one commit means a stack, so every diff is one commit and the set merges together once
-  review is done: `gh stack init <bottom..top>` adopts the branches, then `gh stack submit` registers
-  the stack. Chaining `--base` by hand is not a stack - without submit there is nothing to merge as a
-  unit, and `gh stack view` is how you check.
+- Group tightly coupled commits into one PR. A change and its tests, or a refactor and the note that
+  explains it, review better together than apart; only genuinely independent work gets its own PR.
+- More than one PR means a stack, so the set merges together once review is done: `gh stack init
+  <bottom..top>` adopts the branches, then `gh stack submit` registers the stack. Chaining `--base` by
+  hand is not a stack - without submit there is nothing to merge as a unit, and `gh stack view` is how
+  you check.
 - The body says what was wrong and why the change fixes it, wrapped at ~90 columns.
 
 ## Boundaries
