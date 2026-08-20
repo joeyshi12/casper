@@ -1,10 +1,15 @@
 # AGENTS.md
 
-Casper is a web client for `kiro-cli` over the Agent Client Protocol. A long task keeps running
-server-side; on reconnect the client replays what it missed. npm workspaces: `shared/` (types),
-`web/` (React app), `server/` (Fastify server, and the package published to npm).
+Casper is a web client for `kiro-cli` over the Agent Client Protocol: a long task keeps running
+server-side, and on reconnect the client replays what it missed.
 
-This file is loaded into every turn's context. Keep additions short and durable.
+Node 24+ (for `node:sqlite`). npm workspaces: `shared/` types, `web/` React 18 + zustand 5 +
+Vite 6, `server/` Fastify 5 + ws — and `server/` is the package published to npm.
+
+**What Casper does, how to install and configure it, and the full settings table live in
+[README.md](README.md).** Facts belong there once; this file is procedure, rules and the things
+that are only learned the hard way. It is loaded into every turn's context, so keep additions
+short and durable.
 
 ## Setup and commands
 
@@ -24,8 +29,13 @@ npm run typecheck              # all workspaces
 - Run `npm run build`, `npm test`, and `npm run typecheck` before reporting a change as done. For
   unused code too: `npx tsc -p <ws>/tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters`.
 - Never report a pass you didn't watch happen. Quote the failing command instead.
-- Tests live in `tests/` and import from source. The runner **cannot import components** (tsx uses the
-  classic JSX runtime), so put parsers and pure logic in `web/src/util/` where they can be tested.
+- Tests live in `tests/` and import from source. Components *can* be imported (`web/tsconfig.json`
+  sets `jsx: react-jsx`); rendering one needs a DOM, and `jsdom` is already a dependency —
+  `tests/widget.test.ts` shows the pattern.
+- Each test file gets its own process, so anything sharing state across files contends: point
+  `config.casperDataDir` and `config.kiroSessionsDir` at per-file temp directories rather than the
+  developer's real ones.
+- Don't assert on a fixed sleep. Poll to a deadline, or the suite passes locally and fails on CI.
 - Throwaway probe scripts must sit inside the repo to resolve modules. Delete them when done.
 
 ## Code style
@@ -48,13 +58,26 @@ npm run typecheck              # all workspaces
   unit, and `gh stack view` is how you check.
 - The body says what was wrong and why the change fixes it, wrapped at ~90 columns.
 
-## Security
+## Boundaries
 
-- Casper launches kiro with `--trust-all-tools`, so access to Casper is equivalent to a shell on the
-  machine. Treat any new network-reachable route as needing auth.
-- The token is stored hashed, compared in constant time, and `/api/login` is rate-limited. The settings
-  file and `casper.db` are `0600`. Don't widen either.
-- File endpoints are confined to `config.fileRoot`; keep new filesystem routes inside that check.
+**Always**
+
+- Verify with the project's own commands, and say which ones you ran.
+- Keep new filesystem routes inside the `config.fileRoot` check.
+- Treat any new network-reachable route as needing auth: Casper launches kiro with
+  `--trust-all-tools`, so access to it is equivalent to a shell on the machine.
+
+**Ask first**
+
+- Committing, pushing, and anything that rewrites published history.
+- Adding a dependency, or changing a security boundary, a status code, or an on-the-wire message.
+- Restarting the service, or writing into the installed copy under the nvm prefix.
+
+**Never**
+
+- Widen the `0600` on the settings file or `casper.db`, or weaken how the token is stored and compared.
+- Write into `~/.casper` from a test, or leave fixtures in the developer's real `~/.kiro`.
+- Report a check as passing without having watched it pass.
 
 ## Design taste
 
@@ -67,9 +90,13 @@ npm run typecheck              # all workspaces
 - **Sessions live in kiro's files**, `~/.kiro/sessions/cli/<id>.{json,jsonl}`. `casper.db` holds only
   title/cwd overrides and login hashes. kiro writes a session file when a turn completes, not at
   creation, so a brand-new session legitimately has no file (see `isGhost` in `SessionManager`).
-- **One title resolver**, `shared/src/titles.ts`. Don't add a second precedence chain.
+- **One title resolver**, `shared/src/titles.ts`. Don't add a second precedence chain. The same goes
+  for a session summary: `summaryOf` in `SessionManager` is the only place one is assembled.
 - Store updates go through `applyEvent`, which drops anything whose `seq` it has seen. Work that
   bypasses it is discarded silently.
+- **Confined file access** is one sequence in `server/src/util/confinedFile.ts`, and it takes two sets
+  of roots on purpose: lexical (the session cwd, so `../` can't leave the project) and real (fileRoot,
+  checked after symlinks). Collapsing them stops serving symlinks that legitimately leave a workspace.
 - A `transform` on an ancestor becomes the containing block for `position: fixed`, which is why modals
   portal to `document.body`.
 - The agent prompt is `assets/agents/prompt.txt`: plain text in XML-style sections, no markdown. It
