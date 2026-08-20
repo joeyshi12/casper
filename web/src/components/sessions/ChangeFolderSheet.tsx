@@ -40,7 +40,6 @@ export function ChangeFolderSheet({ sessionId, currentCwd, onChanged, onClose }:
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sheet-handle" />
         <h2 className="sheet-title">Change working directory</h2>
 
         <CwdField

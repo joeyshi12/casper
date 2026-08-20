@@ -2337,7 +2337,7 @@
   background: var(--n0);
   border: 1px solid var(--n2);
   border-radius: var(--r-lg) var(--r-lg) 0 0;
-  padding: 12px 20px calc(24px + var(--safe-bottom));
+  padding: 20px 20px calc(24px + var(--safe-bottom));
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2350,13 +2350,6 @@
   .sheet {
     border-radius: var(--r-lg);
   }
-}
-.sheet-handle {
-  width: 36px;
-  height: 4px;
-  border-radius: var(--r-pill);
-  background: var(--n3);
-  align-self: center;
 }
 .sheet-title {
   font-family: var(--font-display);
