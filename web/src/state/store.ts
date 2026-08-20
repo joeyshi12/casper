@@ -76,6 +76,9 @@ interface CasperState {
   connStatus: ConnStatus;
   /** Why creating a session failed, shown on the chat pane with a retry. */
   createError: string | null;
+  /** File the user asked to look at, relative to the workspace. Set by the file tree
+   *  and by a read/write tool call in the transcript; null when nothing is open. */
+  previewPath: string | null;
 
   // actions
   bumpFsPath: (path: string) => void;
@@ -93,6 +96,8 @@ interface CasperState {
   dismissSessionNotice: () => void;
   setConnStatus: (status: ConnStatus) => void;
   setCreateError: (message: string | null) => void;
+  openFilePreview: (path: string) => void;
+  closeFilePreview: () => void;
   // Optimistic transitions. Here rather than at the call site because applyEvent
   // owns the same fields when the server's echo arrives, and a transition split
   // across two modules is one nobody can read in one place.
@@ -124,9 +129,13 @@ export const useStore = create<CasperState>((set, get) => ({
   sessionNotice: null,
   connStatus: 'closed',
   createError: null,
+  previewPath: null,
 
   setConnStatus: (connStatus) => set({ connStatus }),
   setCreateError: (createError) => set({ createError }),
+
+  openFilePreview: (previewPath) => set({ previewPath }),
+  closeFilePreview: () => set({ previewPath: null }),
 
   // Optimistic feedback: the Stop button flips to "Stopping…" until the server
   // confirms with turn_ended / turn_error, which reset to idle.
@@ -229,6 +238,7 @@ export const useStore = create<CasperState>((set, get) => ({
       sessionNotice: null,
       currentModeId: undefined,
       currentModelId: undefined,
+      previewPath: null,
     }),
 
   dismissSessionNotice: () => set({ sessionNotice: null }),

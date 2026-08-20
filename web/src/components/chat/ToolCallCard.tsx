@@ -1,5 +1,6 @@
 import { memo, useEffect, useState, type ReactNode, type TransitionEvent } from 'react';
-import type { ToolCallView } from '../../state/store.js';
+import { useStore, type ToolCallView } from '../../state/store.js';
+import { workspaceRelative } from '../../util/workspacePath.js';
 import { highlightToHtml } from '../../util/highlighter.js';
 import { lineDiff, type DiffLine } from '../../util/diff.js';
 import { lazyImageProps } from '../../util/lazyImage.js';
@@ -238,25 +239,71 @@ function renderShell(tool: ToolCallView): ReactNode {
   );
 }
 
+/**
+ * The file a read or write acted on, above its body. Its own component so that reading
+ * the session cwd from the store re-renders this and not the whole memoised card.
+ *
+ * Clickable only when the file is inside the workspace: the preview endpoint is confined
+ * to the session cwd, so anything outside it has no preview to open.
+ */
+function FileHeading({ path }: { path: string }) {
+  const activeId = useStore((s) => s.activeId);
+  const cwd = useStore((s) => s.sessions.find((x) => x.sessionId === s.activeId)?.cwd ?? '');
+  const openFilePreview = useStore((s) => s.openFilePreview);
+  const relative = activeId ? workspaceRelative(cwd, path) : null;
+  // Inside the workspace, the relative path is the useful one: it says where the file
+  // sits without repeating the cwd on every row. Outside it, only the full path means
+  // anything. The absolute path is on the tooltip either way.
+  const shown = relative ?? path;
+
+  if (!relative) {
+    return (
+      <div className="toolcall-file" title={path}>
+        <span className="toolcall-file-name is-plain">{shown}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="toolcall-file">
+      <button
+        className="toolcall-file-name"
+        onClick={() => openFilePreview(relative)}
+        title={`Preview ${path}`}
+      >
+        {shown}
+      </button>
+    </div>
+  );
+}
+
 function renderWrite(tool: ToolCallView): ReactNode {
   const inp = asObj(tool.input);
   const path = str(inp?.path) ?? '';
+  const withPath = (body: ReactNode): ReactNode =>
+    path ? (
+      <>
+        <FileHeading path={path} />
+        {body}
+      </>
+    ) : (
+      body
+    );
   const command = str(inp?.command);
   // New file / inserted content: show the whole thing highlighted by extension.
   if (command === 'create' || command === 'insert') {
     const content = str(inp?.content);
-    if (content !== undefined) return <Code code={content} lang={langFromPath(path)} />;
+    if (content !== undefined) return withPath(<Code code={content} lang={langFromPath(path)} />);
   }
   // strReplace (the `write` tool or the standalone one): diff old -> new.
   const oldStr = str(inp?.oldStr);
   const newStr = str(inp?.newStr);
   if (oldStr !== undefined && newStr !== undefined) {
-    return <DiffView diff={lineDiff(oldStr, newStr)} />;
+    return withPath(<DiffView diff={lineDiff(oldStr, newStr)} />);
   }
   // Live edit streamed as a diff block before the input is available.
   const d = firstDiff(tool.content);
-  if (d) return <DiffView diff={lineDiff(d.oldText, d.newText)} />;
-  return renderGeneric(tool);
+  if (d) return withPath(<DiffView diff={lineDiff(d.oldText, d.newText)} />);
+  return withPath(renderGeneric(tool));
 }
 
 function renderRead(tool: ToolCallView): ReactNode {
@@ -273,7 +320,12 @@ function renderRead(tool: ToolCallView): ReactNode {
   const textOp = ops.map(asObj).find((o) => o && o.mode !== 'Image');
   const path = textOp && typeof textOp.path === 'string' ? textOp.path : '';
   const lang = textOp?.mode === 'Line' ? langFromPath(path) : 'text';
-  return <Code code={text} lang={lang} />;
+  return (
+    <>
+      {path && <FileHeading path={path} />}
+      <Code code={text} lang={lang} />
+    </>
+  );
 }
 
 function renderGrep(tool: ToolCallView): ReactNode {

@@ -4,6 +4,7 @@ import { useStore } from '../../state/store.js';
 import type { ConnStatus } from '../../api/SessionSocket.js';
 import { Transcript } from '../chat/Transcript.js';
 import { FileTree } from '../chat/FileTree.js';
+import { FilePreview } from '../chat/FilePreview.js';
 import { Composer } from '../chat/Composer.js';
 import { ConnDot } from '../common/ConnBanner.js';
 import { Spinner, FilesIcon, MenuIcon } from '../common/icons.js';
@@ -216,6 +217,8 @@ export function ChatPane({
       {activeId && (
         <aside className={`ftree-aside ${showTree ? 'is-open' : ''}`}>
           {showTree && <FileTree sessionId={activeId} onClose={() => setShowTree(false)} />}
+          {/* Outside the panel: a tool call can open a preview with the panel closed. */}
+          <FilePreview />
         </aside>
       )}
       {/* Mobile: tapping outside the drawer closes it (the header toggle is

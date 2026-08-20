@@ -3,14 +3,9 @@ import type { FileEntry } from '@casper/shared';
 import { api } from '../../api/rest.js';
 import { useStore } from '../../state/store.js';
 import { ChangeFolderSheet } from '../sessions/ChangeFolderSheet.js';
-import { highlightToHtml } from '../../util/highlighter.js';
 import {
   ChevronIcon,
   CloseIcon,
-  CodeIcon,
-  DownloadIcon,
-  ExpandIcon,
-  EyeIcon,
   FileCodeIcon,
   FileConfigIcon,
   FileIcon,
@@ -20,10 +15,8 @@ import {
   FileTextIcon,
   FolderIcon,
   FolderOpenIcon,
-  ShrinkIcon,
   Spinner,
 } from '../common/icons.js';
-import { MarkdownRenderer } from './MarkdownRenderer.js';
 
 interface FileTreeProps {
   sessionId: string;
@@ -36,16 +29,6 @@ interface FolderState {
   expanded: boolean;
   children: FileEntry[] | null;
   loading: boolean;
-}
-
-interface PreviewState {
-  path: string;
-  name: string;
-  content: string | null;
-  highlightedHtml: string | null;
-  kind: PreviewKind;
-  loading: boolean;
-  error: string | null;
 }
 
 function formatSize(bytes: number): string {
@@ -116,85 +99,6 @@ function FileTypeIcon({ name }: { name: string }) {
     default:
       return <FileIcon size={15} className="ftree-icon-svg" />;
   }
-}
-
-const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif']);
-
-/** 'html' and 'markdown' have a rendered form, so they get the source toggle. */
-type PreviewKind = 'image' | 'pdf' | 'html' | 'markdown' | 'text';
-
-function previewKind(name: string): PreviewKind {
-  const lower = name.toLowerCase();
-  // Same rule as path.extname: a leading dot is a dotfile, not an extension.
-  const dot = lower.lastIndexOf('.');
-  const ext = dot > 0 ? lower.slice(dot + 1) : '';
-  if (IMAGE_EXTS.has(ext)) return 'image';
-  if (ext === 'pdf') return 'pdf';
-  if (ext === 'html' || ext === 'htm') return 'html';
-  if (ext === 'md' || ext === 'markdown') return 'markdown';
-  return 'text';
-}
-
-/** Map file extension to shiki language id. */
-const EXT_TO_LANG: Record<string, string> = {
-  ts: 'typescript',
-  tsx: 'tsx',
-  js: 'javascript',
-  jsx: 'jsx',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  json: 'json',
-  jsonl: 'json',
-  yaml: 'yaml',
-  yml: 'yaml',
-  md: 'markdown',
-  markdown: 'markdown',
-  html: 'html',
-  htm: 'html',
-  xml: 'xml',
-  css: 'css',
-  scss: 'css',
-  less: 'css',
-  py: 'python',
-  rs: 'rust',
-  go: 'go',
-  java: 'java',
-  c: 'c',
-  h: 'c',
-  cpp: 'cpp',
-  cc: 'cpp',
-  cxx: 'cpp',
-  hpp: 'cpp',
-  cs: 'csharp',
-  rb: 'ruby',
-  php: 'php',
-  kt: 'kotlin',
-  kts: 'kotlin',
-  swift: 'swift',
-  zig: 'zig',
-  lua: 'lua',
-  tex: 'latex',
-  toml: 'toml',
-  ini: 'ini',
-  cfg: 'ini',
-  conf: 'ini',
-  sh: 'bash',
-  bash: 'bash',
-  zsh: 'bash',
-  fish: 'bash',
-  dockerfile: 'dockerfile',
-  sql: 'sql',
-  diff: 'diff',
-  patch: 'diff',
-};
-
-function langFromFilename(name: string): string {
-  const lower = name.toLowerCase();
-  // Extensionless files with well-known names.
-  if (lower === 'dockerfile') return 'dockerfile';
-  if (lower === 'makefile') return 'make';
-  const ext = lower.split('.').pop() ?? '';
-  return EXT_TO_LANG[ext] ?? '';
 }
 
 function TreeEntry({
@@ -338,159 +242,19 @@ function TreeEntry({
   );
 }
 
-/** File preview modal - shows text content or image in a centered overlay. */
-function FilePreview({
-  preview,
-  sessionId,
-  onClose,
-}: {
-  preview: PreviewState;
-  sessionId: string;
-  onClose: () => void;
-}) {
-  // A class rather than the Fullscreen API, which iOS Safari won't grant to
-  // arbitrary elements - and this gets used from a phone.
-  const [full, setFull] = useState(false);
-  // Keyed by path so switching files doesn't carry the previous file's choice over.
-  const [sourceByPath, setSourceByPath] = useState<Record<string, boolean>>({});
-
-  const download = () => {
-    window.open(api.downloadUrl(sessionId, preview.path), '_blank');
-  };
-
-  const onBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onClose();
-  };
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  // Rendered by default: a generated page or a README is opened to be read.
-  const showSource = sourceByPath[preview.path] ?? false;
-  const canRender = preview.kind === 'html' || preview.kind === 'markdown';
-  const showRendered = canRender && !showSource;
-  const showText = preview.kind !== 'image' && preview.kind !== 'pdf' && !showRendered;
-
-  return (
-    <div className="fpreview-backdrop" onClick={onBackdropClick}>
-      <div className={`fpreview-modal${full ? ' fpreview-full' : ''}`}>
-        <div className="fpreview-header">
-          {canRender && !preview.error && (
-            // The active side is filled, so it reads as a position not an action.
-            <div className="fpreview-seg" role="group" aria-label="Preview mode">
-              <button
-                className={`fpreview-seg-btn${showSource ? '' : ' is-active'}`}
-                onClick={() => setSourceByPath((prev) => ({ ...prev, [preview.path]: false }))}
-                title="Rendered"
-                aria-label="Rendered"
-                aria-pressed={!showSource}
-              >
-                <EyeIcon size={17} />
-              </button>
-              <button
-                className={`fpreview-seg-btn${showSource ? ' is-active' : ''}`}
-                onClick={() => setSourceByPath((prev) => ({ ...prev, [preview.path]: true }))}
-                title="Source"
-                aria-label="Source"
-                aria-pressed={showSource}
-              >
-                <CodeIcon size={17} />
-              </button>
-            </div>
-          )}
-          <span className="fpreview-name" title={preview.path}>
-            {preview.name}
-          </span>
-          <button
-            className="fpreview-dl"
-            onClick={download}
-            title="Download file"
-            aria-label="Download file"
-          >
-            <DownloadIcon size={18} />
-          </button>
-          <button
-            className="fpreview-full-btn"
-            onClick={() => setFull((v) => !v)}
-            title={full ? 'Exit fullscreen' : 'Fullscreen'}
-            aria-label={full ? 'Exit fullscreen' : 'Fullscreen'}
-          >
-            {full ? <ShrinkIcon size={18} /> : <ExpandIcon size={18} />}
-          </button>
-          <button className="fpreview-close" onClick={onClose} aria-label="Close preview">
-            <CloseIcon size={18} />
-          </button>
-        </div>
-        <div className="fpreview-body">
-          {preview.loading && (
-            <div className="fpreview-loading">
-              <Spinner size={48} />
-            </div>
-          )}
-          {preview.error && <div className="ftree-error">{preview.error}</div>}
-          {!preview.loading && !preview.error && preview.kind === 'image' && (
-            <img
-              src={api.previewUrl(sessionId, preview.path)}
-              alt={preview.name}
-              className="fpreview-image"
-            />
-          )}
-          {!preview.error && preview.kind === 'pdf' && (
-            <iframe
-              src={api.previewUrl(sessionId, preview.path)}
-              title={preview.name}
-              className="fpreview-pdf"
-            />
-          )}
-          {!preview.error && preview.kind === 'html' && showRendered && (
-            // No allow-same-origin, so scripts run but the page can't touch the session
-            // cookie or the API. The server sends a matching CSP.
-            <iframe
-              src={`${api.previewUrl(sessionId, preview.path)}&raw=1`}
-              title={preview.name}
-              className="fpreview-html"
-              sandbox="allow-scripts allow-forms"
-            />
-          )}
-          {!preview.loading && !preview.error && preview.kind === 'markdown' && showRendered && preview.content !== null && (
-            // The file's own HTML renders, sanitised with GitHub's schema first.
-            <div className="fpreview-md">
-              <MarkdownRenderer text={preview.content} html />
-            </div>
-          )}
-          {!preview.loading && !preview.error && showText && preview.highlightedHtml && (
-            <div
-              className="fpreview-highlighted"
-              dangerouslySetInnerHTML={{ __html: preview.highlightedHtml }}
-            />
-          )}
-          {!preview.loading && !preview.error && showText && !preview.highlightedHtml && preview.content !== null && (
-            <pre className="fpreview-code">{preview.content}</pre>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /** Workspace file tree panel with lazy folder expansion, preview, and download. */
 export function FileTree({ sessionId, onClose }: FileTreeProps) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [cwd, setCwd] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<PreviewState | null>(null);
   const [changingFolder, setChangingFolder] = useState(false);
   const sessions = useStore((s) => s.sessions);
   const setWatchedPaths = useStore((st) => st.setWatchedPaths);
   const rootChanged = useStore((st) => st.fsVersion[''] ?? 0);
   const expandedRef = useRef<Set<string>>(new Set());
   const setSessions = useStore((s) => s.setSessions);
+  const openFilePreview = useStore((s) => s.openFilePreview);
   const summaryCwd = sessions.find((s) => s.sessionId === sessionId)?.cwd;
 
   // Watch the root plus every expanded directory: exactly what the tree can show,
@@ -547,58 +311,7 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootChanged]);
 
-  const openPreview = useCallback(
-    async (entry: FileEntry) => {
-      const kind = previewKind(entry.name);
-      const needsContent = kind !== 'image' && kind !== 'pdf';
-      setPreview({
-        path: entry.path,
-        name: entry.name,
-        content: null,
-        highlightedHtml: null,
-        kind,
-        loading: needsContent,
-        error: null,
-      });
 
-      if (needsContent) {
-        try {
-          const url = api.previewUrl(sessionId, entry.path);
-          const res = await fetch(url, { credentials: 'same-origin' });
-          if (!res.ok) {
-            const body = await res.text();
-            throw new Error(body || `HTTP ${res.status}`);
-          }
-          const text = await res.text();
-
-          // Show the file as soon as it arrives; highlighting lands separately so a
-          // big file isn't held behind it.
-          setPreview((p) =>
-            p && p.path === entry.path ? { ...p, content: text, loading: false } : p,
-          );
-
-          const lang = langFromFilename(entry.name);
-          if (lang) {
-            const html = await highlightToHtml(text, lang);
-            if (html) {
-              setPreview((p) =>
-                p && p.path === entry.path ? { ...p, highlightedHtml: html } : p,
-              );
-            }
-          }
-        } catch (err) {
-          setPreview((p) =>
-            p && p.path === entry.path
-              ? { ...p, error: (err as Error).message, loading: false }
-              : p,
-          );
-        }
-      }
-    },
-    [sessionId],
-  );
-
-  const closePreview = useCallback(() => setPreview(null), []);
 
   return (
     <div className="ftree-panel">
@@ -648,15 +361,11 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
               entry={entry}
               sessionId={sessionId}
               depth={0}
-              onPreview={openPreview}
+              onPreview={(entry) => openFilePreview(entry.path)}
               onExpanded={onExpanded}
             />
           ))}
       </div>
-
-      {preview && (
-        <FilePreview preview={preview} sessionId={sessionId} onClose={closePreview} />
-      )}
 
       {changingFolder && (
         <ChangeFolderSheet
