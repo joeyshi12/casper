@@ -29,9 +29,13 @@ npm run typecheck              # all workspaces
 - Run `npm run build`, `npm test`, and `npm run typecheck` before reporting a change as done. For
   unused code too: `npx tsc -p <ws>/tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters`.
 - Never report a pass you didn't watch happen. Quote the failing command instead.
-- Tests live in `tests/` and import from source. Components *can* be imported (`web/tsconfig.json`
-  sets `jsx: react-jsx`); rendering one needs a DOM, and `jsdom` is already a dependency —
-  `tests/widget.test.ts` shows the pattern.
+- Tests live in `tests/` and import from source. Components can be rendered: `tests/transcript-dom.test.ts`
+  is the worked example. Two things bite. Run from the repo root, tsx never reads `web/tsconfig.json`, so
+  JSX compiles with the classic runtime and rendering throws `React is not defined` unless the test sets
+  `globalThis.React` before importing the component. And jsdom computes no layout — `scrollHeight` and
+  `clientHeight` are `0` for everything — so any geometry has to be defined on the element by hand.
+- A DOM test proves wiring, not layout. Anything that depends on real measurement or paint timing, such as
+  holding scroll position across a prepend, still needs a browser the suite doesn't have.
 - Each test file gets its own process, so anything sharing state across files contends: point
   `config.casperDataDir` and `config.kiroSessionsDir` at per-file temp directories rather than the
   developer's real ones.
