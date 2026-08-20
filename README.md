@@ -111,6 +111,7 @@ inside it, and `CASPER_WEB_DIST`, which is install layout rather than a preferen
 | `CASPER_TOKEN` | `token` | _(generated)_ | Entered once at login, exchanged for a per-device cookie |
 | `CASPER_SESSION_TTL_SECONDS` | `sessionTtlSeconds` | `604800` | Device-login lifetime, slid forward on activity |
 | `KIRO_BIN` | `kiroBin` | `kiro-cli` | Path to the kiro-cli binary |
+| `CASPER_KIRO_SESSIONS_DIR` | `kiroSessionsDir` | `~/.kiro/sessions/cli` | Where kiro-cli keeps its own session files, which Casper reads |
 | `DEFAULT_CWD` | `defaultCwd` | cwd | Working directory for new sessions |
 | `DEFAULT_AGENT` | `defaultAgent` | `casper` | Agent for new sessions, so widgets work out of the box. If it is missing, kiro falls back to `kiro_default` on its own |
 | `CASPER_FILE_ROOT` | `fileRoot` | `/` | Confines the file browser. Defaults to everything the server can read; narrow it to keep authenticated users out of system files |

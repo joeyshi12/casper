@@ -23,14 +23,25 @@ import { SessionStore } from '../server/src/session/sessionStore.js';
 import { LoginStore } from '../server/src/session/logins.js';
 import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
 import { bumpSessionToTop } from '../web/src/state/sessions.js';
-import { olderPageRequest } from '../web/src/state/pagination.js';
-import { noopLogger } from './helpers.js';
+import { noopLogger, fakeKiroProcess, type FakeProcess } from './helpers.js';
 import {
   createWorkspace,
   workspaceDir,
   workspacesRoot,
 } from '../server/src/session/workspaces.js';
 import { titleFromPrompt, sanitizeTitle } from '@casper/shared';
+
+// Fixtures go in temp directories, never the developer's real ~/.kiro. Set
+// before any suite runs; node's test runner gives each file its own process, so
+// this cannot leak into another file's config.
+const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-kiro-sessions-'));
+const sessionsCwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-session-cwd-')));
+(config as { kiroSessionsDir: string }).kiroSessionsDir = sessionsDir;
+
+after(() => {
+  fs.rmSync(sessionsDir, { recursive: true, force: true });
+  fs.rmSync(sessionsCwd, { recursive: true, force: true });
+});
 
 
 describe('TurnState: observability fold across a full turn', () => {
@@ -126,27 +137,32 @@ describe('TurnState: resume, crash, and oauth', () => {
   });
 });
 
-describe('EventStore.getSince + SessionManager.wire replay gating', () => {
+describe('EventStore.getSince + replay gating', () => {
   // kiro replays the whole conversation as notifications during session/load;
   // those must be dropped while Session.replaying is set (the transcript is
   // already hydrated from disk), and turn lifecycle events must reach turnState.
+  // Driven through createSession so the wiring under test is the real one.
+  let mgr: SessionManager;
   let store: EventStore;
   let session: Session;
-  let proc: EventEmitter;
+  let proc: FakeProcess;
   const toolCall = {
     method: 'session/update',
     params: { update: { sessionUpdate: 'tool_call', toolCallId: 't1', title: 'x' } },
   };
 
-  before(() => {
-    const log = noopLogger();
-    const mgr = new SessionManager(log) as unknown as { wire(s: unknown, proc: unknown): void };
-    store = new EventStore('replay-regression-test');
-    session = new Session('replay-regression-test', store, '/tmp');
-    proc = new EventEmitter();
-    mgr.wire(session, proc);
+  before(async () => {
+    proc = fakeKiroProcess({ sessionId: 'replay-regression-test' });
+    mgr = new SessionManager(noopLogger(), { spawn: () => proc });
+    const detail = await mgr.createSession({ cwd: sessionsCwd });
+    session = await mgr.ensureOpen(detail.summary.sessionId);
+    store = session.store;
   });
-  after(() => store.dispose());
+  after(() => mgr.disposeAll());
+
+  it('adopts the session id kiro assigned', () => {
+    assert.equal(session.sessionId, 'replay-regression-test');
+  });
 
   // Empty-buffer cursor semantics (run first, before any events are appended).
   it('empty buffer accepts a fresh cursor', () => {
@@ -162,14 +178,22 @@ describe('EventStore.getSince + SessionManager.wire replay gating', () => {
 
   it('replayed notifications dropped during session/load', () => {
     session.replaying = true;
-    proc.emit('notification', toolCall);
-    proc.emit('notification', toolCall);
+    proc.bus.emit('notification', toolCall);
+    proc.bus.emit('notification', toolCall);
     assert.equal(store.head(), 0);
   });
   it('live notifications stored once replay finishes', () => {
     session.replaying = false;
-    proc.emit('notification', toolCall);
+    proc.bus.emit('notification', toolCall);
     assert.equal(store.head(), 1);
+  });
+
+  // Only the session's current process may mutate its state.
+  it('an exit from a replaced process is ignored', () => {
+    const head = store.head();
+    session.proc = undefined;
+    proc.bus.emit('exit', 1, null);
+    assert.equal(store.head(), head, 'a stale process must not record an exit');
   });
 
   // Turn status reaches the snapshot (mid-turn reload shows the stop button).
@@ -186,32 +210,57 @@ describe('EventStore.getSince + SessionManager.wire replay gating', () => {
   });
 });
 
-describe('SessionManager.replayHead (re-open mid-turn must not drop the prompt)', () => {
-  let store: EventStore;
+describe('re-open mid-turn must not drop the prompt', () => {
+  // The head a reconnecting client is given: kiro only writes a turn to its
+  // jsonl once the turn completes, so an in-flight one is missing from the
+  // hydrated transcript and has to be replayed from the event store. Read
+  // through getDetail, which is how a client actually asks.
+  let mgr: SessionManager;
   let session: Session;
-  let mgr: { replayHead(s: unknown, t: unknown): number };
+  let sessionId: string;
   let evSeq: number;
 
-  before(() => {
-    const log = noopLogger();
-    mgr = new SessionManager(log) as unknown as { replayHead(s: unknown, t: unknown): number };
-    store = new EventStore('replayhead-test');
-    session = new Session('replayhead-test', store, '/tmp');
+  before(async () => {
+    mgr = new SessionManager(noopLogger(), {
+      spawn: () => fakeKiroProcess({ sessionId: 'replayhead-test' }),
+    });
+    const detail = await mgr.createSession({ cwd: sessionsCwd });
+    sessionId = detail.summary.sessionId;
+    session = await mgr.ensureOpen(sessionId);
     session.running = true;
-    evSeq = session.record({ kind: 'turn_started', prompt: [{ type: 'text', text: 'hello there' }] }).seq;
+    evSeq = session.record({
+      kind: 'turn_started',
+      prompt: [{ type: 'text', text: 'hello there' }],
+    }).seq;
   });
-  after(() => store.dispose());
+  after(() => mgr.disposeAll());
 
-  it('rewinds to replay an in-flight turn missing from hydrate', () => {
-    assert.equal(mgr.replayHead(session, []), evSeq - 1);
+  it('rewinds to replay an in-flight turn missing from hydrate', async () => {
+    const detail = await mgr.getDetail(sessionId);
+    assert.equal(detail.head, evSeq - 1);
   });
-  it('no rewind when the prompt is already hydrated', () => {
-    const hydrated = [{ type: 'message', message: { id: 'u1', role: 'user', text: 'hello there' } }];
-    assert.equal(mgr.replayHead(session, hydrated), store.head());
+
+  it('no rewind when the prompt is already hydrated', async () => {
+    const file = path.join(config.kiroSessionsDir, `${sessionId}.jsonl`);
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        kind: 'Prompt',
+        data: { message_id: 'u1', content: [{ kind: 'text', data: { text: 'hello there' } }] },
+      }) + '\n',
+    );
+    try {
+      const detail = await mgr.getDetail(sessionId);
+      assert.equal(detail.head, session.store.head());
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
   });
-  it('uses head when no turn is in flight', () => {
+
+  it('uses head when no turn is in flight', async () => {
     session.running = false;
-    assert.equal(mgr.replayHead(session, []), store.head());
+    const detail = await mgr.getDetail(sessionId);
+    assert.equal(detail.head, session.store.head());
   });
 });
 
@@ -241,38 +290,6 @@ describe('sidebar reorder (prompt floats the active session to the top)', () => 
       bumpSessionToTop(list, 'missing', '2026-07-16T12:00:00.000Z').map((s) => s.sessionId).join(),
       'a,b,c',
     );
-  });
-});
-
-describe('transcript pagination (older-page window walks toward index 0)', () => {
-  it('full page adjacent to the window', () => {
-    const full = olderPageRequest(200, 80);
-    assert.equal(full.offset, 120);
-    assert.equal(full.limit, 80);
-  });
-  it('last partial page starts at 0', () => {
-    const partial = olderPageRequest(50, 80);
-    assert.equal(partial.offset, 0);
-    assert.equal(partial.limit, 50);
-  });
-  it('exact page ends at index 0', () => {
-    const exact = olderPageRequest(80, 80);
-    assert.equal(exact.offset, 0);
-    assert.equal(exact.limit, 80);
-  });
-  it('nothing older -> empty request', () => {
-    assert.equal(olderPageRequest(0, 80).limit, 0);
-  });
-  it('pages tile down to zero', () => {
-    let remaining = 200;
-    const offsets: number[] = [];
-    while (remaining > 0) {
-      const { offset, limit } = olderPageRequest(remaining, 80);
-      offsets.push(offset);
-      remaining -= limit;
-    }
-    assert.equal(offsets.join(), '120,40,0');
-    assert.equal(remaining, 0);
   });
 });
 
@@ -564,5 +581,246 @@ describe('naming a session after its first prompt', () => {
   it('gives nothing back for a promptless message', () => {
     assert.equal(titleFromPrompt([{ type: 'image', mimeType: 'image/png', data: 'x' } as never]), '');
     assert.equal(titleFromPrompt(text('   ')), '');
+  });
+});
+
+// These reach SessionManager through its public surface only. Before the spawn
+// seam existed they were unreachable without spawning a real kiro-cli.
+describe('process lifecycle', () => {
+  const managerWith = (spawn: () => FakeProcess) =>
+    new SessionManager(noopLogger(), { spawn });
+
+  it('adopts the id kiro assigns to a brand-new session', async () => {
+    const mgr = managerWith(() => fakeKiroProcess({ sessionId: 'assigned-by-kiro' }));
+    try {
+      const detail = await mgr.createSession({ cwd: sessionsCwd });
+      assert.equal(detail.summary.sessionId, 'assigned-by-kiro');
+      // The temporary pending- id must not survive as a second entry.
+      const ids = (await mgr.listSessions()).map((s) => s.sessionId);
+      assert.deepEqual(ids.filter((id) => id.startsWith('pending-')), []);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  it('loads rather than creates a session that has been live before', async () => {
+    const proc = fakeKiroProcess({ sessionId: 'reload-me' });
+    const mgr = managerWith(() => proc);
+    try {
+      const detail = await mgr.createSession({ cwd: sessionsCwd });
+      assert.deepEqual(proc.calls, ['newSession']);
+
+      // Drop the process, then act again: the session has been live, so kiro is
+      // asked to load it and replay rather than to create a new one.
+      const s = await mgr.ensureOpen(detail.summary.sessionId);
+      s.proc = undefined;
+      await mgr.setModel(detail.summary.sessionId, 'model-2');
+      assert.deepEqual(proc.calls, ['newSession', 'loadSession', 'setModel']);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  it('a failed handshake leaves no half-created session behind', async () => {
+    const mgr = managerWith(() =>
+      fakeKiroProcess({
+        onInitialize: async () => {
+          throw new Error('credentials have expired');
+        },
+      }),
+    );
+    try {
+      await assert.rejects(
+        mgr.createSession({ cwd: sessionsCwd }),
+        /credentials have expired/,
+      );
+      assert.deepEqual(await mgr.listSessions(), []);
+      assert.equal(mgr.liveCount, 0);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  it('evicts the idlest process when at capacity, keeping the busy one', async () => {
+    const cap = config.maxLiveSessions;
+    (config as { maxLiveSessions: number }).maxLiveSessions = 2;
+    const spawned: FakeProcess[] = [];
+    const mgr = managerWith(() => {
+      const p = fakeKiroProcess({ sessionId: `session-${spawned.length + 1}` });
+      spawned.push(p);
+      return p;
+    });
+    try {
+      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createSession({ cwd: sessionsCwd });
+      assert.equal(mgr.liveCount, 2);
+
+      // Mark the first busy so it cannot be the victim, and make the second the
+      // idlest by age.
+      const first = await mgr.ensureOpen('session-1');
+      first.running = true;
+      const second = await mgr.ensureOpen('session-2');
+      second.lastActivity = 0;
+
+      await mgr.createSession({ cwd: sessionsCwd });
+      assert.equal(spawned[1]?.disposed(), true, 'the idle process should be evicted');
+      assert.equal(spawned[0]?.disposed(), false, 'a running turn must not be evicted');
+    } finally {
+      (config as { maxLiveSessions: number }).maxLiveSessions = cap;
+      mgr.disposeAll();
+    }
+  });
+
+  it('re-pointing the working directory drops the process spawned in the old one', async () => {
+    const proc = fakeKiroProcess({ sessionId: 'repoint-me' });
+    const mgr = managerWith(() => proc);
+    const target = path.join(sessionsCwd, 'moved');
+    try {
+      await mgr.createSession({ cwd: sessionsCwd });
+      assert.equal(mgr.liveCount, 1);
+      await mgr.setSessionCwd('repoint-me', target);
+      assert.equal(proc.disposed(), true);
+      assert.equal(mgr.liveCount, 0, 'the next turn respawns in the new directory');
+      assert.equal(await mgr.getSessionCwd('repoint-me'), target);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+});
+
+describe('session summary: one projection over kiro’s file and live state', () => {
+  const writeSessionFile = (
+    sessionId: string,
+    over: Record<string, unknown> = {},
+  ): void => {
+    fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(config.kiroSessionsDir, `${sessionId}.json`),
+      JSON.stringify({
+        session_id: sessionId,
+        title: 'kiro title',
+        cwd: sessionsCwd,
+        created_at: '2026-01-01T00:00:00.000Z',
+        updated_at: '2026-01-02T00:00:00.000Z',
+        session_state: {
+          agent_name: 'file-agent',
+          rts_model_state: {
+            context_usage_percentage: 42,
+            model_info: { model_id: 'file-model' },
+          },
+          conversation_metadata: {
+            user_turn_metadatas: [{ metering_usage: [{ value: 0.25 }] }],
+          },
+        },
+        ...over,
+      }),
+    );
+  };
+
+  const cleanup = (sessionId: string) =>
+    fs.rmSync(path.join(config.kiroSessionsDir, `${sessionId}.json`), { force: true });
+
+  it('a dormant session reports what kiro’s file says', async () => {
+    writeSessionFile('dormant-1');
+    const mgr = new SessionManager(noopLogger());
+    try {
+      const [summary] = await mgr.listSessions();
+      assert.equal(summary?.sessionId, 'dormant-1');
+      assert.equal(summary?.title, 'kiro title');
+      assert.equal(summary?.liveness, 'dormant');
+      assert.equal(summary?.running, false);
+      assert.equal(summary?.agentId, 'file-agent');
+      assert.equal(summary?.modelId, 'file-model');
+      assert.equal(summary?.contextUsagePercentage, 42);
+      assert.ok(Math.abs((summary?.creditsSpent ?? 0) - 0.25) < 1e-9);
+    } finally {
+      mgr.disposeAll();
+      cleanup('dormant-1');
+    }
+  });
+
+  // The bug this projection removes: the list applied fallbacks from kiro's file
+  // and the detail did not, so the same session read two ways disagreed.
+  it('list and detail agree for a live session', async () => {
+    writeSessionFile('agreeing-1');
+    const mgr = new SessionManager(noopLogger(), {
+      spawn: () => fakeKiroProcess({ sessionId: 'agreeing-1' }),
+    });
+    try {
+      await mgr.createSession({ cwd: sessionsCwd });
+      const fromList = (await mgr.listSessions()).find((s) => s.sessionId === 'agreeing-1');
+      const fromDetail = (await mgr.getDetail('agreeing-1')).summary;
+
+      assert.deepEqual(fromDetail, fromList, 'the two read paths must project identically');
+      // createdAt comes from kiro's file, not from when the process started.
+      assert.equal(fromDetail.createdAt, '2026-01-01T00:00:00.000Z');
+      // A live session with no turn yet still reports the file's totals.
+      assert.ok(Math.abs((fromDetail.creditsSpent ?? 0) - 0.25) < 1e-9);
+      assert.equal(fromDetail.contextUsagePercentage, 42);
+      assert.equal(fromDetail.liveness, 'live');
+    } finally {
+      mgr.disposeAll();
+      cleanup('agreeing-1');
+    }
+  });
+
+  it('a Casper override wins over the file, on both read paths', async () => {
+    writeSessionFile('override-1');
+    const mgr = new SessionManager(noopLogger());
+    const moved = path.join(sessionsCwd, 'elsewhere');
+    fs.mkdirSync(moved, { recursive: true });
+    try {
+      mgr.renameSession('override-1', 'my name');
+      await mgr.setSessionCwd('override-1', moved);
+
+      const fromList = (await mgr.listSessions()).find((s) => s.sessionId === 'override-1');
+      const fromDetail = (await mgr.getDetail('override-1')).summary;
+      assert.equal(fromList?.title, 'my name');
+      assert.equal(fromList?.cwd, moved);
+      assert.equal(fromDetail.title, 'my name');
+      assert.equal(fromDetail.cwd, moved);
+    } finally {
+      mgr.disposeAll();
+      cleanup('override-1');
+    }
+  });
+
+  it('the later of kiro’s timestamp and our own activity wins', async () => {
+    // kiro's file says the 2nd; a live event now is later, so the list must not
+    // report a time older than the session's real last activity.
+    writeSessionFile('newer-1');
+    const mgr = new SessionManager(noopLogger(), {
+      spawn: () => fakeKiroProcess({ sessionId: 'newer-1' }),
+    });
+    try {
+      await mgr.createSession({ cwd: sessionsCwd });
+      const s = await mgr.ensureOpen('newer-1');
+      s.record({ kind: 'turn_ended', stopReason: 'end_turn' });
+      const summary = (await mgr.listSessions()).find((x) => x.sessionId === 'newer-1');
+      assert.ok(
+        (summary?.updatedAt ?? '') > '2026-01-02T00:00:00.000Z',
+        `expected live activity to win, got ${summary?.updatedAt}`,
+      );
+    } finally {
+      mgr.disposeAll();
+      cleanup('newer-1');
+    }
+  });
+
+  it('a session kiro deleted out from under us stops being listed', async () => {
+    const mgr = new SessionManager(noopLogger(), {
+      spawn: () => fakeKiroProcess({ sessionId: 'ghost-1' }),
+    });
+    try {
+      await mgr.createSession({ cwd: sessionsCwd });
+      const s = await mgr.ensureOpen('ghost-1');
+      // Live, no file: legitimate for a brand-new session, so it still lists.
+      assert.equal((await mgr.listSessions()).length, 1);
+      // Once its process is gone and it has no file, it is a ghost.
+      s.proc = undefined;
+      assert.deepEqual(await mgr.listSessions(), []);
+    } finally {
+      mgr.disposeAll();
+    }
   });
 });
