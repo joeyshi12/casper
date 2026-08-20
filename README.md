@@ -116,6 +116,8 @@ inside it, and `CASPER_WEB_DIST`, which is install layout rather than a preferen
 | `DEFAULT_AGENT` | `defaultAgent` | `casper` | Agent for new sessions, so widgets work out of the box. If it is missing, kiro falls back to `kiro_default` on its own |
 | `CASPER_FILE_ROOT` | `fileRoot` | `/` | Confines the file browser. Defaults to everything the server can read; narrow it to keep authenticated users out of system files |
 | `MAX_LIVE_SESSIONS` | `maxLiveSessions` | `6` | Concurrent live kiro processes |
+| `EVENT_BUFFER_SIZE` | `eventBufferSize` | `5000` | Events kept per session for replay on reconnect; a client older than the buffer refetches instead |
+| `CASPER_MAX_UPLOAD_BYTES` | `maxUploadBytes` | `104857600` | Largest single uploaded file |
 | `CASPER_DATA_DIR` | _(env only)_ | `~/.casper` | Where `casper.db` and uploaded files live |
 | `CASPER_WEB_DIST` | _(env only)_ | beside the bundle | Built web app to serve |
 
@@ -142,6 +144,9 @@ CASPER_TOKEN=dev npm run dev   # server and web dev servers together
 npm test
 npm run e2e                    # prompt, disconnect mid-turn, reconnect, replay
 ```
+
+`unset NODE_ENV` first if you have it set: a stray `production` breaks installs and
+builds here.
 
 The repo is an npm workspace: `shared/` for types, `web/` for the React app, and
 `server/`, which is the package published to npm. `npm run build` bundles the server
