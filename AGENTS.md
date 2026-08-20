@@ -38,9 +38,14 @@ npm run typecheck              # all workspaces
 ## Commits and PRs
 
 - Commit only when asked. Push only when asked: each push is authorised once, not standing permission.
+- Keep each commit small and auditable: one reviewable idea that stands on its own. Split unrelated
+  concerns even when they arrive together.
 - Work lands through a PR from a branch, not a push to `main`. Keep titles under 70 characters and put
   the detail in the description: what changed, what was tested, anything left blocked.
-- A stack sets each PR's base to the branch below it, so every diff is one commit.
+- More than one commit means a stack, so every diff is one commit and the set merges together once
+  review is done: `gh stack init <bottom..top>` adopts the branches, then `gh stack submit` registers
+  the stack. Chaining `--base` by hand is not a stack - without submit there is nothing to merge as a
+  unit, and `gh stack view` is how you check.
 - The body says what was wrong and why the change fixes it, wrapped at ~90 columns.
 
 ## Security
