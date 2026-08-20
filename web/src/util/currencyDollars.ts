@@ -14,6 +14,11 @@ const AMOUNT = /^\d[\d,.]*\s*(?:[kKmMbB]|bn|billion|million|thousand)?$/;
 /** Words as prose rather than variables. */
 const WORD = /^[a-zA-Z]{3,}$/;
 const OPERATOR = /[=+\-*/<>≤≥±×÷]/;
+/** Hoisted with the rest: escapeCurrencyDollars runs over the whole message per chunk. */
+const TRAILING_PUNCT = /[.,;:!?]$/;
+const NEWLINE = /\n/;
+const WHITESPACE = /\s+/;
+const GROUPED_NUMBER = /\d,\d{3}\b/;
 
 /**
  * Whether the text between two dollar signs is mathematical. Errs toward math only when
@@ -23,16 +28,16 @@ export function looksLikeMath(content: string): boolean {
   const text = content.trim();
   if (!text) return false;
   // Newlines inside a single-dollar pair mean the pair spans unrelated lines.
-  if (/\n/.test(content)) return false;
+  if (NEWLINE.test(content)) return false;
   if (NOTATION.test(text)) return true;
   if (AMOUNT.test(text)) return false;
 
-  const words = text.split(/\s+/);
+  const words = text.split(WHITESPACE);
   // Prose: several real words, or any word long enough to be a word rather than a symbol.
-  const proseWords = words.filter((w) => WORD.test(w.replace(/[.,;:!?]$/, '')));
+  const proseWords = words.filter((w) => WORD.test(w.replace(TRAILING_PUNCT, '')));
   if (proseWords.length >= 2) return false;
   // A comma-grouped number anywhere reads as an amount, not an expression.
-  if (/\d,\d{3}\b/.test(text)) return false;
+  if (GROUPED_NUMBER.test(text)) return false;
 
   // A short symbolic run is math: x, n, 2n, a+b, E = mc, \pi.
   const symbolic = words.every((w) => w.length <= 4);
