@@ -18,7 +18,7 @@ import { MarkdownRenderer } from './MarkdownRenderer.js';
 /**
  * The file preview, for whoever asks: the file tree, or a read/write tool call in the
  * transcript. It used to belong to the tree, which meant it could only be opened while
- * the panel was open. The store holds the path; this loads and shows it.
+ * the panel was open. The store holds the path; this loads it and renders PreviewModal.
  *
  * Portalled to the body like the app's other modals - a `transform` on an ancestor would
  * otherwise become the containing block for a `position: fixed` overlay, and the mobile
@@ -37,8 +37,8 @@ interface PreviewState {
 
 const basename = (p: string): string => p.split('/').pop() || p;
 
-/** File preview modal - shows text content or image in a centered overlay. */
-function FilePreview({
+/** The modal itself - text content, image, or a rendered page in a centered overlay. */
+function PreviewModal({
   preview,
   sessionId,
   onClose,
@@ -177,7 +177,7 @@ function FilePreview({
   );
 }
 
-export function FilePreviewHost() {
+export function FilePreview() {
   const path = useStore((s) => s.previewPath);
   const sessionId = useStore((s) => s.activeId);
   const closeFilePreview = useStore((s) => s.closeFilePreview);
@@ -238,7 +238,7 @@ export function FilePreviewHost() {
 
   if (!preview || !sessionId) return null;
   return createPortal(
-    <FilePreview preview={preview} sessionId={sessionId} onClose={close} />,
+    <PreviewModal preview={preview} sessionId={sessionId} onClose={close} />,
     document.body,
   );
 }
