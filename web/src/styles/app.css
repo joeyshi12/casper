@@ -315,13 +315,27 @@
 .srow-menu-btn {
   width: 28px;
   height: 28px;
-  font-size: 18px;
   opacity: 0;
 }
 .srow:hover .srow-menu-btn,
 .srow.is-active .srow-menu-btn {
   opacity: 1;
 }
+/* One step above the row it sits on, in both row states. The inherited .iconbtn hover
+   was --n1: identical to the row's own hover fill, so hovering the button changed
+   nothing, and darker than the active row's --n2, so it read as a hole. Source order
+   matters here - a hovered active row matches both, and the later rule should win. */
+.srow:hover .srow-menu-btn:hover,
+.srow:hover .srow-menu-btn:active {
+  background: var(--n2);
+}
+.srow.is-active .srow-menu-btn:hover,
+.srow.is-active .srow-menu-btn:active {
+  background: var(--n3);
+}
+/* The menu's look. Positioning is separate: the account menu is absolute inside its
+   own wrapper, while a session row's is portaled to body and positioned from script,
+   because absolute inside the scrolling list grew that list's scroll height. */
 .menu-list {
   position: absolute;
   top: 34px;
@@ -333,6 +347,14 @@
   border: 1px solid var(--n2);
   border-radius: var(--r-md);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+/* Portaled to body, so it overlays instead of taking part in any layout. top/left
+   come from PopoverMenu, which also flips it above the trigger near the bottom. */
+.menu-list-floating {
+  position: fixed;
+  top: auto;
+  right: auto;
+  z-index: 60;
 }
 .menu-item {
   display: block;
