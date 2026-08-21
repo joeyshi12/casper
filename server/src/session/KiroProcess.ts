@@ -67,19 +67,33 @@ export class KiroProcess extends EventEmitter {
     // Keep the tail of stderr, not just the log: when kiro dies (expired
     // credentials, a bad flag) the reason is printed here, and 'process exited
     // (code=1)' on its own tells the user nothing.
-    this.child.stderr.pipe(split2()).on('data', (line: string) => {
+    const stderrLines = this.child.stderr.pipe(split2());
+    stderrLines.on('data', (line: string) => {
       if (!line.trim()) return;
       this.log.debug({ stderr: line }, 'kiro-cli stderr');
       this.recentStderr.push(line.trim());
       if (this.recentStderr.length > STDERR_KEEP) this.recentStderr.shift();
     });
+    // 'exit' can arrive before the last of stderr has been read, and on some node
+    // versions it does: the reason came out as a bare "exited with code 1" with kiro's
+    // actual complaint still in the pipe. Wait for the stream to finish instead of
+    // depending on which callback the event loop runs first.
+    const stderrEnded = new Promise<void>((resolve) => {
+      stderrLines.once('end', resolve);
+      stderrLines.once('error', () => resolve());
+    });
 
     this.child.on('exit', (code, signal) => {
-      this.client.fail(this.exitReason(code, signal));
-      if (!this.disposed) {
-        this.log.warn({ code, signal }, 'kiro-cli acp exited unexpectedly');
-      }
-      this.emit('exit', code, signal);
+      // Bounded: a stream that somehow never ends must not wedge the exit path, or an
+      // in-flight request would never reject and the session would never go dormant.
+      const capped = new Promise<void>((resolve) => setTimeout(resolve, 250).unref());
+      void Promise.race([stderrEnded, capped]).then(() => {
+        this.client.fail(this.exitReason(code, signal));
+        if (!this.disposed) {
+          this.log.warn({ code, signal }, 'kiro-cli acp exited unexpectedly');
+        }
+        this.emit('exit', code, signal);
+      });
     });
 
     // A spawn failure (e.g. bad cwd or missing binary) emits 'error'. Fail the
