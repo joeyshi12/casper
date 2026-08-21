@@ -7,7 +7,7 @@ import { FileTree } from '../chat/FileTree.js';
 import { FilePreview } from '../chat/FilePreview.js';
 import { Composer } from '../chat/Composer.js';
 import { ConnDot } from '../common/ConnBanner.js';
-import { Spinner, FilesIcon, MenuIcon } from '../common/icons.js';
+import { Spinner, FilesIcon, MenuIcon, RefreshIcon } from '../common/icons.js';
 
 interface Props {
   /** A session being composed: no id yet, created by the first prompt. */
@@ -30,6 +30,8 @@ interface Props {
   onChangeModel: (modelId: string) => void;
   onChangeAgent: (modeId: string) => void;
   onCompact: () => void;
+  /** Restart the session's kiro process, re-detecting .kiro and MCP servers. */
+  onReload: () => void;
 }
 
 /** The right-hand chat area. Shows an empty prompt when no session is open. */
@@ -49,6 +51,7 @@ export function ChatPane({
   onChangeModel,
   onChangeAgent,
   onCompact,
+  onReload,
 }: Props) {
   const title = useStore((s) => s.sessions.find((x) => x.sessionId === s.activeId)?.title);
   // The hero belongs to an empty draft: sending hands over to the transcript at once, so the
@@ -56,6 +59,9 @@ export function ChatPane({
   const composing = useStore((st) => isDraft && st.pending.length === 0 && st.items.length === 0);
   const activeId = useStore((s) => s.activeId);
   const sessionNotice = useStore((s) => s.sessionNotice);
+  const reloading = useStore((s) => s.reloading);
+  // A restart mid-turn would lose the turn, so the control waits for it.
+  const turnRunning = useStore((s) => s.observability.turnStatus === 'running');
   const dismissSessionNotice = useStore((s) => s.dismissSessionNotice);
   const [showTree, setShowTree] = useState(false);
 
@@ -197,10 +203,22 @@ export function ChatPane({
           )}
           {/* A draft has no socket yet, so a red "Offline" dot would be a lie. */}
           {!isDraft && <ConnDot status={connStatus} />}
+          {/* A draft has no process to restart yet. */}
+          {!isDraft && (
+            <button
+              className="chat-head-btn chat-reload"
+              onClick={onReload}
+              disabled={reloading || turnRunning}
+              title={turnRunning ? 'Reload after the turn' : 'Reload session'}
+              aria-label="Reload session"
+            >
+              {reloading ? <Spinner size={18} /> : <RefreshIcon size={18} />}
+            </button>
+          )}
           {/* A draft has no workspace yet, so there is nothing to browse. */}
           {!isDraft && (
             <button
-              className={`ftree-toggle ${showTree ? 'is-active' : ''}`}
+              className={`chat-head-btn ftree-toggle ${showTree ? 'is-active' : ''}`}
               onClick={() => setShowTree((v) => !v)}
               title="Toggle file tree"
               aria-label="Toggle file tree"

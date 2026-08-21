@@ -33,7 +33,7 @@ interface PendingMessage {
 
 /** A condition that outlives a single turn (bad credentials, missing binary), so
  *  it stays pinned above the composer until it's resolved or dismissed. */
-interface SessionNotice {
+export interface SessionNotice {
   title: string;
   fix?: string;
   /** The raw server message, kept so the notice can offer the real text. */
@@ -76,6 +76,8 @@ interface CasperState {
   connStatus: ConnStatus;
   /** Why creating a session failed, shown on the chat pane with a retry. */
   createError: string | null;
+  /** True while the session's kiro process is being restarted. */
+  reloading: boolean;
   /** File the user asked to look at, relative to the workspace. Set by the file tree
    *  and by a read/write tool call in the transcript; null when nothing is open. */
   previewPath: string | null;
@@ -94,8 +96,11 @@ interface CasperState {
   addPending: (id: string, text: string) => void;
   markPendingFailed: (id: string, error?: string) => void;
   dismissSessionNotice: () => void;
+  /** Pin a condition above the composer, for a failure with no turn to attach to. */
+  setSessionNotice: (notice: SessionNotice) => void;
   setConnStatus: (status: ConnStatus) => void;
   setCreateError: (message: string | null) => void;
+  setReloading: (reloading: boolean) => void;
   openFilePreview: (path: string) => void;
   closeFilePreview: () => void;
   // Optimistic transitions. Here rather than at the call site because applyEvent
@@ -129,10 +134,12 @@ export const useStore = create<CasperState>((set, get) => ({
   sessionNotice: null,
   connStatus: 'closed',
   createError: null,
+  reloading: false,
   previewPath: null,
 
   setConnStatus: (connStatus) => set({ connStatus }),
   setCreateError: (createError) => set({ createError }),
+  setReloading: (reloading) => set({ reloading }),
 
   openFilePreview: (previewPath) => set({ previewPath }),
   closeFilePreview: () => set({ previewPath: null }),
@@ -242,6 +249,7 @@ export const useStore = create<CasperState>((set, get) => ({
     }),
 
   dismissSessionNotice: () => set({ sessionNotice: null }),
+  setSessionNotice: (sessionNotice) => set({ sessionNotice }),
 
   addPending: (id, text) =>
     set((s) => ({ pending: [...s.pending, { id, text, status: 'sending' }] })),

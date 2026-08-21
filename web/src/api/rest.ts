@@ -30,7 +30,15 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   if (res.status === 401) throw new Error('Unauthorized');
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`${method} ${path} failed (${res.status}): ${text}`);
+    // The server explains every rejection in { error }. Prefer that sentence: the
+    // raw body puts JSON and a status code in front of the user.
+    let reason = '';
+    try {
+      reason = (JSON.parse(text) as { error?: string }).error ?? '';
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(reason || `${method} ${path} failed (${res.status}): ${text}`);
   }
   const text = await res.text();
   return (text ? JSON.parse(text) : {}) as T;
@@ -70,6 +78,12 @@ export const api = {
   /** Re-point a session at a different working directory. */
   setSessionCwd: (id: string, cwd: string) =>
     req<{ ok: boolean; cwd: string }>('POST', `/api/sessions/${id}/cwd`, { cwd }),
+  /**
+   * Restart the session's kiro process so its `.kiro` directory, agent definition
+   * and MCP servers are detected again. Answers with the refreshed detail.
+   */
+  reloadSession: (id: string) =>
+    req<SessionDetail>('POST', `/api/sessions/${id}/reload`),
   /** List files/directories in a session's workspace. */
   tree: (id: string, relativePath = '') =>
     req<TreeResponse>(
