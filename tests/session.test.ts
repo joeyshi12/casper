@@ -1,7 +1,7 @@
 // Session state: the folds, the event store, replay and the SQLite stores.
 // Run with: npm test
 
-import { describe, it, before, beforeEach, after } from 'node:test';
+import { describe, it, before, beforeEach, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -697,6 +697,322 @@ describe('process lifecycle', () => {
     } finally {
       mgr.disposeAll();
     }
+  });
+});
+
+// kiro binds the agent definition, the workspace's .kiro directory and its MCP
+// servers when the child starts, and offers no ACP method to re-read them, so a
+// reload is a process replacement.
+describe('reloading a session re-detects its setup', () => {
+  const managerWithSpawns = (spawned: FakeProcess[]) =>
+    new SessionManager(noopLogger(), {
+      spawn: () => {
+        const p = fakeKiroProcess({ sessionId: 'reloadable' });
+        spawned.push(p);
+        return p;
+      },
+    });
+
+  // A reload is a load, and kiro can only load a session whose event log has
+  // entries. Stand in for what a completed turn leaves behind.
+  const persist = (sessionId: string) => {
+    fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(config.kiroSessionsDir, `${sessionId}.json`),
+      JSON.stringify({ session_id: sessionId, cwd: sessionsCwd }),
+    );
+    fs.writeFileSync(
+      path.join(config.kiroSessionsDir, `${sessionId}.jsonl`),
+      JSON.stringify({
+        kind: 'Prompt',
+        data: { message_id: 'm1', content: [{ kind: 'text', data: { text: 'hi' } }] },
+      }) + '\n',
+    );
+  };
+  const unpersist = (sessionId: string) => {
+    for (const ext of ['json', 'jsonl']) {
+      fs.rmSync(path.join(config.kiroSessionsDir, `${sessionId}.${ext}`), { force: true });
+    }
+  };
+
+  afterEach(() => unpersist('reloadable'));
+
+  it('replaces the process and loads the session back into the new one', async () => {
+    const spawned: FakeProcess[] = [];
+    const mgr = managerWithSpawns(spawned);
+    try {
+      await mgr.createSession({ cwd: sessionsCwd });
+      assert.deepEqual(spawned[0]?.calls, ['newSession']);
+      persist('reloadable');
+
+      await mgr.reloadSession('reloadable');
+      assert.equal(spawned.length, 2, 'a second process should have been spawned');
+      // Awaited out, not just signalled: kiro flushes its session file on exit and
+      // the replacement reads that file.
+      assert.ok(spawned[0]?.calls.includes('disposeAndWait'));
+      // The transcript comes back via load, not a fresh session.
+      assert.deepEqual(spawned[1]?.calls, ['loadSession']);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  it('leaves the session live, so the next prompt does not respawn again', async () => {
+    const spawned: FakeProcess[] = [];
+    const mgr = managerWithSpawns(spawned);
+    try {
+      await mgr.createSession({ cwd: sessionsCwd });
+      persist('reloadable');
+      await mgr.reloadSession('reloadable');
+      assert.equal(mgr.liveCount, 1);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  it('records no process_exited for a deliberate restart', async () => {
+    const spawned: FakeProcess[] = [];
+    const mgr = managerWithSpawns(spawned);
+    try {
+      await mgr.createSession({ cwd: sessionsCwd });
+      persist('reloadable');
+      const before = mgr.getStore('reloadable')!.getSince(0).events.length;
+      await mgr.reloadSession('reloadable');
+      // The fake exits on demand; emit what a real child emits as it shuts down.
+      spawned[0]!.bus.emit('exit', 0, null);
+      const kinds = mgr
+        .getStore('reloadable')!
+        .getSince(0)
+        .events.slice(before)
+        .map((e) => e.payload.kind);
+      assert.deepEqual(kinds.filter((k) => k === 'process_exited'), []);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  it('refuses to reload while a turn is running', async () => {
+    const spawned: FakeProcess[] = [];
+    const mgr = managerWithSpawns(spawned);
+    try {
+      await mgr.createSession({ cwd: sessionsCwd });
+      persist('reloadable');
+      (await mgr.ensureOpen('reloadable')).running = true;
+      await assert.rejects(mgr.reloadSession('reloadable'), /turn is running/);
+      assert.equal(spawned.length, 1, 'the running turn keeps its process');
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  it('refuses a session with no recorded turn, keeping the process it has', async () => {
+    // kiro creates the event log empty at session/new and refuses to load a session
+    // that has nothing in it. Tearing the process down first would replace a working
+    // one with a process that answers "Session not found".
+    const spawned: FakeProcess[] = [];
+    const mgr = managerWithSpawns(spawned);
+    try {
+      await mgr.createSession({ cwd: sessionsCwd });
+      // The files exist, as kiro's do from creation; the event log is empty.
+      fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(config.kiroSessionsDir, 'reloadable.json'),
+        JSON.stringify({ session_id: 'reloadable', cwd: sessionsCwd }),
+      );
+      fs.writeFileSync(path.join(config.kiroSessionsDir, 'reloadable.jsonl'), '');
+
+      await assert.rejects(mgr.reloadSession('reloadable'), /has not saved this session/);
+      assert.equal(spawned.length, 1);
+      assert.equal(spawned[0]?.disposed(), false, 'the live process must survive');
+      assert.equal(mgr.liveCount, 1);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  it('reports the reloaded session, so the client can apply it', async () => {
+    const spawned: FakeProcess[] = [];
+    const mgr = managerWithSpawns(spawned);
+    try {
+      await mgr.createSession({ cwd: sessionsCwd });
+      persist('reloadable');
+      const detail = await mgr.reloadSession('reloadable');
+      assert.equal(detail.summary.sessionId, 'reloadable');
+      assert.equal(detail.summary.liveness, 'live');
+      // The modes are the fresh process's, not the disposed one's cached copy.
+      assert.deepEqual(detail.modes.map((m) => m.id), ['casper']);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  // A message sent while the process is being replaced used to be handed the process
+  // the reload was about to dispose, which killed the turn mid-flight. It must wait
+  // for the replacement instead.
+  describe('a message sent mid-reload', () => {
+    /** A manager whose first process holds its shutdown open until released. */
+    const gatedManager = (spawned: FakeProcess[]) => {
+      let release!: () => void;
+      const held = new Promise<void>((r) => {
+        release = r;
+      });
+      const mgr = new SessionManager(noopLogger(), {
+        spawn: () => {
+          const first = spawned.length === 0;
+          const p = fakeKiroProcess({
+            sessionId: 'reloadable',
+            ...(first ? { onDisposeAndWait: () => held } : {}),
+          });
+          spawned.push(p);
+          return p;
+        },
+      });
+      return { mgr, release };
+    };
+
+    const waitFor = async (what: string, ok: () => boolean, timeoutMs = 2000) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (ok()) return;
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      assert.fail(`timed out waiting for ${what}`);
+    };
+
+    it('runs on the replacement process, never on the one being disposed', async () => {
+      const spawned: FakeProcess[] = [];
+      const { mgr, release } = gatedManager(spawned);
+      try {
+        await mgr.createSession({ cwd: sessionsCwd });
+        persist('reloadable');
+
+        const reload = mgr.reloadSession('reloadable');
+        // Hold it at shutdown: this is the window the prompt used to slip into.
+        await waitFor('the reload to reach shutdown', () =>
+          spawned[0]!.calls.includes('disposeAndWait'),
+        );
+
+        const prompt = mgr.runPrompt('reloadable', [{ type: 'text', text: 'hi' }]);
+        // No wait needed, and none wanted: the prompt cannot reach a process until
+        // release() below lets the reload finish, so this holds by causality.
+        assert.ok(
+          !spawned[0]!.calls.includes('prompt'),
+          'the process being disposed must never be prompted',
+        );
+        assert.equal(spawned.length, 1, 'no process is spawned until the old one is gone');
+
+        release();
+        await reload;
+        await prompt;
+
+        assert.equal(spawned.length, 2);
+        assert.ok(
+          spawned[1]!.calls.includes('prompt'),
+          'the turn should run on the replacement',
+        );
+      } finally {
+        mgr.disposeAll();
+      }
+    });
+
+    it('still records exactly one turn_started', async () => {
+      const spawned: FakeProcess[] = [];
+      const { mgr, release } = gatedManager(spawned);
+      try {
+        await mgr.createSession({ cwd: sessionsCwd });
+        persist('reloadable');
+        const reload = mgr.reloadSession('reloadable');
+        await waitFor('shutdown', () => spawned[0]!.calls.includes('disposeAndWait'));
+        const prompt = mgr.runPrompt('reloadable', [{ type: 'text', text: 'hi' }]);
+        release();
+        await reload;
+        await prompt;
+
+        const starts = mgr
+          .getStore('reloadable')!
+          .getSince(0)
+          .events.filter((e) => e.payload.kind === 'turn_started');
+        assert.equal(starts.length, 1);
+      } finally {
+        mgr.disposeAll();
+      }
+    });
+
+    it('refuses a second reload while one is already running', async () => {
+      const spawned: FakeProcess[] = [];
+      const { mgr, release } = gatedManager(spawned);
+      try {
+        await mgr.createSession({ cwd: sessionsCwd });
+        persist('reloadable');
+        const first = mgr.reloadSession('reloadable');
+        await waitFor('shutdown', () => spawned[0]!.calls.includes('disposeAndWait'));
+
+        await assert.rejects(mgr.reloadSession('reloadable'), /already running/);
+
+        release();
+        await first;
+        assert.equal(spawned.length, 2, 'only one replacement process');
+      } finally {
+        mgr.disposeAll();
+      }
+    });
+
+    // The other direction. A prompt on a dormant session spends seconds in ensureProc
+    // before it has a process; a reload entering that gap used to see no turn, drain the
+    // spawn, and dispose the very child the prompt was about to be sent to.
+    it('is refused when a prompt is still spawning its process', async () => {
+      const spawned: FakeProcess[] = [];
+      let releaseInit!: () => void;
+      const initGate = new Promise<void>((r) => {
+        releaseInit = r;
+      });
+      let gateInit = false;
+      const mgr = new SessionManager(noopLogger(), {
+        spawn: () => {
+          const p = fakeKiroProcess({
+            sessionId: 'reloadable',
+            ...(gateInit
+              ? {
+                  onInitialize: async () => {
+                    await initGate;
+                    return {};
+                  },
+                }
+              : {}),
+          });
+          spawned.push(p);
+          return p;
+        },
+      });
+      try {
+        await mgr.createSession({ cwd: sessionsCwd });
+        persist('reloadable');
+        // Dormant, so the prompt has to spawn before it can send anything.
+        (await mgr.ensureOpen('reloadable')).proc = undefined;
+        gateInit = true;
+
+        const prompt = mgr.runPrompt('reloadable', [{ type: 'text', text: 'hi' }]);
+        await waitFor('the respawn to begin', () => spawned.length === 2);
+
+        // The timer is a hang detector, not a wait: before the fix the reload drained
+        // s.spawning and never returned while initialize was held.
+        const outcome = await Promise.race([
+          mgr.reloadSession('reloadable').then(
+            () => 'reloaded',
+            (e: Error) => e.message,
+          ),
+          new Promise<string>((r) => setTimeout(() => r('hung'), 500)),
+        ]);
+        assert.match(outcome, /turn is running/);
+
+        releaseInit();
+        await prompt;
+        assert.equal(spawned.length, 2, 'the reload spawned nothing of its own');
+      } finally {
+        releaseInit();
+        mgr.disposeAll();
+      }
+    });
   });
 });
 

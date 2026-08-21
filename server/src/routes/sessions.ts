@@ -127,6 +127,18 @@ export function registerSessionRoutes(
     },
   );
 
+  // Restart the session's kiro child so a `.kiro` directory, agent definition or
+  // MCP server that changed since it started is picked up. Returns the refreshed
+  // detail, so the client applies it exactly as it applies a resync.
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/reload', async (req, reply) => {
+    try {
+      return await manager.reloadSession(req.params.id);
+    } catch (err) {
+      reply.code(400);
+      return { error: (err as Error).message };
+    }
+  });
+
   // Permanently delete a session (memory + on-disk files).
   app.delete<{ Params: { id: string } }>('/api/sessions/:id', async (req) => {
     await manager.deleteSession(req.params.id);

@@ -33,6 +33,8 @@ export function fakeKiroProcess(
     currentModeId?: string;
     onPrompt?: () => Promise<SessionPromptResult>;
     onInitialize?: () => Promise<unknown>;
+    /** Hold the shutdown open, so a reload can be observed mid-flight. */
+    onDisposeAndWait?: () => Promise<void>;
   } = {},
 ): FakeProcess {
   const bus = new EventEmitter();
@@ -62,7 +64,14 @@ export function fakeKiroProcess(
       calls.push('loadSession');
       return handshake();
     },
-    prompt: opts.onPrompt ?? (async () => ({ stopReason: 'end_turn' }) as SessionPromptResult),
+    // Recorded even when a test supplies its own onPrompt, so "which process got
+    // prompted" is answerable - the reload race turns on exactly that.
+    async prompt() {
+      calls.push('prompt');
+      return opts.onPrompt
+        ? opts.onPrompt()
+        : ({ stopReason: 'end_turn' } as SessionPromptResult);
+    },
     stderrTail: () => '',
     cancel() {
       calls.push('cancel');
@@ -82,7 +91,10 @@ export function fakeKiroProcess(
     },
     async disposeAndWait() {
       disposed = true;
+      // Recorded before the hook runs, so a test can see the reload has reached
+      // shutdown while the hook still holds it there.
       calls.push('disposeAndWait');
+      if (opts.onDisposeAndWait) await opts.onDisposeAndWait();
     },
   } as FakeProcess;
 }

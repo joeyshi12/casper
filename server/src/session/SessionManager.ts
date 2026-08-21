@@ -29,6 +29,7 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { invalidateAgents } from './agents.js';
 import { createWorkspace, isWorkspacePath } from './workspaces.js';
 import type { Logger } from '../util/logger.js';
 import { isWithinRoot } from '../util/paths.js';
@@ -37,6 +38,7 @@ import { EventStore } from './EventStore.js';
 import { TurnState } from './TurnState.js';
 import {
   deletePersistedSession,
+  hasRecordedTurns,
   hydrateTranscript,
   listPersistedSessions,
   readPersistedSession,
@@ -126,6 +128,13 @@ export class Session {
   proc?: ManagedProcess;
   // In-flight spawn, so concurrent actions share one process.
   spawning?: Promise<ManagedProcess>;
+  /**
+   * Set while this session's process is being replaced, and resolved when the
+   * replacement is ready. Claimed synchronously with the reload's guard, so an
+   * action arriving during one waits for the new process instead of acting on the
+   * one about to be disposed.
+   */
+  reloading?: Promise<void>;
   // True while kiro is replaying history during session/load. The transcript is
   // already hydrated from disk, so replayed notifications must not be appended
   // to the live store (doing so floods the chat with duplicate tool calls).
@@ -265,6 +274,86 @@ export class SessionManager {
       this.log.info({ sessionId, cwd: resolved }, 'session working directory changed');
     }
     return resolved;
+  }
+
+  /**
+   * Restart the session's kiro child, so everything kiro only reads when a child
+   * starts is read again: the agent definition, the workspace's `.kiro` directory,
+   * and the MCP servers kiro launches for itself.
+   *
+   * No ACP method does this. kiro advertises no reload command, and `session/set_mode`
+   * leaves the MCP servers it started alone, so replacing the process is the only
+   * way - the transcript comes back with `session/load`.
+   *
+   * The old child is awaited out before the new one starts, because kiro flushes its
+   * session file on shutdown and the replacement reads that file to reload the
+   * conversation. Respawned eagerly rather than at the next prompt, so the caller
+   * gets a detail that reflects what the fresh process reported.
+   *
+   * Needs a session that has recorded a turn, so it can be loaded back. Verified
+   * against kiro 2.11: loading one with an empty event log fails with "Session not
+   * found", and kiro deletes both its files when that process exits.
+   */
+  async reloadSession(sessionId: string): Promise<SessionDetail> {
+    const s = await this.ensureOpen(sessionId);
+    // Guard and claim in one tick. Every await below yields, and a check-then-act
+    // guard excluded nothing: a prompt arriving in one of those gaps used to start a
+    // turn on the very process this is about to dispose, killing it mid-flight.
+    if (s.running) {
+      throw new Error('Cannot reload while a turn is running');
+    }
+    if (s.reloading) {
+      throw new Error('A reload is already running for this session');
+    }
+    let ready!: () => void;
+    s.reloading = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+
+    try {
+      return await this.replaceProcess(s);
+    } finally {
+      // Cleared before waking anyone, so a waiter never sees a stale claim.
+      s.reloading = undefined;
+      ready();
+    }
+  }
+
+  /** The reload itself. Only ever called with the session's reload claim held. */
+  private async replaceProcess(s: Session): Promise<SessionDetail> {
+    if (!(await hasRecordedTurns(s.sessionId))) {
+      throw new Error(
+        'kiro has not saved this session yet. Send a message first, then reload.',
+      );
+    }
+    // A spawn already in flight would otherwise be handed back below as the
+    // "reloaded" process, or race the one this starts.
+    if (s.spawning) await s.spawning.catch(() => {});
+
+    const old = s.proc;
+    if (old) {
+      // Cleared before the wait so the exit handler sees a replaced process and
+      // records no process_exited: this restart is deliberate, not a crash.
+      s.proc = undefined;
+      await old.disposeAndWait().catch(() => {});
+    }
+    // Whatever the last process reported is now stale; the new one re-reports.
+    s.availableModes = [];
+    await this.ensureProc(s);
+    s.lastActivity = Date.now();
+    // The agent list is read from kiro, not from the session, and reloading is
+    // exactly when a newly created agent should show up.
+    invalidateAgents();
+    this.log.info({ sessionId: s.sessionId, cwd: s.cwd }, 'session reloaded');
+    return this.getDetail(s.sessionId);
+  }
+
+  /**
+   * Wait out a reload before touching the session's process. Without this an action
+   * can be handed the process that the reload is about to dispose.
+   */
+  private async settleReload(s: Session): Promise<void> {
+    if (s.reloading) await s.reloading;
   }
 
   get liveCount(): number {
@@ -482,10 +571,25 @@ export class SessionManager {
 
   async runPrompt(sessionId: string, content: PromptContentBlock[]): Promise<void> {
     const s = await this.ensureOpen(sessionId);
-    const proc = await this.ensureProc(s);
+    // Held rather than rejected: a message typed while the process is being replaced
+    // should land on the new one, not bounce back at the user.
+    await this.settleReload(s);
     if (s.running) throw new Error('A turn is already running for this session');
+    // Claimed before the spawn rather than after it. Bringing a dormant session up takes
+    // seconds, and a reload entering that gap saw no turn, drained this spawn, and then
+    // disposed the very child this prompt was about to be sent to.
     s.running = true;
     s.lastActivity = Date.now();
+
+    let proc: ManagedProcess;
+    try {
+      proc = await this.ensureProc(s);
+    } catch (err) {
+      // Nothing to run the turn on, so release the claim or the session looks busy
+      // forever and can never be reloaded either.
+      s.running = false;
+      throw err;
+    }
     // Named before the turn is announced, so a client reacting to turn_started already
     // sees it. Only when nothing has named it yet: a title the user set, or one taken
     // from a chosen working directory, is theirs to keep.
@@ -527,6 +631,7 @@ export class SessionManager {
 
   async setMode(sessionId: string, modeId: string): Promise<void> {
     const s = await this.ensureOpen(sessionId);
+    await this.settleReload(s);
     const proc = await this.ensureProc(s);
     await proc.setMode(s.sessionId, modeId);
     s.currentModeId = modeId;
@@ -536,6 +641,7 @@ export class SessionManager {
 
   async setModel(sessionId: string, modelId: string): Promise<void> {
     const s = await this.ensureOpen(sessionId);
+    await this.settleReload(s);
     const proc = await this.ensureProc(s);
     await proc.setModel(s.sessionId, modelId);
     s.modelId = modelId;
@@ -544,6 +650,7 @@ export class SessionManager {
 
   async execCommand(sessionId: string, command: string, args?: string): Promise<void> {
     const s = await this.ensureOpen(sessionId);
+    await this.settleReload(s);
     const proc = await this.ensureProc(s);
     await proc.execCommand(s.sessionId, command, args);
     s.lastActivity = Date.now();

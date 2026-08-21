@@ -94,8 +94,11 @@ npm run typecheck              # all workspaces
 ## Architecture notes
 
 - **Sessions live in kiro's files**, `~/.kiro/sessions/cli/<id>.{json,jsonl}`. `casper.db` holds only
-  title/cwd overrides and login hashes. kiro writes a session file when a turn completes, not at
-  creation, so a brand-new session legitimately has no file (see `isGhost` in `SessionManager`).
+  title/cwd overrides and login hashes. kiro creates both files at `session/new` but leaves the
+  `.jsonl` empty until a turn completes, and **deletes both** when a session that never ran one
+  exits — so a brand-new session legitimately ends up with no file (see `isGhost` in
+  `SessionManager`). An empty `.jsonl` also means kiro will refuse `session/load` with "Session not
+  found", which is what `hasRecordedTurns` gates a reload on.
 - **One title resolver**, `shared/src/titles.ts`. Don't add a second precedence chain. The same goes
   for a session summary: `summaryOf` in `SessionManager` is the only place one is assembled.
 - Store updates go through `applyEvent`, which drops anything whose `seq` it has seen. Work that
