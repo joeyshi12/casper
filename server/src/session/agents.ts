@@ -12,7 +12,20 @@ const BUILTIN: AgentMode[] = [
   { id: 'kiro_guide', name: 'kiro_guide', description: 'Guidance and Q&A agent' },
 ];
 
-let cache: AgentMode[] | null = null;
+/**
+ * Agents come and go while the server runs - `/agent create`, or a file dropped
+ * into ~/.kiro/agents - so the list is cached briefly rather than for the process
+ * lifetime, which left the picker wrong until a restart. Long enough that opening
+ * the picker doesn't shell out repeatedly; short enough to notice a new agent.
+ */
+const CACHE_TTL_MS = 15_000;
+
+let cache: { at: number; agents: AgentMode[] } | null = null;
+
+/** Forget the cached list, so the next read shells out. Used by a session reload. */
+export function invalidateAgents(): void {
+  cache = null;
+}
 
 // Strip ANSI colour codes kiro emits.
 const ANSI = /\x1b\[[0-9;]*m/g;
@@ -20,10 +33,10 @@ const ANSI = /\x1b\[[0-9;]*m/g;
 /**
  * List available agents by parsing `kiro-cli agent list`. The output has a
  * leading "* " marker on the default and two columns (name, scope, description);
- * we only need the id/name for the picker. Cached for the process lifetime.
+ * we only need the id/name for the picker.
  */
 export async function listAgents(): Promise<AgentMode[]> {
-  if (cache) return cache;
+  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.agents;
   const found = new Map<string, AgentMode>();
   for (const b of BUILTIN) found.set(b.id, b);
 
@@ -49,6 +62,6 @@ export async function listAgents(): Promise<AgentMode[]> {
     // Fall back to builtins only.
   }
 
-  cache = [...found.values()];
-  return cache;
+  cache = { at: Date.now(), agents: [...found.values()] };
+  return cache.agents;
 }
