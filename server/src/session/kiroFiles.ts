@@ -206,6 +206,25 @@ export async function readPersistedSession(
 }
 
 /**
+ * Whether kiro has recorded any conversation for this session.
+ *
+ * Its event log is created empty at session/new and only gets entries as turns
+ * complete, and a session with none cannot be loaded into a fresh process - kiro
+ * answers "Session not found" and deletes both files when the process that made it
+ * exits. So this is what says whether a session can be rebuilt. Verified against
+ * kiro 2.11: 0 bytes before the first turn, non-empty after it.
+ */
+export async function hasRecordedTurns(sessionId: string): Promise<boolean> {
+  if (!isValidSessionId(sessionId)) return false;
+  try {
+    const st = await fs.stat(path.join(config.kiroSessionsDir, `${sessionId}.jsonl`));
+    return st.size > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Hydrate the conversation transcript from kiro's <id>.jsonl event log, matching
  * the shape the live stream produces: user/thinking/assistant messages plus
  * reconstructed tool calls. Tool uses live in AssistantMessage content
