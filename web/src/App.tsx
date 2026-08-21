@@ -151,6 +151,7 @@ function Shell({ onLock }: { onLock: () => void }) {
         onChangeModel={(id) => sessionController.changeModel(id)}
         onChangeAgent={(id) => sessionController.changeAgent(id)}
         onCompact={() => sessionController.compact()}
+        onReload={() => void sessionController.reloadSession()}
       />
     </div>
   );

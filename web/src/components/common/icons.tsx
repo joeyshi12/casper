@@ -23,6 +23,29 @@ export function ChevronIcon({ size = 14, className }: IconProps) {
   );
 }
 
+/** Circular arrows - restarting a session's kiro process. */
+export function RefreshIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M20 11a8 8 0 0 0-13.6-4.5L3 9" />
+      <polyline points="3 4 3 9 8 9" />
+      <path d="M4 13a8 8 0 0 0 13.6 4.5L21 15" />
+      <polyline points="21 20 21 15 16 15" />
+    </svg>
+  );
+}
+
 export function CloseIcon({ size = 16, className }: IconProps) {
   return (
     <svg

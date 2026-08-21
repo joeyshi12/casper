@@ -2433,20 +2433,38 @@
   flex-direction: column;
 }
 
-/* File tree toggle button in chat header. */
-.ftree-toggle {
-  margin-left: auto;
-  padding: 4px 8px;
-  font-size: 16px;
+/* The icon buttons at the right of the chat header. One box for both, so their hover
+   areas match: sizing them separately left the file toggle intrinsic at ~36x29 and
+   reload fixed at 32x28, which reads as a misalignment on hover. box-sizing is set
+   here because this stylesheet has no global border-box rule. */
+.chat-head-btn {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   border-radius: var(--r-sm);
   border: 1px solid transparent;
   background: none;
+  color: inherit;
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
 }
-.ftree-toggle:hover {
+.chat-head-btn:hover:not(:disabled) {
   background: var(--n1);
 }
+.chat-head-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* First of the pair, so its auto margin pushes both to the right edge. */
+.chat-reload {
+  margin-left: auto;
+}
+
 .ftree-toggle.is-active {
   background: var(--n1);
   border-color: var(--n2);

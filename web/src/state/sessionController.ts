@@ -30,6 +30,7 @@ export interface SessionApi {
   createSession(req: CreateSessionRequest): Promise<SessionDetail>;
   deleteSession(id: string): Promise<unknown>;
   renameSession(id: string, title: string): Promise<unknown>;
+  reloadSession(id: string): Promise<SessionDetail>;
   models(): Promise<ModelsResponse>;
   agents(): Promise<AgentsResponse>;
 }
@@ -428,6 +429,37 @@ export class SessionController {
     // Safety net: if the command never lands (e.g. the socket dropped) and no
     // compaction/status ever arrives, don't leave the UI stuck compacting.
     setTimeout(() => this.state.setCompacting(false), this.compactTimeoutMs);
+  }
+
+  /**
+   * Restart the open session's kiro process, so a `.kiro` directory or an MCP server
+   * added since it started is detected. The reply is a fresh detail, applied the way a
+   * resync applies one; the pickers are refetched because a new agent only appears
+   * once the server has re-read kiro's list.
+   */
+  async reloadSession(): Promise<void> {
+    const id = this.state.activeId;
+    if (!id || this.state.reloading) return;
+    this.state.setReloading(true);
+    try {
+      const detail = await this.api.reloadSession(id);
+      // Moved on while the process restarted: leave the new session alone.
+      if (this.state.activeId !== id) return;
+      this.state.loadDetail(detail);
+      this.socket?.reset(detail.head);
+      this.loadPickers();
+    } catch (err) {
+      // No turn to hang this on, so it goes above the composer: the reasons a
+      // reload is refused are all things the user can act on.
+      const detail = err instanceof Error ? err.message : 'The server rejected the reload.';
+      this.state.setSessionNotice({
+        title: "Couldn't reload the session",
+        fix: detail,
+        detail,
+      });
+    } finally {
+      this.state.setReloading(false);
+    }
   }
 
   /**
