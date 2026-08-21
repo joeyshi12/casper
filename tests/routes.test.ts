@@ -25,6 +25,7 @@ import { describeError } from '../server/src/acp/errors.js';
 import { registerFsRoutes } from '../server/src/routes/fs.js';
 import { registerWorkspaceRoutes } from '../server/src/routes/workspace.js';
 import { KiroProcess } from '../server/src/session/KiroProcess.js';
+import { listAgents, invalidateAgents } from '../server/src/session/agents.js';
 import {
   confineToRoot,
   isValidSessionId,
@@ -196,6 +197,65 @@ describe('createSession resolves a missing cwd by creating it', () => {
     assert.equal(fs.existsSync(target), true, 'directory was created');
     assert.equal(fs.statSync(target).isDirectory(), true);
     manager.disposeAll();
+  });
+});
+
+// The picker is only right if the list is re-read: agents are created while the
+// server runs, and the list used to be cached for its whole lifetime.
+describe('the agent list does not go stale', () => {
+  const fakeAgentBin = (log: string) => {
+    const p = path.join(os.tmpdir(), `casper-agentbin-${Date.now()}-${Math.random()}.sh`);
+    fs.writeFileSync(
+      p,
+      `#!/usr/bin/env bash\necho run >> ${log}\necho "  from-disk   Global  an agent that appeared later" >&2\n`,
+      { mode: 0o755 },
+    );
+    return p;
+  };
+
+  it('re-reads after an invalidation, and answers from cache in between', async () => {
+    const log = path.join(os.tmpdir(), `casper-agentruns-${Date.now()}.log`);
+    fs.writeFileSync(log, '');
+    const script = fakeAgentBin(log);
+    const prev = config.kiroBin;
+    config.kiroBin = script;
+    const runs = () => fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).length;
+    try {
+      invalidateAgents();
+      const first = await listAgents();
+      assert.ok(
+        first.some((a) => a.id === 'from-disk'),
+        'an agent kiro reports should reach the picker',
+      );
+      assert.equal(runs(), 1);
+
+      // Within the TTL: served from cache, so opening a picker doesn't spawn kiro.
+      await listAgents();
+      assert.equal(runs(), 1);
+
+      // A reload says the world changed, so the next read goes back to kiro.
+      invalidateAgents();
+      await listAgents();
+      assert.equal(runs(), 2);
+    } finally {
+      config.kiroBin = prev;
+      invalidateAgents();
+      fs.rmSync(script, { force: true });
+      fs.rmSync(log, { force: true });
+    }
+  });
+
+  it('always includes the built-in agents, even when kiro reports nothing', async () => {
+    const prev = config.kiroBin;
+    config.kiroBin = path.join(os.tmpdir(), 'casper-no-such-binary');
+    try {
+      invalidateAgents();
+      const ids = (await listAgents()).map((a) => a.id);
+      assert.ok(ids.includes('kiro_default'));
+    } finally {
+      config.kiroBin = prev;
+      invalidateAgents();
+    }
   });
 });
 
