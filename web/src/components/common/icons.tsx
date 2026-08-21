@@ -23,6 +23,24 @@ export function ChevronIcon({ size = 14, className }: IconProps) {
   );
 }
 
+/** Vertical ellipsis for an overflow menu. SVG, so it renders the same on every platform. */
+export function MoreIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+    >
+      <circle cx="12" cy="5" r="1.9" />
+      <circle cx="12" cy="12" r="1.9" />
+      <circle cx="12" cy="19" r="1.9" />
+    </svg>
+  );
+}
+
 /** Circular arrows - restarting a session's kiro process. */
 export function RefreshIcon({ size = 16, className }: IconProps) {
   return (

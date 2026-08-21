@@ -1,8 +1,9 @@
 import { Link } from 'react-router';
 import { pathForSession } from '../../util/route.js';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { SessionSummary } from '@casper/shared';
-import { LockIcon, PlusIcon, SearchIcon, Spinner } from '../common/icons.js';
+import { LockIcon, MoreIcon, PlusIcon, SearchIcon, Spinner } from '../common/icons.js';
+import { PopoverMenu } from '../common/PopoverMenu.js';
 import { SearchModal } from '../sessions/SearchModal.js';
 import { DevicesModal } from '../sessions/DevicesModal.js';
 import { ConfirmDialog } from '../common/ConfirmDialog.js';
@@ -47,16 +48,18 @@ export function Sidebar({
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [menuId, setMenuId] = useState<string | null>(null);
+  /** The row's ⋮ button, which the portaled menu measures itself against. */
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
 
-  useEffect(() => {
-    if (!menuId) return;
-    const close = () => setMenuId(null);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [menuId]);
+  // PopoverMenu owns its own dismissal, so there is no blanket document listener
+  // here: one would race the menu items, closing the menu before a click landed.
+  const closeRowMenu = useCallback(() => {
+    setMenuId(null);
+    setMenuAnchor(null);
+  }, []);
 
   useEffect(() => {
     if (!accountOpen) return;
@@ -188,21 +191,25 @@ export function Sidebar({
                 <button
                   className="iconbtn srow-menu-btn"
                   aria-label="Session actions"
+                  aria-haspopup="menu"
+                  aria-expanded={menuId === s.sessionId}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setMenuId(menuId === s.sessionId ? null : s.sessionId);
+                    const open = menuId === s.sessionId;
+                    setMenuAnchor(open ? null : e.currentTarget);
+                    setMenuId(open ? null : s.sessionId);
                   }}
                 >
-                  ⋮
+                  <MoreIcon size={16} />
                 </button>
                 {menuId === s.sessionId && (
-                  <div className="menu-list" onClick={(e) => e.stopPropagation()}>
+                  <PopoverMenu anchor={menuAnchor} onClose={closeRowMenu}>
                     <button
                       className="menu-item"
                       onClick={() => {
                         setDraft(s.title);
                         setRenamingId(s.sessionId);
-                        setMenuId(null);
+                        closeRowMenu();
                       }}
                     >
                       Rename
@@ -210,13 +217,13 @@ export function Sidebar({
                     <button
                       className="menu-item menu-item-danger"
                       onClick={() => {
-                        setMenuId(null);
+                        closeRowMenu();
                         setConfirmingId(s.sessionId);
                       }}
                     >
                       Delete
                     </button>
-                  </div>
+                  </PopoverMenu>
                 )}
               </div>
             </div>
