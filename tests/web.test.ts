@@ -1289,6 +1289,10 @@ describe('session controller', () => {
       renameSession: async (id, title) => {
         calls.push(`renameSession:${id}:${title}`);
       },
+      reloadSession: async (id) => {
+        calls.push(`reloadSession:${id}`);
+        return detailFor(id);
+      },
       models: async () => {
         calls.push('models');
         return { models: [] } as unknown as Awaited<ReturnType<SessionApi['models']>>;
@@ -1510,6 +1514,53 @@ describe('session controller', () => {
 
     assert.ok(socket.calls.includes('reset:12'));
     assert.equal(useStore.getState().appliedSeq, 12);
+  });
+
+  it('a reload applies the refreshed detail and moves the cursor with it', async () => {
+    const reloaded: string[] = [];
+    const { controller, socket, rest } = build({
+      api: {
+        reloadSession: async (id) => {
+          reloaded.push(id);
+          return detailFor(id, 9);
+        },
+      },
+    });
+    await controller.openSession('s1');
+    await controller.reloadSession();
+
+    assert.deepEqual(reloaded, ['s1']);
+    assert.ok(socket.calls.includes('reset:9'));
+    assert.equal(useStore.getState().appliedSeq, 9);
+    // A newly created agent only reaches the picker once the list is refetched.
+    assert.ok(rest.calls.includes('agents'));
+    assert.equal(useStore.getState().reloading, false);
+  });
+
+  it('a failed reload clears the flag rather than leaving the button spinning', async () => {
+    const { controller } = build({
+      api: {
+        reloadSession: async () => {
+          throw new Error('kiro has not saved this session yet.');
+        },
+      },
+    });
+    await controller.openSession('s1');
+    await controller.reloadSession();
+
+    assert.equal(useStore.getState().reloading, false);
+    // The reasons a reload is refused are all actionable, so they must be visible.
+    assert.equal(
+      useStore.getState().sessionNotice?.fix,
+      'kiro has not saved this session yet.',
+    );
+  });
+
+  it('a reload with nothing open is a no-op', async () => {
+    const { controller, rest } = build();
+    await controller.reloadSession();
+
+    assert.deepEqual(rest.calls.filter((c) => c.startsWith('reloadSession')), []);
   });
 
   it('leaving the route closes the socket and clears the session', async () => {
