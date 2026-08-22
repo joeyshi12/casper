@@ -34,6 +34,8 @@ Needs Node 24+, since Casper keeps its state in SQLite via the built-in
 `node:sqlite`. It also needs [`kiro-cli`](https://kiro.dev) installed and logged in.
 Casper is a client for it, so nothing works without it.
 
+**kiro-cli 2.x, tested against 2.11 to 2.19. Not yet compatible with 3.0.**
+
 ```bash
 npm install -g @joeyshi12/casper
 casper

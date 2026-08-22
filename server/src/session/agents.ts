@@ -5,11 +5,14 @@ import { config } from '../config.js';
 
 const execFileAsync = promisify(execFile);
 
-/** Kiro's built-in agents, always available even without a workspace agent dir. */
-const BUILTIN: AgentMode[] = [
+/**
+ * Last resort, when `kiro-cli agent list` can't be read at all. Deliberately just the one
+ * agent kiro itself falls back to: the built-in set changes between releases - 2.11 offered
+ * kiro_guide, 2.19 offers kiro_help instead - and a hardcoded list goes stale in both
+ * directions, inventing agents that are gone and hiding ones that exist.
+ */
+const FALLBACK: AgentMode[] = [
   { id: 'kiro_default', name: 'kiro_default', description: 'General-purpose Kiro agent' },
-  { id: 'kiro_planner', name: 'kiro_planner', description: 'Planning-focused agent' },
-  { id: 'kiro_guide', name: 'kiro_guide', description: 'Guidance and Q&A agent' },
 ];
 
 /**
@@ -38,7 +41,6 @@ const ANSI = /\x1b\[[0-9;]*m/g;
 export async function listAgents(): Promise<AgentMode[]> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.agents;
   const found = new Map<string, AgentMode>();
-  for (const b of BUILTIN) found.set(b.id, b);
 
   try {
     // `kiro-cli agent list` prints the table to STDERR, not stdout.
@@ -49,9 +51,10 @@ export async function listAgents(): Promise<AgentMode[]> {
     const text = (stderr || '') + '\n' + (stdout || '');
     for (const rawLine of text.split('\n')) {
       const line = rawLine.replace(ANSI, '');
-      // Rows: "* name   Global  desc..." or "  name   Global  desc..." at col 0.
-      // Wrapped description lines are deeply indented and won't match.
-      const m = /^\s{0,2}(\*\s)?([A-Za-z0-9_-]+)\s{2,}(Global|Workspace|Local)\b/.exec(
+      // Rows: "* name  <scope>  description", where scope is (Built-in) for kiro's own
+      // agents since 2.19 and Global/Workspace/Local for the rest. The "Global: <path>"
+      // header lines don't match, because a colon follows the word rather than spaces.
+      const m = /^\s{0,2}(\*\s)?([A-Za-z0-9_-]+)\s{2,}(\(Built-in\)|Global|Workspace|Local)(?:\s|$)/.exec(
         line,
       );
       if (!m) continue;
@@ -59,9 +62,10 @@ export async function listAgents(): Promise<AgentMode[]> {
       if (!found.has(id)) found.set(id, { id, name: id });
     }
   } catch {
-    // Fall back to builtins only.
+    /* fall through to the fallback below */
   }
 
-  cache = { at: Date.now(), agents: [...found.values()] };
+  const agents = found.size > 0 ? [...found.values()] : FALLBACK;
+  cache = { at: Date.now(), agents };
   return cache.agents;
 }

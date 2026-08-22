@@ -300,6 +300,65 @@ describe('the agent list does not go stale', () => {
       invalidateAgents();
     }
   });
+
+  // kiro's table has drifted: 2.19 prints its own agents as (Built-in) where 2.11 used
+  // Global/Workspace/Local. The old parser required one of those three words, so on 2.19 it
+  // silently dropped every built-in and the picker fell back to a hardcoded list that had
+  // itself gone stale - offering kiro_guide, which is gone, and hiding kiro_help.
+  const agentBin = (table: string) => {
+    const p = path.join(os.tmpdir(), `casper-agentlist-${Date.now()}-${Math.random()}.sh`);
+    // The table goes to stderr, which is where kiro prints it.
+    fs.writeFileSync(p, `#!/usr/bin/env bash\ncat >&2 <<'TABLE'\n${table}\nTABLE\n`, {
+      mode: 0o755,
+    });
+    return p;
+  };
+
+  const idsFrom = async (table: string) => {
+    const prev = config.kiroBin;
+    const script = agentBin(table);
+    config.kiroBin = script;
+    try {
+      invalidateAgents();
+      return (await listAgents()).map((a) => a.id);
+    } finally {
+      config.kiroBin = prev;
+      invalidateAgents();
+      fs.rmSync(script, { force: true });
+    }
+  };
+
+  it("reads kiro 2.19's table, where built-ins are marked (Built-in)", async () => {
+    const ids = await idsFrom(
+      [
+        'Workspace: ~/proj/.kiro/agents',
+        'Global:    ~/.kiro/agents',
+        '',
+        '* kiro_default    (Built-in)    Default agent',
+        '  casper          Global        Casper - a web interface',
+        '  kiro_help       (Built-in)    Help agent',
+      ].join('\n'),
+    );
+    assert.deepEqual(ids, ['kiro_default', 'casper', 'kiro_help']);
+  });
+
+  it("still reads kiro 2.11's table, which had no (Built-in) column", async () => {
+    const ids = await idsFrom(
+      ['* kiro_default   Global     Default agent', '  casper         Global     A web interface'].join(
+        '\n',
+      ),
+    );
+    assert.deepEqual(ids, ['kiro_default', 'casper']);
+  });
+
+  it('does not mistake the "Global: <path>" header for an agent', async () => {
+    const ids = await idsFrom(
+      ['Global:    ~/.kiro/agents', 'Workspace: ~/proj/.kiro/agents', '', '  casper    Global    x'].join(
+        '\n',
+      ),
+    );
+    assert.deepEqual(ids, ['casper'], 'the header lines are not rows');
+  });
 });
 
 describe('failures explain themselves', () => {
