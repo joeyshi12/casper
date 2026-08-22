@@ -54,18 +54,24 @@ export function registerFsRoutes(app: FastifyInstance): void {
       let entries: string[] = [];
       try {
         const dirents = await fs.readdir(realDir, { withFileTypes: true });
-        const candidates = dirents.filter((d) => !d.name.startsWith('.'));
         const checks = await Promise.all(
-          candidates.map(async (d) => {
+          dirents.map(async (d) => {
             const target = await classifyDirent(realDir, d, absoluteRoots());
             return target?.kind === 'directory' ? d.name : null;
           }),
         );
+        // Dot-directories are listed, ordered after the rest. The cap is generous because
+        // ordering them last would otherwise starve them: 20 entries meant .kiro never
+        // appeared in a folder with 20 ordinary siblings. The client filters and scrolls.
+        const isDot = (name: string) => name.startsWith('.');
         entries = checks
           .filter((name): name is string => name !== null)
           .filter((name) => name.toLowerCase().startsWith(prefix.toLowerCase()))
-          .sort((a, b) => a.localeCompare(b))
-          .slice(0, 20)
+          .sort((a, b) => {
+            if (isDot(a) !== isDot(b)) return isDot(a) ? 1 : -1;
+            return a.localeCompare(b);
+          })
+          .slice(0, 500)
           .map((name) => path.join(dir, name));
       } catch {
         entries = [];
