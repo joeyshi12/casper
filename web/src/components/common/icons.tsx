@@ -23,7 +23,25 @@ export function ChevronIcon({ size = 14, className }: IconProps) {
   );
 }
 
-/** Vertical ellipsis for an overflow menu. SVG, so it renders the same on every platform. */
+/** Horizontal ellipsis. An SVG because "…" is crushed into one cell in monospace. */
+export function EllipsisIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+    >
+      <circle cx="4" cy="12" r="1.8" />
+      <circle cx="12" cy="12" r="1.8" />
+      <circle cx="20" cy="12" r="1.8" />
+    </svg>
+  );
+}
+
+/** Vertical ellipsis for an overflow menu. */
 export function MoreIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -41,7 +59,7 @@ export function MoreIcon({ size = 16, className }: IconProps) {
   );
 }
 
-/** Circular arrows - restarting a session's kiro process. */
+/** Circular arrows - reloading a session. */
 export function RefreshIcon({ size = 16, className }: IconProps) {
   return (
     <svg

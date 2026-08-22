@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/rest.js';
-import { CwdField } from './CwdField.js';
+import { DirectoryPicker } from './DirectoryPicker.js';
 
 interface Props {
   sessionId: string;
-  /** Current working directory, shown for reference. */
+  /** Current working directory, where browsing starts. */
   currentCwd?: string;
   /** Called with the resolved path after a successful change. */
   onChanged: (cwd: string) => void;
@@ -20,6 +20,20 @@ export function ChangeFolderSheet({ sessionId, currentCwd, onChanged, onClose }:
   const [cwd, setCwd] = useState(currentCwd ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * A click fires on the common ancestor of press and release, so dragging a selection out
+   * of the input raises one on the backdrop. Require the press to have started there too.
+   */
+  const pressedBackdrop = useRef(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // The picker swallows Escape while its suggestion list is open.
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const submit = async () => {
     const target = cwd.trim();
@@ -38,16 +52,30 @@ export function ChangeFolderSheet({ sessionId, currentCwd, onChanged, onClose }:
   };
 
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <h2 className="sheet-title">Change working directory</h2>
+    <div
+      className="sheet-backdrop"
+      onMouseDown={(e) => {
+        pressedBackdrop.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && pressedBackdrop.current) onClose();
+        pressedBackdrop.current = false;
+      }}
+    >
+      <div
+        className="sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="change-folder-title"
+      >
+        <h2 className="sheet-title" id="change-folder-title">
+          Change working directory
+        </h2>
 
-        <CwdField
-          value={cwd}
+        <DirectoryPicker
+          initialPath={currentCwd ?? ''}
           onChange={setCwd}
-          placeholder="/path/to/folder"
-          hint="The session keeps its transcript. A folder that doesn't exist yet will be created."
-          autoFocus
+          onSubmit={submit}
         />
 
         {error && <div className="sheet-error">{error}</div>}
