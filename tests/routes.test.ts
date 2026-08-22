@@ -176,6 +176,49 @@ describe('GET /api/fs/dirs: reports what the typed path is', () => {
     const r = await dirsFor('some-relative-name');
     assert.equal(r.target, path.resolve(config.defaultCwd, 'some-relative-name'));
   });
+
+  // .kiro is the folder the reload feature exists to re-read, and it used to be
+  // unbrowsable: typeable, but never offered.
+  it('lists dot-directories, after the ordinary ones', async () => {
+    const box = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-dots-'));
+    for (const name of ['.kiro', '.config', 'zebra', 'apple']) {
+      fs.mkdirSync(path.join(box, name));
+    }
+    try {
+      const r = await dirsFor(box + path.sep);
+      assert.deepEqual(
+        r.entries.map((e) => path.basename(e)),
+        ['apple', 'zebra', '.config', '.kiro'],
+        'ordinary names first, alphabetical within each group',
+      );
+    } finally {
+      fs.rmSync(box, { recursive: true, force: true });
+    }
+  });
+
+  it('filters dot-directories by prefix like any other', async () => {
+    const box = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-dots2-'));
+    fs.mkdirSync(path.join(box, '.kiro'));
+    fs.mkdirSync(path.join(box, '.config'));
+    try {
+      const r = await dirsFor(path.join(box, '.k'));
+      assert.deepEqual(r.entries.map((e) => path.basename(e)), ['.kiro']);
+    } finally {
+      fs.rmSync(box, { recursive: true, force: true });
+    }
+  });
+
+  it('still lists directories only, dot or not', async () => {
+    const box = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-dots3-'));
+    fs.mkdirSync(path.join(box, '.adir'));
+    fs.writeFileSync(path.join(box, '.afile'), 'x');
+    try {
+      const r = await dirsFor(box + path.sep);
+      assert.deepEqual(r.entries.map((e) => path.basename(e)), ['.adir']);
+    } finally {
+      fs.rmSync(box, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('createSession resolves a missing cwd by creating it', () => {
