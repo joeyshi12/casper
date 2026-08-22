@@ -439,8 +439,9 @@ export class SessionController {
    */
   async reloadSession(): Promise<void> {
     const id = this.state.activeId;
-    if (!id || this.state.reloading) return;
-    this.state.setReloading(true);
+    // Scoped to this session: another one restarting is no reason to refuse this.
+    if (!id || this.state.reloadingId === id) return;
+    this.state.setReloadingId(id);
     try {
       const detail = await this.api.reloadSession(id);
       // Moved on while the process restarted: leave the new session alone.
@@ -449,8 +450,8 @@ export class SessionController {
       this.socket?.reset(detail.head);
       this.loadPickers();
     } catch (err) {
-      // No turn to hang this on, so it goes above the composer: the reasons a
-      // reload is refused are all things the user can act on.
+      // Guarded like the success path: don't blame the session the user moved to.
+      if (this.state.activeId !== id) return;
       const detail = err instanceof Error ? err.message : 'The server rejected the reload.';
       this.state.setSessionNotice({
         title: "Couldn't reload the session",
@@ -458,7 +459,8 @@ export class SessionController {
         detail,
       });
     } finally {
-      this.state.setReloading(false);
+      // Only if still ours - a later reload of another session owns the field now.
+      if (this.state.reloadingId === id) this.state.setReloadingId(null);
     }
   }
 

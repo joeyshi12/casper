@@ -1534,7 +1534,7 @@ describe('session controller', () => {
     assert.equal(useStore.getState().appliedSeq, 9);
     // A newly created agent only reaches the picker once the list is refetched.
     assert.ok(rest.calls.includes('agents'));
-    assert.equal(useStore.getState().reloading, false);
+    assert.equal(useStore.getState().reloadingId, null);
   });
 
   it('a failed reload clears the flag rather than leaving the button spinning', async () => {
@@ -1548,11 +1548,52 @@ describe('session controller', () => {
     await controller.openSession('s1');
     await controller.reloadSession();
 
-    assert.equal(useStore.getState().reloading, false);
+    assert.equal(useStore.getState().reloadingId, null);
     // The reasons a reload is refused are all actionable, so they must be visible.
     assert.equal(
       useStore.getState().sessionNotice?.fix,
       'kiro has not saved this session yet.',
+    );
+  });
+
+  // A reload belongs to one session. Held as a global flag it disabled the control on every
+  // other session, and a refusal that landed after switching blamed the wrong session.
+  it('leaves another session\'s reload control alone while one is restarting', async () => {
+    let release!: (d: SessionDetail) => void;
+    const { controller } = build({
+      api: { reloadSession: () => new Promise<SessionDetail>((r) => { release = r; }) },
+    });
+    await controller.openSession('s1');
+    void controller.reloadSession();
+    await settle();
+
+    assert.equal(useStore.getState().reloadingId, 's1', 'the reload is attributed to s1');
+
+    await controller.openSession('s2');
+    const st = useStore.getState();
+    assert.notEqual(st.reloadingId, st.activeId, 's2 is not the one reloading');
+
+    release(detailFor('s1'));
+    await settle();
+  });
+
+  it('does not blame the session you switched to when a reload is refused', async () => {
+    let reject!: (e: Error) => void;
+    const { controller } = build({
+      api: { reloadSession: () => new Promise<SessionDetail>((_, rj) => { reject = rj; }) },
+    });
+    await controller.openSession('s1');
+    void controller.reloadSession();
+    await settle();
+
+    await controller.openSession('s2');
+    reject(new Error('kiro has not saved this session yet.'));
+    await settle();
+
+    assert.equal(
+      useStore.getState().sessionNotice,
+      null,
+      "s1's refusal must not pin itself above s2's composer",
     );
   });
 
