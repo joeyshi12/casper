@@ -144,7 +144,9 @@ export function Sidebar({
           sessions.map((s) => (
             <div
               key={s.sessionId}
-              className={`srow ${s.sessionId === activeId ? 'is-active' : ''}`}
+              className={`srow ${s.sessionId === activeId ? 'is-active' : ''} ${
+                menuId === s.sessionId ? 'is-menu-open' : ''
+              }`}
             >
               {renamingId === s.sessionId ? (
                 <input

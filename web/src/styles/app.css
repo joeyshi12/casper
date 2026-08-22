@@ -204,7 +204,11 @@
   border-radius: var(--r-md);
   transition: background 0.12s;
 }
-.srow:hover {
+/* The menu is portaled to body, so opening it moves the pointer off the row and :hover
+   drops. The row would go flat and its ⋮ button would fade to nothing while its own
+   menu was still on screen, so an open menu holds the hover state itself. */
+.srow:hover,
+.srow.is-menu-open {
   background: var(--n1);
 }
 /* The active row gets a stronger fill than hover, so an adjacent hovered row
@@ -318,19 +322,23 @@
   opacity: 0;
 }
 .srow:hover .srow-menu-btn,
-.srow.is-active .srow-menu-btn {
+.srow.is-active .srow-menu-btn,
+.srow.is-menu-open .srow-menu-btn {
   opacity: 1;
 }
 /* One step above the row it sits on, in both row states. The inherited .iconbtn hover
    was --n1: identical to the row's own hover fill, so hovering the button changed
    nothing, and darker than the active row's --n2, so it read as a hole. Source order
-   matters here - a hovered active row matches both, and the later rule should win. */
+   matters here - a hovered active row matches both, and the later rule should win.
+   An open menu keeps that fill without the pointer, which has moved to the menu. */
 .srow:hover .srow-menu-btn:hover,
-.srow:hover .srow-menu-btn:active {
+.srow:hover .srow-menu-btn:active,
+.srow.is-menu-open .srow-menu-btn {
   background: var(--n2);
 }
 .srow.is-active .srow-menu-btn:hover,
-.srow.is-active .srow-menu-btn:active {
+.srow.is-active .srow-menu-btn:active,
+.srow.is-active.is-menu-open .srow-menu-btn {
   background: var(--n3);
 }
 /* The menu's look. Positioning is separate: the account menu is absolute inside its
