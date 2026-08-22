@@ -59,7 +59,8 @@ export function ChatPane({
   const composing = useStore((st) => isDraft && st.pending.length === 0 && st.items.length === 0);
   const activeId = useStore((s) => s.activeId);
   const sessionNotice = useStore((s) => s.sessionNotice);
-  const reloading = useStore((s) => s.reloading);
+  // A derived boolean, so this re-renders only when the answer for this session flips.
+  const reloading = useStore((s) => s.reloadingId !== null && s.reloadingId === s.activeId);
   // A restart mid-turn would lose the turn, so the control waits for it.
   const turnRunning = useStore((s) => s.observability.turnStatus === 'running');
   const dismissSessionNotice = useStore((s) => s.dismissSessionNotice);

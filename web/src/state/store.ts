@@ -76,8 +76,8 @@ interface CasperState {
   connStatus: ConnStatus;
   /** Why creating a session failed, shown on the chat pane with a retry. */
   createError: string | null;
-  /** True while the session's kiro process is being restarted. */
-  reloading: boolean;
+  /** The session whose kiro process is being restarted, if any. */
+  reloadingId: string | null;
   /** File the user asked to look at, relative to the workspace. Set by the file tree
    *  and by a read/write tool call in the transcript; null when nothing is open. */
   previewPath: string | null;
@@ -100,7 +100,7 @@ interface CasperState {
   setSessionNotice: (notice: SessionNotice) => void;
   setConnStatus: (status: ConnStatus) => void;
   setCreateError: (message: string | null) => void;
-  setReloading: (reloading: boolean) => void;
+  setReloadingId: (id: string | null) => void;
   openFilePreview: (path: string) => void;
   closeFilePreview: () => void;
   // Optimistic transitions. Here rather than at the call site because applyEvent
@@ -134,12 +134,12 @@ export const useStore = create<CasperState>((set, get) => ({
   sessionNotice: null,
   connStatus: 'closed',
   createError: null,
-  reloading: false,
+  reloadingId: null,
   previewPath: null,
 
   setConnStatus: (connStatus) => set({ connStatus }),
   setCreateError: (createError) => set({ createError }),
-  setReloading: (reloading) => set({ reloading }),
+  setReloadingId: (reloadingId) => set({ reloadingId }),
 
   openFilePreview: (previewPath) => set({ previewPath }),
   closeFilePreview: () => set({ previewPath: null }),
