@@ -299,9 +299,8 @@ export function Composer({
           <button
             className="composer-plus"
             onClick={() => fileInputRef.current?.click()}
-            // A draft has no session to upload to yet, so this waits for the first prompt.
-            disabled={draft || !live || uploading}
-            title={draft ? 'Send a message first to attach files' : 'Add photos & files'}
+            disabled={!live || uploading}
+            title="Add photos & files"
             aria-label="Add photos and files"
           >
             <PlusIcon size={18} />

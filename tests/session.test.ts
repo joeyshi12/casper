@@ -875,14 +875,9 @@ describe('the chat directory layout', () => {
     assert.ok(chatUploadsDir(chatId).startsWith(chatDir(chatId)));
   });
 
-  // Workspaces made before this layout stay where they are: their path is recorded in
-  // casper.db and in kiro's own session file.
-  it('still recognises a workspace in the old location as one of ours', () => {
+  // Drives whether the session list shows a folder name: a directory Casper made gets none.
+  it('tells a workspace it made from a directory the user picked', () => {
     assert.equal(isManagedWorkspace(chatWorkspaceDir(crypto.randomUUID())), true);
-    assert.equal(
-      isManagedWorkspace(path.join(config.casperDataDir, 'workspaces', crypto.randomUUID())),
-      true,
-    );
     assert.equal(isManagedWorkspace('/home/someone/projects/thing'), false);
   });
 });

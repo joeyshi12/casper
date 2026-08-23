@@ -139,7 +139,7 @@ function summarize(j: KiroSessionJson): SessionSummary {
   return {
     sessionId: j.session_id,
     // kiro's file knows nothing about chats; summaryOf replaces this with the recorded id
-    // when there is one, and this is the same fallback it uses when there isn't.
+    // when there is one, and this matches what getChatId names a session without a row.
     chatId: j.session_id,
     // Left empty when kiro has not named it; resolveSessionTitle decides what to show.
     title: j.title?.trim() ?? '',

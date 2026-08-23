@@ -28,8 +28,9 @@ export class SessionStore {
   }
 
   /**
-   * The chat that owns this session's uploads. Sessions created before the chats layout
-   * have no row, and fall back to the session id so they still get one stable directory.
+   * The chat that owns this session's uploads. A session Casper did not create has no row -
+   * one started with kiro-cli directly still shows up in the list - so it is named after the
+   * session, which gives it one stable directory rather than a new one per call.
    */
   getChatId(sessionId: string): string {
     return this.read(sessionId, 'chat_id') ?? sessionId;

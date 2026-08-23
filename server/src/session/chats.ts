@@ -8,10 +8,8 @@ import { config } from '../config.js';
  *   <data dir>/chats/<chat id>/uploads     files the user attached
  *   <data dir>/chats/<chat id>/workspace   the agent's files, if Casper made the cwd
  *
- * The id is the chat's own, minted by the client before it sends anything, because kiro
- * does not name a session until it starts one and the user can attach a file before that.
- * Keying this directory on kiro's session id instead - which is what it used to do - meant
- * a brand-new chat had nowhere to put an upload.
+ * The id is the chat's own, minted by the client before it sends anything, because kiro does
+ * not name a session until it starts one and the user can attach a file before that.
  *
  * `workspace` is absent for a chat pointed at a directory the user chose, which is most of
  * them; only a chat given a workspace of its own has one here.
@@ -40,27 +38,10 @@ export function createChatWorkspace(chatId: string): string {
 }
 
 /**
- * Where uploads used to go, still read for sessions that predate the chats layout. Recorded
- * attachment paths are absolute, so old files keep resolving without being moved.
- */
-export function legacyUploadsDir(sessionId: string): string {
-  return path.join(config.casperDataDir, 'sessions', sessionId, 'uploads');
-}
-
-function legacyWorkspacesRoot(): string {
-  return path.join(config.casperDataDir, 'workspaces');
-}
-
-/**
  * Whether a working directory is one Casper made, rather than one the user picked - so the
  * session list can show a folder name for the latter and nothing for the former.
- *
- * Both layouts count: workspaces created before this change stay where they are, since
- * their path is recorded in casper.db and in kiro's own session file, and rewriting kiro's
- * state to relocate them would risk a session for no visible gain.
  */
 export function isManagedWorkspace(dir: string): boolean {
-  return [chatsRoot(), legacyWorkspacesRoot()].some(
-    (root) => dir === root || dir.startsWith(root + path.sep),
-  );
+  const root = chatsRoot();
+  return dir === root || dir.startsWith(root + path.sep);
 }
