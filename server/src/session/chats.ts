@@ -3,16 +3,13 @@ import path from 'node:path';
 import { config } from '../config.js';
 
 /**
- * Everything a chat owns on disk lives under one directory named by its chat id:
+ * Everything a chat owns on disk, under one directory named by its chat id:
  *
  *   <data dir>/chats/<chat id>/uploads     files the user attached
  *   <data dir>/chats/<chat id>/workspace   the agent's files, if Casper made the cwd
  *
- * The id is the chat's own, minted by the client before it sends anything, because kiro does
- * not name a session until it starts one and the user can attach a file before that.
- *
- * `workspace` is absent for a chat pointed at a directory the user chose, which is most of
- * them; only a chat given a workspace of its own has one here.
+ * The client mints the id, because kiro does not name a session until it starts one and a file
+ * can be attached before that. `workspace` exists only for a chat Casper made a cwd for.
  */
 export function chatsRoot(): string {
   return path.join(config.casperDataDir, 'chats');

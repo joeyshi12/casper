@@ -204,9 +204,7 @@
   border-radius: var(--r-md);
   transition: background 0.12s;
 }
-/* The menu is portaled to body, so opening it moves the pointer off the row and :hover
-   drops. The row would go flat and its ⋮ button would fade to nothing while its own
-   menu was still on screen, so an open menu holds the hover state itself. */
+/* An open menu holds the hover state: it is portaled to body, so the pointer leaves the row. */
 .srow:hover,
 .srow.is-menu-open {
   background: var(--n1);
@@ -341,9 +339,7 @@
 .srow.is-active.is-menu-open .srow-menu-btn {
   background: var(--n3);
 }
-/* The menu's look. Positioning is separate: the account menu is absolute inside its
-   own wrapper, while a session row's is portaled to body and positioned from script,
-   because absolute inside the scrolling list grew that list's scroll height. */
+/* Look only. The account menu positions itself here; a row's is portaled and placed by script. */
 .menu-list {
   position: absolute;
   top: 34px;
@@ -2203,9 +2199,7 @@
   background: var(--n-abyss);
 }
 .composer {
-  /* Same column as the transcript so the prompt lines up with the messages. The
-     bottom inset clears the iOS home indicator, which the removed stats bar
-     used to carry. */
+  /* Same column as the transcript; the bottom inset clears the iOS home indicator. */
   padding: 12px var(--chat-inset) calc(10px + var(--safe-bottom));
 }
 .composer-error {

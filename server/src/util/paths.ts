@@ -3,32 +3,23 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 /**
- * True if `target` (once resolved) is `root` itself or lives underneath it.
- * Lexical check only - resolves `..` but does not follow symlinks. The
- * `root + path.sep` suffix prevents prefix-match escapes (e.g. root
- * `/home/joey` must not match `/home/joeyx`).
+ * Whether `target` resolves to `root` or below it. Lexical only: resolves `..`, ignores
+ * symlinks. The `path.sep` suffix stops `/home/joey` matching `/home/joeyx`.
  */
 export function isWithinRoot(root: string, target: string): boolean {
   const resolved = path.resolve(target);
-  // Filesystem root ("/" on posix) contains everything; the suffix trick below
-  // would otherwise compare against "//" and reject all paths.
+  // "/" contains everything, and the suffix below would compare against "//".
   if (root === path.sep) return true;
   return resolved === root || resolved.startsWith(root + path.sep);
 }
 
-/**
- * Resolve `input` against `root` and confine it there. Returns the absolute
- * resolved path, or null if it escapes the root (blocks `../` traversal and
- * out-of-root absolute paths). Lexical only - see realConfineToRoot for a
- * symlink-safe variant.
- */
+/** Resolve `input` under `root`, or null if it escapes. Lexical; see realConfineToRoot. */
 export function confineToRoot(root: string, input: string): string | null {
   const resolved = path.resolve(root, input);
   return isWithinRoot(root, resolved) ? resolved : null;
 }
 
-// Real (symlink-resolved) form of the root, cached per root value so we don't
-// realpath it on every request.
+// Cached so the root isn't realpath'd on every request.
 let realRootCache: { root: string; real: string } | null = null;
 function resolveRealRoot(root: string): string {
   if (realRootCache && realRootCache.root === root) return realRootCache.real;
@@ -43,10 +34,8 @@ function resolveRealRoot(root: string): string {
 }
 
 /**
- * Symlink-safe confinement. Resolves symlinks on both the root and the target
- * with realpath, then verifies the real target is still within the real root.
- * Defeats escapes where a symlink inside the root points outside it. Returns
- * the canonical real path, or null if it escapes or the target doesn't exist.
+ * Confinement that survives symlinks: realpaths both sides before comparing, which defeats a
+ * symlink inside the root pointing out of it. Null if it escapes or does not exist.
  */
 export async function realConfineToRoot(
   root: string,
@@ -61,18 +50,12 @@ export async function realConfineToRoot(
   return isWithinRoot(resolveRealRoot(root), realTarget) ? realTarget : null;
 }
 
-/**
- * A session id is used to build on-disk file paths. Restrict it to a safe
- * character set so it can never traverse out of the sessions directory.
- */
+/** A session id names files, so restrict it to what cannot traverse. */
 export function isValidSessionId(id: string): boolean {
   return /^[A-Za-z0-9._-]+$/.test(id) && id !== '.' && !id.includes('..');
 }
 
-/**
- * A chat id names a directory too, but unlike a session id it comes from the client, so it
- * is held to the shape the client is supposed to send: a uuid, nothing else.
- */
+/** A chat id comes from the client, so it is held to the exact shape it should send. */
 export function isValidChatId(id: string | undefined): id is string {
   return !!id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }

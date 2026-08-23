@@ -1,11 +1,7 @@
 //
-// Opening a session row's menu portals it to document.body, which moves the pointer off
-// the row: :hover drops, the row goes flat, and the ⋮ button - opacity 0 unless hovered -
-// fades out while its own menu is still on screen. The row carries an is-menu-open class
-// to hold that state instead.
-//
-// jsdom applies no stylesheet, so this proves the class is wired to the open menu, not
-// what it looks like. The colours are in app.css and only a browser can judge them.
+// Portalling a row's menu to body moves the pointer off the row, so :hover drops and the
+// hover-only ⋮ fades out while its menu is still open; an is-menu-open class holds the state.
+// jsdom applies no stylesheet, so this proves the wiring, not the appearance.
 
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';

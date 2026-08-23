@@ -1,12 +1,7 @@
 //
-// The old field carried the whole path in one input and offered its suggestions to the
-// mouse only. This covers the two things that replaced it: browsing by breadcrumb, and
-// the combobox keyboard contract from the WAI-ARIA APG. It also covers the sheet's
-// dismissal, where dragging a selection past the edge used to close it and lose the input.
-//
-// The directory listing is a stub, so this says nothing about the server's own splitting
-// of a path into directory and prefix - only that the client asks for the right thing and
-// renders what comes back.
+// Covers browsing by breadcrumb, the WAI-ARIA combobox keyboard contract, and the sheet's
+// dismissal. The directory listing is a stub, so this proves the client asks for the right
+// thing and renders the reply, not how the server splits a path.
 
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';

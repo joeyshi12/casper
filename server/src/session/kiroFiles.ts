@@ -175,9 +175,8 @@ export async function listPersistedSessions(log: Logger): Promise<SessionSummary
 }
 
 // Delete a session's on-disk files: kiro's <id>.{json,jsonl,history,lock} and its
-// per-session <id>/ directory (tasks, etc.). Missing paths are ignored.
-// The .lock is kiro's "active in another process" marker, which 2.19 writes; without it
-// here, deleting a session left an orphan behind for a session that no longer exists.
+// per-session <id>/ directory (tasks, etc.). Missing paths are ignored. The .lock is kiro's
+// "active in another process" marker, which 2.19 writes.
 export async function deletePersistedSession(sessionId: string): Promise<void> {
   if (!isValidSessionId(sessionId)) return;
   const targets = [

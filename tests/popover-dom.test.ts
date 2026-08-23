@@ -1,11 +1,8 @@
 //
-// The session row menu used to be absolutely positioned inside the sidebar's scrolling
-// list, so it added to that list's scroll height and, on the last row, opened past the
-// bottom of the window. PopoverMenu portals to body and positions itself from the
-// trigger's rect instead.
-//
-// jsdom computes no layout, so both rects are defined by hand. That part is a fake; the
-// portal target, the flip decision and the dismissal wiring either side of it are real.
+// PopoverMenu portals to body and positions from the trigger's rect, so it cannot add to the
+// sidebar list's scroll height or open past the bottom of the window. jsdom computes no
+// layout, so both rects are defined by hand: the portal target, the flip decision and the
+// dismissal are real, the geometry is not.
 
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';

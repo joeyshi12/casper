@@ -16,8 +16,6 @@ import {
 } from '../../util/transcriptViewport.js';
 import { classifyTurnFailure } from '../../util/turnFailure.js';
 
-// Live media query (its .matches updates as the OS setting changes), so the
-// easing follow can snap instantly for users who ask for reduced motion.
 /** How long a running turn may be quiet before the dots come back. */
 const STALL_MS = 700;
 
@@ -97,10 +95,8 @@ export const Transcript = memo(function Transcript() {
   const activeId = useStore((s) => s.activeId);
   const openFilePreview = useStore((s) => s.openFilePreview);
   const remainingOlder = useStore((s) => s.remainingOlder);
-  // A running turn goes quiet while the model prepares a tool call - a widget's code is
-  // tool input, so nothing streams - and text from earlier would otherwise hide the dots.
-  // Items already on screen when a session opened must not animate - otherwise opening an
-  // old session flashes every card at once. Anything not in this set arrived live.
+  // Items already on screen when a session opened must not animate, or opening an old session
+  // flashes every card at once. Anything not in this set arrived live.
   const hydrated = useRef<{ session: string | null; ids: Set<string> }>({
     session: null,
     ids: new Set(),
