@@ -374,10 +374,8 @@ export class SessionManager {
     const persisted = await readPersistedSession(sessionId);
     if (!persisted) throw new Error(`Unknown session: ${sessionId}`);
 
-    // A session's cwd is persisted by kiro at creation. If the user re-pointed
-    // the session (original folder moved or deleted), the Casper-side override
-    // wins.
-    const effectiveCwd = this.store.getCwd(sessionId) ?? persisted.cwd;
+    // kiro persists the cwd at creation; a re-pointed chat overrides it.
+    const effectiveCwd = this.store.getCwd(chatId) ?? persisted.cwd;
 
     // Confine the persisted cwd to fileRoot. A session created before this
     // boundary existed - or one created directly by kiro-cli - could carry an

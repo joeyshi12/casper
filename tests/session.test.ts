@@ -870,6 +870,34 @@ describe('process lifecycle', () => {
     }
   });
 
+  // kiro's file still says the old directory - its shutdown write uses the cwd it was spawned
+  // with - so the override is the only record until a turn completes in the new one. Keyed by
+  // chat, which a chat id equal to its session id would not have caught.
+  it('remembers a re-pointed directory across a dormant reopen', async () => {
+    const mgr = managerWith(() => fakeKiroProcess({ sessionId: 'kiro-side-id' }));
+    const moved = path.join(sessionsCwd, 'moved-elsewhere');
+    fs.mkdirSync(moved, { recursive: true });
+    try {
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'chat-side-id' });
+      await mgr.setChatCwd('chat-side-id', moved);
+
+      // What kiro leaves behind: the directory it was spawned in, not the new one.
+      fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(config.kiroSessionsDir, 'kiro-side-id.json'),
+        JSON.stringify({ session_id: 'kiro-side-id', cwd: sessionsCwd }),
+      );
+      // Drop it from memory so the next open has to read the override back.
+      mgr.disposeAll();
+
+      const reopened = await mgr.ensureOpen('chat-side-id');
+      assert.equal(reopened.cwd, moved, 'the override must be found by chat id');
+    } finally {
+      mgr.disposeAll();
+      fs.rmSync(path.join(config.kiroSessionsDir, 'kiro-side-id.json'), { force: true });
+    }
+  });
+
   it('re-pointing the working directory drops the process spawned in the old one', async () => {
     const proc = fakeKiroProcess({ sessionId: 'repoint-me' });
     const mgr = managerWith(() => proc);
