@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import type { FileEntry } from '@casper/shared';
 import { api } from '../../api/rest.js';
+import { formatSize } from '../../util/formatSize.js';
 import { useStore } from '../../state/store.js';
 import { ChangeFolderSheet } from '../sessions/ChangeFolderSheet.js';
 import {
@@ -29,12 +30,6 @@ interface FolderState {
   expanded: boolean;
   children: FileEntry[] | null;
   loading: boolean;
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function FileTypeIcon({ name }: { name: string }) {

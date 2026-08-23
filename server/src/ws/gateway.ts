@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { CasperEvent, ClientMessage, ServerMessage } from '@casper/shared';
-import type { PromptContentBlock } from '@casper/shared';
+import type { MessageAttachment, PromptContentBlock } from '@casper/shared';
 import type { EventStore } from '../session/EventStore.js';
 import type { SessionManager } from '../session/SessionManager.js';
 import { authDisabled, hasValidSession } from '../routes/auth.js';
@@ -39,7 +39,11 @@ export interface GatewaySessions {
   getStore(sessionId: string): EventStore | undefined;
   onEvent(sessionId: string, cb: (e: CasperEvent) => void): (() => void) | null;
   getSessionCwd(sessionId: string): Promise<string>;
-  runPrompt(sessionId: string, content: PromptContentBlock[]): Promise<void>;
+  runPrompt(
+    sessionId: string,
+    content: PromptContentBlock[],
+    attachments?: MessageAttachment[],
+  ): Promise<void>;
   cancel(sessionId: string): void;
   setMode(sessionId: string, modeId: string): Promise<void>;
   setModel(sessionId: string, modelId: string): Promise<void>;
@@ -138,7 +142,7 @@ export function handleConnection(
       case 'watch_paths':
         return watchers.sync(msg.paths);
       case 'prompt':
-        return ack('prompt', () => manager.runPrompt(sessionId, msg.content));
+        return ack('prompt', () => manager.runPrompt(sessionId, msg.content, msg.attachments));
       case 'cancel':
         return ack('cancel', () => manager.cancel(sessionId));
       case 'set_mode':

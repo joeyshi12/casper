@@ -20,8 +20,9 @@ import { SessionManager, Session } from '../server/src/session/SessionManager.js
 import { EventStore } from '../server/src/session/EventStore.js';
 import { closeDb, db } from '../server/src/session/db.js';
 import { SessionStore } from '../server/src/session/sessionStore.js';
+import { backfillAttachments } from '../server/src/session/backfillAttachments.js';
 import { LoginStore } from '../server/src/session/logins.js';
-import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
+import { hydrateTranscript, promptCount } from '../server/src/session/kiroFiles.js';
 import { bumpSessionToTop } from '../web/src/state/sessions.js';
 import { noopLogger, fakeKiroProcess, type FakeProcess } from './helpers.js';
 import {
@@ -373,6 +374,114 @@ describe('hydrateTranscript: inline tool-result images are not shipped', () => {
   });
 });
 
+// The identity problem: a live message is keyed by Casper's event seq and a rebuilt one by
+// kiro's message_id, so neither side can use the other's. Position is the only key both can
+// compute, which makes this the load-bearing test for the whole scheme.
+describe('hydrateTranscript: attachments land on the right message by position', () => {
+  const sid = 'hydrate-attachments-test';
+  const file = path.join(config.kiroSessionsDir, `${sid}.jsonl`);
+  const prompt = (text: string) => ({
+    kind: 'Prompt',
+    data: { content: [{ kind: 'text', data: { text } }] },
+  });
+
+  before(() => {
+    fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
+    fs.writeFileSync(
+      file,
+      [
+        JSON.stringify(prompt('first')),
+        JSON.stringify({ kind: 'AssistantMessage', data: { content: [{ kind: 'text', data: { text: 'ok' } }] } }),
+        JSON.stringify(prompt('Attached files: /up/a.zip\nsecond')),
+        JSON.stringify(prompt('third')),
+      ].join('\n'),
+    );
+  });
+  after(() => fs.rmSync(file, { force: true }));
+
+  const users = (items: Awaited<ReturnType<typeof hydrateTranscript>>) =>
+    items.filter((it) => it.type === 'message' && it.message.role === 'user');
+
+  it('gives the attachment to the second user message, not the first or third', async () => {
+    const zip = { path: '/up/a.zip', name: 'a.zip', size: 12, kind: 'binary' as const };
+    const items = await hydrateTranscript(sid, new Map([[1, [zip]]]));
+    const msgs = users(items);
+    assert.equal(msgs.length, 3);
+    assert.equal(msgs[0]!.type === 'message' && msgs[0]!.message.attachments, undefined);
+    assert.deepEqual(
+      msgs[1]!.type === 'message' ? msgs[1]!.message.attachments : null,
+      [zip],
+      'ordinal 1 is the second user message, counting assistant turns out',
+    );
+    assert.equal(msgs[2]!.type === 'message' && msgs[2]!.message.attachments, undefined);
+  });
+
+  it('strips the paths line from what is displayed', async () => {
+    const items = await hydrateTranscript(sid, new Map());
+    const second = users(items)[1]!;
+    const text = second.type === 'message' ? second.message.text : '';
+    assert.equal(text, 'second', 'the machine-facing line never reaches the bubble');
+  });
+
+  // The writer and the reader must count the same thing. Counting *rendered* messages while
+  // hydration counted *Prompt entries* meant an attachment-only prompt was seen by one and
+  // not the other, and every later attachment was filed one message too early.
+  it('counts a prompt that carried only an attachment', async () => {
+    const box = path.join(config.kiroSessionsDir, 'ordinal-count-test.jsonl');
+    fs.writeFileSync(
+      box,
+      [
+        // No text of its own: just the machine-facing line, which strips to nothing.
+        JSON.stringify(prompt('Attached files: /up/a.zip\n')),
+        JSON.stringify(prompt('second')),
+      ].join('\n'),
+    );
+    try {
+      assert.equal(
+        await promptCount('ordinal-count-test'),
+        2,
+        'both prompts count, so the next attachment is filed at 2',
+      );
+    } finally {
+      fs.rmSync(box, { force: true });
+    }
+  });
+
+  it('agrees with the ordinal hydration reads back', async () => {
+    const box = path.join(config.kiroSessionsDir, 'ordinal-agree-test.jsonl');
+    fs.writeFileSync(
+      box,
+      [JSON.stringify(prompt('Attached files: /up/a.zip\n')), JSON.stringify(prompt('second'))].join('\n'),
+    );
+    try {
+      const zip = { path: '/up/a.zip', name: 'a.zip', size: 1, kind: 'binary' as const };
+      // Written at the ordinal the first prompt would have taken.
+      const items = await hydrateTranscript('ordinal-agree-test', new Map([[0, [zip]]]));
+      const users = items.filter((it) => it.type === 'message' && it.message.role === 'user');
+      assert.equal(users.length, 2);
+      assert.deepEqual(
+        users[0]!.type === 'message' ? users[0]!.message.attachments : null,
+        [zip],
+        'lands on the attachment-only prompt, not the one after it',
+      );
+    } finally {
+      fs.rmSync(box, { force: true });
+    }
+  });
+
+  it('keeps a message that had only an attachment and no text', async () => {
+    const only = path.join(config.kiroSessionsDir, 'attach-only-test.jsonl');
+    fs.writeFileSync(only, JSON.stringify(prompt('Attached files: /up/a.zip\n')));
+    try {
+      const zip = { path: '/up/a.zip', name: 'a.zip', size: 1, kind: 'binary' as const };
+      const items = await hydrateTranscript('attach-only-test', new Map([[0, [zip]]]));
+      assert.equal(users(items).length, 1, 'an attachment alone is still a message');
+    } finally {
+      fs.rmSync(only, { force: true });
+    }
+  });
+});
+
 describe('hydrateTranscript: malformed entries do not crash hydration', () => {
   const sid = 'hydrate-malformed-test';
   const file = path.join(config.kiroSessionsDir, `${sid}.jsonl`);
@@ -422,6 +531,101 @@ describe('hydrateTranscript: malformed entries do not crash hydration', () => {
   });
 });
 
+// Messages sent before attachments were recorded left only the "Attached files:" line.
+// Display no longer parses that line, so without this migration those files are invisible.
+describe('backfilling attachments from older messages', () => {
+  let dir: string;
+  let sessions: string;
+  const origData = config.casperDataDir;
+  const origSessions = config.kiroSessionsDir;
+  let uploads: string;
+
+  const promptWith = (text: string) => ({
+    kind: 'Prompt',
+    data: { content: [{ kind: 'text', data: { text } }] },
+  });
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-backfill-db-'));
+    sessions = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-backfill-sessions-'));
+    uploads = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-backfill-uploads-'));
+    (config as { casperDataDir: string }).casperDataDir = dir;
+    (config as { kiroSessionsDir: string }).kiroSessionsDir = sessions;
+    closeDb();
+  });
+  after(() => {
+    closeDb();
+    (config as { casperDataDir: string }).casperDataDir = origData;
+    (config as { kiroSessionsDir: string }).kiroSessionsDir = origSessions;
+  });
+
+  it('recovers a file that still exists, at the right ordinal', async () => {
+    const zip = path.join(uploads, 'old.zip');
+    fs.writeFileSync(zip, 'PK\u0003\u0004xx');
+    fs.writeFileSync(
+      path.join(sessions, 'old-1.jsonl'),
+      [
+        JSON.stringify(promptWith('first, nothing attached')),
+        JSON.stringify(promptWith(`Attached files: ${zip}\nlook at this`)),
+      ].join('\n'),
+    );
+
+    const store = new SessionStore();
+    await backfillAttachments(store, noopLogger());
+
+    const got = store.attachmentsBySession('old-1');
+    assert.deepEqual([...got.keys()], [1], 'the second prompt, counting from zero');
+    assert.equal(got.get(1)![0]!.name, 'old.zip');
+    assert.equal(got.get(1)![0]!.size, 6);
+    assert.equal(got.get(1)![0]!.kind, 'binary');
+  });
+
+  it('drops a file that is no longer on disk', async () => {
+    fs.writeFileSync(
+      path.join(sessions, 'old-2.jsonl'),
+      JSON.stringify(promptWith(`Attached files: ${path.join(uploads, 'gone.zip')}\nhi`)),
+    );
+    const store = new SessionStore();
+    await backfillAttachments(store, noopLogger());
+    assert.equal(store.attachmentsBySession('old-2').size, 0, 'nothing to preview');
+  });
+
+  it('runs once, and never overwrites what the live path recorded', async () => {
+    const zip = path.join(uploads, 'old.zip');
+    fs.writeFileSync(zip, 'PK');
+    fs.writeFileSync(
+      path.join(sessions, 'old-3.jsonl'),
+      JSON.stringify(promptWith(`Attached files: ${zip}\nhi`)),
+    );
+    const store = new SessionStore();
+    // Already recorded by the live path, with a different name.
+    store.setAttachments('old-3', 0, [
+      { path: zip, name: 'recorded-live.zip', size: 2, kind: 'binary' },
+    ]);
+
+    await backfillAttachments(store, noopLogger());
+    assert.equal(store.attachmentsBySession('old-3').get(0)![0]!.name, 'recorded-live.zip');
+
+    // Second run is a no-op even for sessions it skipped.
+    fs.writeFileSync(
+      path.join(sessions, 'old-4.jsonl'),
+      JSON.stringify(promptWith(`Attached files: ${zip}\nhi`)),
+    );
+    await backfillAttachments(store, noopLogger());
+    assert.equal(store.attachmentsBySession('old-4').size, 0, 'the marker stops a re-run');
+  });
+
+  it('ignores an attachments line that names no absolute path', async () => {
+    fs.writeFileSync(
+      path.join(sessions, 'old-5.jsonl'),
+      JSON.stringify(promptWith("Attached files: ';\nquoted source, not a real line")),
+    );
+    const store = new SessionStore();
+    await backfillAttachments(store, noopLogger());
+    assert.equal(store.attachmentsBySession('old-5').size, 0);
+  });
+});
+
 describe('SQLite stores', () => {
   let dir: string;
   const origDir = config.casperDataDir;
@@ -436,6 +640,44 @@ describe('SQLite stores', () => {
   after(() => {
     closeDb();
     (config as { casperDataDir: string }).casperDataDir = origDir;
+  });
+
+  // Attachments are recorded per message so the transcript never has to parse the
+  // "Attached files:" line back out of the prose it was written into.
+  it('round-trips attachments, grouped by the message they belong to', () => {
+    const store = new SessionStore();
+    store.setAttachments('s1', 0, [
+      { path: '/up/a.zip', name: 'a.zip', size: 2048, kind: 'binary' },
+      { path: '/up/b.png', name: 'b.png', size: 99, kind: 'image' },
+    ]);
+    store.setAttachments('s1', 3, [{ path: '/up/c.txt', name: 'c.txt', size: 7, kind: 'text' }]);
+
+    const got = store.attachmentsBySession('s1');
+    assert.deepEqual([...got.keys()].sort(), [0, 3]);
+    assert.deepEqual(got.get(0)!.map((a) => a.name), ['a.zip', 'b.png']);
+    assert.equal(got.get(0)![0]!.size, 2048);
+    assert.equal(got.get(3)!.length, 1);
+  });
+
+  it('keeps one session\'s attachments out of another\'s', () => {
+    const store = new SessionStore();
+    store.setAttachments('s1', 0, [{ path: '/up/a.zip', name: 'a.zip', size: 1, kind: 'binary' }]);
+    assert.equal(store.attachmentsBySession('s2').size, 0);
+  });
+
+  it('re-recording the same file at the same message does not duplicate it', () => {
+    const store = new SessionStore();
+    const one = { path: '/up/a.zip', name: 'a.zip', size: 1, kind: 'binary' as const };
+    store.setAttachments('s1', 0, [one]);
+    store.setAttachments('s1', 0, [one]);
+    assert.equal(store.attachmentsBySession('s1').get(0)!.length, 1);
+  });
+
+  it('deleting a session forgets its attachments too', () => {
+    const store = new SessionStore();
+    store.setAttachments('s1', 0, [{ path: '/up/a.zip', name: 'a.zip', size: 1, kind: 'binary' }]);
+    store.remove('s1');
+    assert.equal(store.attachmentsBySession('s1').size, 0);
   });
 
   it('keeps a title and a cwd for one session in a single row', () => {

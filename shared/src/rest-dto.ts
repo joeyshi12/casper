@@ -76,6 +76,15 @@ export interface CreateSessionRequest {
   title?: string;
 }
 
+/** One file attached to a prompt, recorded per message rather than parsed from the text. */
+export interface MessageAttachment {
+  /** Absolute path under the data directory, and the identity within a message. */
+  path: string;
+  name: string;
+  size: number;
+  kind: UploadKind;
+}
+
 /** A message entry in a session transcript. */
 export interface TranscriptMessage {
   id: string;
@@ -83,8 +92,8 @@ export interface TranscriptMessage {
   /** Concatenated text content. */
   text: string;
   timestamp?: number;
-  /** Relative workspace paths of images attached to a user message. */
-  imagePaths?: string[];
+  /** What was attached to this message, images and everything else alike. */
+  attachments?: MessageAttachment[];
 }
 
 /** A tool-call entry in a session transcript (matches the live tool_call view). */
@@ -154,6 +163,8 @@ export interface SetModeRequest {
 
 export interface PromptRequest {
   prompt: PromptContentBlock[];
+  /** What was attached, for the transcript. The paths also go in the text, for the agent. */
+  attachments?: MessageAttachment[];
 }
 
 // Directory suggestions for the working-directory input.

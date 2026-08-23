@@ -6,7 +6,8 @@ import type {
   TranscriptMessage,
   TranscriptToolCall,
 } from '@casper/shared';
-import { imageAttachmentPaths, stripAttachmentsLine } from '@casper/shared';
+import { stripAttachmentsLine } from '@casper/shared';
+import type { MessageAttachment } from '@casper/shared';
 import { config } from '../config.js';
 import type { Logger } from '../util/logger.js';
 import { isValidSessionId } from '../util/paths.js';
@@ -175,15 +176,17 @@ export async function listPersistedSessions(log: Logger): Promise<SessionSummary
   return summaries;
 }
 
-// Delete a session's on-disk files: kiro's <id>.{json,jsonl,history}, kiro's
-// per-session <id>/ directory (tasks, etc.).
-// Missing paths are ignored.
+// Delete a session's on-disk files: kiro's <id>.{json,jsonl,history,lock} and its
+// per-session <id>/ directory (tasks, etc.). Missing paths are ignored.
+// The .lock is kiro's "active in another process" marker, which 2.19 writes; without it
+// here, deleting a session left an orphan behind for a session that no longer exists.
 export async function deletePersistedSession(sessionId: string): Promise<void> {
   if (!isValidSessionId(sessionId)) return;
   const targets = [
     path.join(config.kiroSessionsDir, `${sessionId}.json`),
     path.join(config.kiroSessionsDir, `${sessionId}.jsonl`),
     path.join(config.kiroSessionsDir, `${sessionId}.history`),
+    path.join(config.kiroSessionsDir, `${sessionId}.lock`),
     path.join(config.kiroSessionsDir, sessionId),
   ];
   await Promise.all(targets.map((f) => fs.rm(f, { recursive: true, force: true })));
@@ -203,6 +206,33 @@ export async function readPersistedSession(
   } catch {
     return null;
   }
+}
+
+/**
+ * How many prompts kiro has recorded for this session, which is the ordinal the next one
+ * will take. Counted here rather than by the caller so the number that attachments are
+ * written under is produced by the same rule that hydrateTranscript reads them back by:
+ * one per Prompt entry, whether or not that entry ends up rendered.
+ */
+export async function promptCount(sessionId: string): Promise<number> {
+  if (!isValidSessionId(sessionId)) return 0;
+  let raw: string;
+  try {
+    raw = await fs.readFile(path.join(config.kiroSessionsDir, `${sessionId}.jsonl`), 'utf8');
+  } catch {
+    return 0;
+  }
+  let n = 0;
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      if ((JSON.parse(trimmed) as { kind?: string }).kind === 'Prompt') n++;
+    } catch {
+      /* a malformed line is skipped here exactly as hydration skips it */
+    }
+  }
+  return n;
 }
 
 /**
@@ -231,7 +261,11 @@ export async function hasRecordedTurns(sessionId: string): Promise<boolean> {
  * (`toolUse`) and their results arrive in later `ToolResults` entries
  * (`toolResult`), matched back by toolUseId.
  */
-export async function hydrateTranscript(sessionId: string): Promise<TranscriptItem[]> {
+export async function hydrateTranscript(
+  sessionId: string,
+  /** Recorded attachments, keyed by the ordinal of the user message they belong to. */
+  attachments?: Map<number, MessageAttachment[]>,
+): Promise<TranscriptItem[]> {
   if (!isValidSessionId(sessionId)) return [];
   let raw: string;
   try {
@@ -244,6 +278,8 @@ export async function hydrateTranscript(sessionId: string): Promise<TranscriptIt
   }
 
   const items: TranscriptItem[] = [];
+  // Counts user messages as they are rebuilt, so it lines up with what runPrompt recorded.
+  let userOrdinal = 0;
   // Tool-call items awaiting their result, keyed by toolUseId.
   const toolsById = new Map<string, TranscriptToolCall>();
 
@@ -264,11 +300,12 @@ export async function hydrateTranscript(sessionId: string): Promise<TranscriptIt
     const pushMsg = (msg: TranscriptMessage) => items.push({ type: 'message', message: msg });
 
     if (entry.kind === 'Prompt') {
-      const raw = textOf('text');
-      const text = stripAttachmentsLine(raw);
-      const imagePaths = imageAttachmentPaths(raw);
-      if (text.trim() || imagePaths.length)
-        pushMsg({ id: `u-${baseId}`, role: 'user', text, timestamp: ts, imagePaths });
+      // Attachments come from Casper's record, keyed by this message's position.
+      const text = stripAttachmentsLine(textOf('text'));
+      const attached = attachments?.get(userOrdinal);
+      userOrdinal++;
+      if (text.trim() || attached?.length)
+        pushMsg({ id: `u-${baseId}`, role: 'user', text, timestamp: ts, attachments: attached });
     } else if (entry.kind === 'AssistantMessage') {
       // Order within an assistant turn: reasoning, spoken text, then tool uses.
       const thinking = textOf('thinking');

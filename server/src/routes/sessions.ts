@@ -69,7 +69,7 @@ export function registerSessionRoutes(
     '/api/sessions/:id/prompt',
     async (req, reply) => {
       try {
-        await manager.runPrompt(req.params.id, req.body.prompt);
+        await manager.runPrompt(req.params.id, req.body.prompt, req.body.attachments);
         return { ok: true };
       } catch (err) {
         reply.code(400);

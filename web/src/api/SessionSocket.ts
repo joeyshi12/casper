@@ -6,6 +6,7 @@ import type {
 } from '@casper/shared';
 
 import { shouldPing, shouldReconnect } from './socketHealth.js';
+import type { MessageAttachment } from '@casper/shared';
 
 export type ConnStatus =
   | 'connecting'
@@ -205,8 +206,8 @@ export class SessionSocket {
   }
 
   /** Returns false if the socket wasn't open, so the caller can flag failure. */
-  prompt(content: PromptContentBlock[]): boolean {
-    return this.send({ type: 'prompt', content });
+  prompt(content: PromptContentBlock[], attachments?: MessageAttachment[]): boolean {
+    return this.send({ type: 'prompt', content, attachments });
   }
   cancel(): void {
     this.send({ type: 'cancel' });

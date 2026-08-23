@@ -1,6 +1,10 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '../../state/store.js';
+import type { MessageAttachment } from '@casper/shared';
 import { api } from '../../api/rest.js';
+import { formatSize } from '../../util/formatSize.js';
+import { FileIcon } from '../common/icons.js';
+
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { ToolCallCard } from './ToolCallCard.js';
 import { CompressIcon, Spinner } from '../common/icons.js';
@@ -22,9 +26,58 @@ const reduceMotion =
     : null;
 
 interface Props {
-  onRetry: (id: string, text: string) => void;
+  onRetry: (id: string) => void;
   /** Re-send a prompt after a failed turn. */
   onRetryTurn: (text: string) => void;
+}
+
+/**
+ * The files attached to one message: images as thumbnails, anything else a chip that opens
+ * the preview panel. Shared by the sent message and the optimistic bubble.
+ */
+function AttachmentList({
+  sessionId,
+  attachments,
+  onOpen,
+}: {
+  sessionId: string;
+  attachments: MessageAttachment[];
+  onOpen: (path: string) => void;
+}) {
+  return (
+    <div className="msg-attachments">
+      {attachments.map((a) =>
+        a.kind === 'image' ? (
+          <a
+            key={a.path}
+            href={api.previewUrl(sessionId, a.path)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="msg-image-link"
+          >
+            <img
+              src={api.previewUrl(sessionId, a.path)}
+              alt={a.name}
+              className="msg-image"
+              {...lazyImageProps}
+            />
+          </a>
+        ) : (
+          <button
+            key={a.path}
+            type="button"
+            className="msg-file"
+            title={a.path}
+            onClick={() => onOpen(a.path)}
+          >
+            <FileIcon size={14} />
+            <span className="msg-file-name">{a.name}</span>
+            <span className="msg-file-size">{formatSize(a.size)}</span>
+          </button>
+        ),
+      )}
+    </div>
+  );
 }
 
 /**
@@ -47,6 +100,7 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
   const turnStatus = useStore((s) => s.observability.turnStatus);
   const compacting = useStore((s) => s.observability.compacting);
   const activeId = useStore((s) => s.activeId);
+  const openFilePreview = useStore((s) => s.openFilePreview);
   const remainingOlder = useStore((s) => s.remainingOlder);
   // A running turn goes quiet while the model prepares a tool call - a widget's code is
   // tool input, so nothing streams - and text from earlier would otherwise hide the dots.
@@ -146,25 +200,12 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
                 <MarkdownRenderer text={item.message.text} />
               ) : (
                 <>
-                  {activeId && item.message.imagePaths && item.message.imagePaths.length > 0 && (
-                    <div className="msg-images">
-                      {item.message.imagePaths.map((p) => (
-                        <a
-                          key={p}
-                          href={api.attachmentUrl(activeId, p)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="msg-image-link"
-                        >
-                          <img
-                            src={api.attachmentUrl(activeId, p)}
-                            alt={p.split('/').pop() ?? 'image'}
-                            className="msg-image"
-                            {...lazyImageProps}
-                          />
-                        </a>
-                      ))}
-                    </div>
+                  {activeId && item.message.attachments && item.message.attachments.length > 0 && (
+                    <AttachmentList
+                      sessionId={activeId}
+                      attachments={item.message.attachments}
+                      onOpen={openFilePreview}
+                    />
                   )}
                   {item.message.text && (
                     <div className="msg-user-text">{item.message.text}</div>
@@ -187,11 +228,14 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
           key={pm.id}
           className={`msg msg-user msg-pending ${pm.status === 'failed' ? 'is-failed' : ''}`}
         >
-          <div className="msg-user-text">{pm.text}</div>
+          {activeId && pm.attachments && pm.attachments.length > 0 && (
+            <AttachmentList sessionId={activeId} attachments={pm.attachments} onOpen={openFilePreview} />
+          )}
+          {pm.text && <div className="msg-user-text">{pm.text}</div>}
           {pm.status === 'failed' && (
             <div className="msg-failed">
               <span className="msg-failed-why">{pm.error ?? 'Failed to send.'}</span>
-              <button className="msg-retry" onClick={() => onRetry(pm.id, pm.text)}>
+              <button className="msg-retry" onClick={() => onRetry(pm.id)}>
                 Retry
               </button>
             </div>

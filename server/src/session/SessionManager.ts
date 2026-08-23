@@ -5,6 +5,7 @@ import {
   type AgentMode,
   type CasperEvent,
   type CasperEventPayload,
+  type MessageAttachment,
   type JsonRpcNotification,
   type KiroCommandsAvailableParams,
   type KiroCompactionStatusParams,
@@ -40,10 +41,12 @@ import {
   deletePersistedSession,
   hasRecordedTurns,
   hydrateTranscript,
+  promptCount,
   listPersistedSessions,
   readPersistedSession,
 } from './kiroFiles.js';
 import { SessionStore } from './sessionStore.js';
+import { backfillAttachments } from './backfillAttachments.js';
 
 // Resolve a working directory for a new session as an absolute path (relative input against
 // DEFAULT_CWD), created if missing, rejected if it exists as a file. Confined to
@@ -226,6 +229,12 @@ export class SessionManager {
   constructor(log: Logger, opts: SessionManagerOptions = {}) {
     this.log = log;
     this.spawnProcess = opts.spawn ?? ((o, l) => new KiroProcess(o, l));
+    // Messages sent before attachments were recorded left only the "Attached files:" line;
+    // convert them once so their files are still visible. Deliberately not awaited: it is a
+    // one-off over kiro's files and nothing depends on it having finished.
+    void backfillAttachments(this.store, log).catch((err) => {
+      log.warn({ err }, 'attachment backfill failed; older attachments stay hidden');
+    });
   }
 
   /**
@@ -575,7 +584,11 @@ export class SessionManager {
   // Actions - these spawn the process lazily.
   // -------------------------------------------------------------------------
 
-  async runPrompt(sessionId: string, content: PromptContentBlock[]): Promise<void> {
+  async runPrompt(
+    sessionId: string,
+    content: PromptContentBlock[],
+    attachments?: MessageAttachment[],
+  ): Promise<void> {
     const s = await this.ensureOpen(sessionId);
     // Held rather than rejected: a message typed while the process is being replaced
     // should land on the new one, not bounce back at the user.
@@ -607,7 +620,15 @@ export class SessionManager {
       }
     }
 
-    s.record({ kind: 'turn_started', prompt: content });
+    // Only counted when there is something to record, so an ordinary prompt pays nothing.
+    let recorded: MessageAttachment[] | undefined;
+    if (attachments?.length) {
+      const ordinal = await promptCount(s.sessionId);
+      this.store.setAttachments(s.sessionId, ordinal, attachments);
+      recorded = attachments;
+    }
+
+    s.record({ kind: 'turn_started', prompt: content, attachments: recorded });
 
     proc
       .prompt({ sessionId: s.sessionId, prompt: content })
@@ -742,7 +763,7 @@ export class SessionManager {
     // Both reads in parallel: a live session needs the file too, so its summary
     // gets the same fallbacks the list gives it and the two cannot disagree.
     const [transcript, persisted] = await Promise.all([
-      hydrateTranscript(sessionId),
+      hydrateTranscript(sessionId, this.store.attachmentsBySession(sessionId)),
       readPersistedSession(sessionId),
     ]);
 
@@ -775,7 +796,10 @@ export class SessionManager {
     offset: number,
     limit: number,
   ): Promise<TranscriptItem[]> {
-    const transcript = await hydrateTranscript(sessionId);
+    const transcript = await hydrateTranscript(
+      sessionId,
+      this.store.attachmentsBySession(sessionId),
+    );
     const start = Math.max(0, Math.min(offset, transcript.length));
     const end = Math.max(start, Math.min(start + limit, transcript.length));
     return transcript.slice(start, end);
