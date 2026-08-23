@@ -8,15 +8,15 @@ import {
   type PromptContentBlock,
   type ModelInfo,
   type ObservabilitySnapshot,
-  type SessionDetail,
-  type SessionSummary,
+  type ChatDetail,
+  type ChatSummary,
   type ToolCallProgressUpdate,
   type ToolCallUpdate,
   type TranscriptItem,
   type TranscriptToolCall,
 } from '@casper/shared';
 
-import { bumpSessionToTop, upsertSession } from './sessions.js';
+import { bumpChatToTop, upsertChat } from './chats.js';
 import { classifyTurnFailure } from '../util/turnFailure.js';
 import type { ConnStatus } from '../api/SessionSocket.js';
 
@@ -38,7 +38,7 @@ interface PendingMessage {
 
 /** A condition that outlives a single turn (bad credentials, missing binary), so
  *  it stays pinned above the composer until it's resolved or dismissed. */
-export interface SessionNotice {
+export interface ChatNotice {
   title: string;
   fix?: string;
   /** The raw server message, kept so the notice can offer the real text. */
@@ -47,10 +47,10 @@ export interface SessionNotice {
 
 interface CasperState {
   // Session list
-  sessions: SessionSummary[];
+  chats: ChatSummary[];
   models: ModelInfo[];
   agents: AgentMode[]; // global agent list (from /api/agents) - always populated
-  defaultAgentId: string; // server-configured default (DEFAULT_AGENT) for new sessions
+  defaultAgentId: string; // server-configured default (DEFAULT_AGENT) for new chats
 
   // Active session
   activeId: string | null;
@@ -59,7 +59,7 @@ interface CasperState {
   /** Session whose detail is currently being fetched (opening/switching), so
    *  the pane can show a loading state instead of the previous session's stale
    *  content while a slow transcript hydrates. Null once loadDetail lands. */
-  loadingSessionId: string | null;
+  loadingChatId: string | null;
   modes: AgentMode[];
   currentModeId?: string;
   currentModelId?: string;
@@ -78,7 +78,7 @@ interface CasperState {
   streamingText: string; // in-flight assistant chunk not yet committed
   streamingThought: string; // in-flight reasoning chunk not yet committed
   pending: PendingMessage[]; // user messages sent locally, awaiting server echo
-  sessionNotice: SessionNotice | null;
+  chatNotice: ChatNotice | null;
   /** Socket state for the active session, so the pane can say what it is doing. */
   connStatus: ConnStatus;
   /** Why creating a session failed, shown on the chat pane with a retry. */
@@ -92,11 +92,11 @@ interface CasperState {
   // actions
   bumpFsPath: (path: string) => void;
   setWatchedPaths: (paths: string[]) => void;
-  setSessions: (s: SessionSummary[]) => void;
+  setChats: (s: ChatSummary[]) => void;
   setModels: (m: ModelInfo[]) => void;
   setAgents: (a: AgentMode[], defaultAgentId: string) => void;
-  setLoadingSession: (id: string | null) => void;
-  loadDetail: (d: SessionDetail, opts?: { keepPending?: boolean }) => void;
+  setLoadingChat: (id: string | null) => void;
+  loadDetail: (d: ChatDetail, opts?: { keepPending?: boolean }) => void;
   prependItems: (older: TranscriptItem[]) => void;
   clearActive: () => void;
   /** Start a new chat's identity, before it has a session. */
@@ -104,9 +104,9 @@ interface CasperState {
   applyEvent: (e: CasperEvent) => void;
   addPending: (pending: Omit<PendingMessage, 'status'>) => void;
   markPendingFailed: (id: string, error?: string) => void;
-  dismissSessionNotice: () => void;
+  dismissChatNotice: () => void;
   /** Pin a condition above the composer, for a failure with no turn to attach to. */
-  setSessionNotice: (notice: SessionNotice) => void;
+  setSessionNotice: (notice: ChatNotice) => void;
   setConnStatus: (status: ConnStatus) => void;
   setCreateError: (message: string | null) => void;
   setReloadingId: (id: string | null) => void;
@@ -124,13 +124,13 @@ interface CasperState {
 }
 
 export const useStore = create<CasperState>((set, get) => ({
-  sessions: [],
+  chats: [],
   models: [],
   agents: [],
   defaultAgentId: 'kiro_default',
   activeId: null,
   chatId: null,
-  loadingSessionId: null,
+  loadingChatId: null,
   modes: [],
   items: [],
   appliedSeq: 0,
@@ -141,7 +141,7 @@ export const useStore = create<CasperState>((set, get) => ({
   streamingText: '',
   streamingThought: '',
   pending: [],
-  sessionNotice: null,
+  chatNotice: null,
   connStatus: 'closed',
   createError: null,
   reloadingId: null,
@@ -166,15 +166,15 @@ export const useStore = create<CasperState>((set, get) => ({
   setCurrentModel: (currentModelId) => set({ currentModelId }),
 
   // Optimistic in both the picker (currentModeId) and the sidebar row (agentId),
-  // so neither waits for the next listSessions.
+  // so neither waits for the next listChats.
   setCurrentAgent: (modeId) =>
     set((s) => ({
       currentModeId: modeId,
-      sessions: s.activeId
-        ? s.sessions.map((sess) =>
-            sess.sessionId === s.activeId ? { ...sess, agentId: modeId } : sess,
+      chats: s.activeId
+        ? s.chats.map((sess) =>
+            sess.chatId === s.activeId ? { ...sess, agentId: modeId } : sess,
           )
-        : s.sessions,
+        : s.chats,
     })),
 
   // No-op when already in that state, so the safety-net clear cannot undo a real
@@ -195,8 +195,8 @@ export const useStore = create<CasperState>((set, get) => ({
 
   renameSessionRow: (id, title) =>
     set((s) => ({
-      sessions: s.sessions.map((sess) =>
-        sess.sessionId === id ? { ...sess, title } : sess,
+      chats: s.chats.map((sess) =>
+        sess.chatId === id ? { ...sess, title } : sess,
       ),
     })),
 
@@ -204,18 +204,18 @@ export const useStore = create<CasperState>((set, get) => ({
     set((s) => ({ fsVersion: { ...s.fsVersion, [path]: (s.fsVersion[path] ?? 0) + 1 } })),
   setWatchedPaths: (watchedPaths) => set({ watchedPaths }),
 
-  setSessions: (sessions) => set({ sessions }),
+  setChats: (chats) => set({ chats }),
   setModels: (models) => set({ models }),
   setAgents: (agents, defaultAgentId) => set({ agents, defaultAgentId }),
-  setLoadingSession: (loadingSessionId) => set({ loadingSessionId }),
+  setLoadingChat: (loadingChatId) => set({ loadingChatId }),
 
   loadDetail: (d, opts) =>
     set((s) => ({
-      activeId: d.summary.sessionId,
+      activeId: d.summary.chatId,
       chatId: d.summary.chatId,
-      loadingSessionId: null,
+      loadingChatId: null,
       // The detail knows this session's title before the next list fetch does.
-      sessions: upsertSession(s.sessions, d.summary),
+      chats: upsertChat(s.chats, d.summary),
       modes: d.modes,
       currentModeId: d.currentModeId,
       currentModelId: d.summary.modelId,
@@ -227,10 +227,10 @@ export const useStore = create<CasperState>((set, get) => ({
       remainingOlder: Math.max(0, d.transcriptTotal - d.transcript.length),
       streamingText: '',
       streamingThought: '',
-      // Switching sessions drops optimistic bubbles, but adopting the session a draft
+      // Switching chats drops optimistic bubbles, but adopting the session a draft
       // just created must keep the message that created it.
       pending: opts?.keepPending ? s.pending : [],
-      sessionNotice: null,
+      chatNotice: null,
     })),
 
   // Prepend an older page (loaded on scroll-up). remainingOlder shrinks by the
@@ -250,7 +250,7 @@ export const useStore = create<CasperState>((set, get) => ({
   clearActive: () =>
     set({
       activeId: null,
-      loadingSessionId: null,
+      loadingChatId: null,
       modes: [],
       items: [],
       appliedSeq: 0,
@@ -259,14 +259,14 @@ export const useStore = create<CasperState>((set, get) => ({
       streamingText: '',
       streamingThought: '',
       pending: [],
-      sessionNotice: null,
+      chatNotice: null,
       currentModeId: undefined,
       currentModelId: undefined,
       previewPath: null,
     }),
 
-  dismissSessionNotice: () => set({ sessionNotice: null }),
-  setSessionNotice: (sessionNotice) => set({ sessionNotice }),
+  dismissChatNotice: () => set({ chatNotice: null }),
+  setSessionNotice: (chatNotice) => set({ chatNotice }),
 
   // An object, not positional args: a caller that forgets one is a type error rather than
   // a silently dropped field.
@@ -304,7 +304,7 @@ export const useStore = create<CasperState>((set, get) => ({
         // orders by updatedAt, which only changes once kiro persists the turn,
         // so bump it optimistically now; turn_ended reconciles from the server.
         const bumpedAt = new Date(e.ts).toISOString();
-        const sessions = bumpSessionToTop(state.sessions, e.sessionId, bumpedAt);
+        const chats = bumpChatToTop(state.chats, e.chatId, bumpedAt);
         set({
           items: [
             ...state.items,
@@ -323,7 +323,7 @@ export const useStore = create<CasperState>((set, get) => ({
             sendingIdx === -1
               ? state.pending
               : state.pending.filter((_, i) => i !== sendingIdx),
-          sessions,
+          chats,
           streamingText: '',
           observability: { ...state.observability, turnStatus: 'running' },
         });
@@ -387,7 +387,7 @@ export const useStore = create<CasperState>((set, get) => ({
           items: commitStreaming(state, `s-${e.seq}`, e.ts),
           // A turn got through, so whatever was blocking the session isn't
           // blocking it any more.
-          sessionNotice: null,
+          chatNotice: null,
           streamingText: '',
           streamingThought: '',
           observability: { ...state.observability, turnStatus: 'idle' },
@@ -404,9 +404,9 @@ export const useStore = create<CasperState>((set, get) => ({
           ],
           // Conditions that outlive the turn get pinned above the composer too,
           // since the next send will hit the same wall.
-          sessionNotice: failure.sessionWide
+          chatNotice: failure.sessionWide
             ? { title: failure.title, fix: failure.fix, detail: p.message }
-            : state.sessionNotice,
+            : state.chatNotice,
           streamingText: '',
           streamingThought: '',
           observability: { ...state.observability, turnStatus: 'idle' },

@@ -1,11 +1,11 @@
 import type {
   AgentsResponse,
-  CreateSessionRequest,
+  CreateChatRequest,
   DevicesResponse,
   DirListing,
   ModelsResponse,
-  SessionDetail,
-  SessionListResponse,
+  ChatDetail,
+  ChatListResponse,
   TranscriptPageResponse,
   TreeResponse,
   UploadResponse,
@@ -62,39 +62,39 @@ export const api = {
   agents: () => req<AgentsResponse>('GET', '/api/agents'),
   listDirs: (path: string) =>
     req<DirListing>('GET', `/api/fs/dirs?path=${encodeURIComponent(path)}`),
-  listSessions: () => req<SessionListResponse>('GET', '/api/sessions'),
-  createSession: (body: CreateSessionRequest) =>
-    req<SessionDetail>('POST', '/api/sessions', body),
-  getSession: (id: string) => req<SessionDetail>('GET', `/api/sessions/${id}`),
+  listChats: () => req<ChatListResponse>('GET', '/api/chats'),
+  createChat: (body: CreateChatRequest) =>
+    req<ChatDetail>('POST', '/api/chats', body),
+  getChat: (id: string) => req<ChatDetail>('GET', `/api/chats/${id}`),
   /** Fetch an older page of transcript items: [offset, offset+limit). */
   transcriptPage: (id: string, offset: number, limit: number) =>
     req<TranscriptPageResponse>(
       'GET',
-      `/api/sessions/${id}/transcript?offset=${offset}&limit=${limit}`,
+      `/api/chats/${id}/transcript?offset=${offset}&limit=${limit}`,
     ),
-  deleteSession: (id: string) => req<{ ok: boolean }>('DELETE', `/api/sessions/${id}`),
-  renameSession: (id: string, title: string) =>
-    req<{ ok: boolean }>('POST', `/api/sessions/${id}/rename`, { title }),
+  deleteChat: (id: string) => req<{ ok: boolean }>('DELETE', `/api/chats/${id}`),
+  renameChat: (id: string, title: string) =>
+    req<{ ok: boolean }>('POST', `/api/chats/${id}/rename`, { title }),
   /** Re-point a session at a different working directory. */
   setSessionCwd: (id: string, cwd: string) =>
-    req<{ ok: boolean; cwd: string }>('POST', `/api/sessions/${id}/cwd`, { cwd }),
+    req<{ ok: boolean; cwd: string }>('POST', `/api/chats/${id}/cwd`, { cwd }),
   /**
    * Restart the session's kiro process so its `.kiro` directory, agent definition
    * and MCP servers are detected again. Answers with the refreshed detail.
    */
-  reloadSession: (id: string) =>
-    req<SessionDetail>('POST', `/api/sessions/${id}/reload`),
+  reloadChat: (id: string) =>
+    req<ChatDetail>('POST', `/api/chats/${id}/reload`),
   /** List files/directories in a session's workspace. */
   tree: (id: string, relativePath = '') =>
     req<TreeResponse>(
       'GET',
-      `/api/sessions/${id}/tree?path=${encodeURIComponent(relativePath)}`,
+      `/api/chats/${id}/tree?path=${encodeURIComponent(relativePath)}`,
     ),
   /** Trigger a file download from a session's workspace. */
   downloadUrl: (id: string, filePath: string) =>
     filePath.startsWith('/')
       ? `/api/fs/file?download=1&path=${encodeURIComponent(filePath)}`
-      : `/api/sessions/${id}/download?path=${encodeURIComponent(filePath)}`,
+      : `/api/chats/${id}/download?path=${encodeURIComponent(filePath)}`,
   /**
    * Preview URL for a file. An absolute path goes to the filesystem route: uploads live
    * under the data directory, outside any session's cwd, so the workspace route cannot
@@ -103,7 +103,7 @@ export const api = {
   previewUrl: (id: string, filePath: string) =>
     filePath.startsWith('/')
       ? `/api/fs/file?path=${encodeURIComponent(filePath)}`
-      : `/api/sessions/${id}/preview?path=${encodeURIComponent(filePath)}`,
+      : `/api/chats/${id}/preview?path=${encodeURIComponent(filePath)}`,
   /** Upload files for a session (stored under the data directory). */
   /** Keyed by chat, not session: a draft uploads before it has one. */
   uploadFiles: async (chatId: string, files: File[]): Promise<UploadResponse> => {

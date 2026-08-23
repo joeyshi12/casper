@@ -6,7 +6,7 @@ import { sessionController } from './state/sessionController.js';
 import { Sidebar } from './components/layout/Sidebar.js';
 import { ChatPane } from './components/layout/ChatPane.js';
 import { TokenGate } from './components/common/TokenGate.js';
-import { SESSION_ROUTE } from './util/route.js';
+import { CHAT_ROUTE } from './util/route.js';
 
 type AuthState = 'checking' | 'gate' | 'ready';
 
@@ -20,10 +20,10 @@ export function App() {
   useEffect(() => {
     if (auth !== 'checking') return;
     api
-      .listSessions()
+      .listChats()
       .then((r) => {
         // This probe is also the first list fetch, so keep what it returned.
-        useStore.getState().setSessions(r.sessions);
+        useStore.getState().setChats(r.chats);
         setAuth('ready');
       })
       .catch(() => setAuth('gate'));
@@ -35,10 +35,10 @@ export function App() {
     <BrowserRouter>
       <Routes>
         {/* A layout route, so navigating doesn't remount Shell and drop the
-            socket. The children only exist to put :sessionId in the URL. */}
+            socket. The children only exist to put :chatId in the URL. */}
         <Route element={<Shell onLock={() => setAuth('gate')} />}>
           <Route index element={null} />
-          <Route path="sessions/:sessionId" element={null} />
+          <Route path="chats/:chatId" element={null} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -54,14 +54,14 @@ export function App() {
  * and this renders both panes.
  */
 function Shell({ onLock }: { onLock: () => void }) {
-  const sessions = useStore((s) => s.sessions);
+  const sessions = useStore((s) => s.chats);
   const activeId = useStore((s) => s.activeId);
   const watchedPaths = useStore((s) => s.watchedPaths);
   const connStatus = useStore((s) => s.connStatus);
-  const loadingSessionId = useStore((s) => s.loadingSessionId);
+  const loadingChatId = useStore((s) => s.loadingChatId);
   const navigate = useNavigate();
   // Not useParams: the param belongs to the child route, so it isn't visible here.
-  const matchedId = useMatch(SESSION_ROUTE)?.params.sessionId ?? null;
+  const matchedId = useMatch(CHAT_ROUTE)?.params.chatId ?? null;
   // A draft is a session that does not exist yet: the chat opens immediately and the first
   // prompt creates it. Both the explicit /sessions/new route and the default page, so
   // landing with nothing open puts you in front of a composer.
@@ -79,7 +79,7 @@ function Shell({ onLock }: { onLock: () => void }) {
     sessionController.loadPickers();
     // The auth probe fetched the list already; this covers the other way in, a
     // fresh login, where nothing has.
-    if (useStore.getState().sessions.length === 0) sessionController.refreshSessions();
+    if (useStore.getState().chats.length === 0) sessionController.refreshSessions();
   }, []);
 
   // The route owns which session is open, so cold loads, back/forward and clicks
@@ -121,7 +121,7 @@ function Shell({ onLock }: { onLock: () => void }) {
       <Sidebar
         sessions={sessions}
         activeId={activeId}
-        loadingId={loadingSessionId}
+        loadingId={loadingChatId}
         onOpen={(id) => {
           sessionController.markLoading(id);
           closeNavOnMobile();
@@ -130,8 +130,8 @@ function Shell({ onLock }: { onLock: () => void }) {
           sessionController.startDraft();
           closeNavOnMobile();
         }}
-        onDelete={(id) => void sessionController.deleteSession(id)}
-        onRename={(id, title) => void sessionController.renameSession(id, title)}
+        onDelete={(id) => void sessionController.deleteChat(id)}
+        onRename={(id, title) => void sessionController.renameChat(id, title)}
         onLock={lock}
       />
       {/* Only the drawer needs dismissing; a wide screen gives the panel its own column. */}

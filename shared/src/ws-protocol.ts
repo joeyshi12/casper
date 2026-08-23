@@ -75,7 +75,7 @@ export type CasperEventPayload =
 export interface CasperEvent {
   seq: number;
   ts: number;
-  sessionId: string;
+  chatId: string;
   payload: CasperEventPayload;
 }
 

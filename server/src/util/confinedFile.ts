@@ -97,8 +97,8 @@ export function replyWith(
 }
 
 /** The one method this module needs from SessionManager. */
-export interface SessionCwdSource {
-  getSessionCwd(sessionId: string): Promise<string>;
+export interface ChatCwdSource {
+  getChatCwd(chatId: string): Promise<string>;
 }
 
 export type SessionPathResult =
@@ -111,14 +111,14 @@ export type SessionPathResult =
  * directory and lists the cwd itself when the path is empty.
  */
 export async function resolveSessionPath(
-  sessions: SessionCwdSource,
+  sessions: ChatCwdSource,
   sessionId: string,
   requestedPath: string | undefined,
   require: 'file' | 'directory',
 ): Promise<SessionPathResult> {
   let cwd: string;
   try {
-    cwd = await sessions.getSessionCwd(sessionId);
+    cwd = await sessions.getChatCwd(sessionId);
   } catch {
     return { ok: false, status: 404, error: 'Session not found' };
   }

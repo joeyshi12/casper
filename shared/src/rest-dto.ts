@@ -38,10 +38,10 @@ export interface AgentsResponse {
 
 export type SessionLiveness = 'live' | 'dormant';
 
-export interface SessionSummary {
-  sessionId: string;
-  /** The chat that owns this session's uploads. */
+export interface ChatSummary {
   chatId: string;
+  /** kiro's session behind this chat, absent until it has started one. */
+  sessionId?: string;
   title: string;
   cwd: string;
   createdAt: string;
@@ -56,11 +56,11 @@ export interface SessionSummary {
   contextUsagePercentage?: number;
 }
 
-export interface SessionListResponse {
-  sessions: SessionSummary[];
+export interface ChatListResponse {
+  chats: ChatSummary[];
 }
 
-export interface CreateSessionRequest {
+export interface CreateChatRequest {
   cwd?: string;
   agentId?: string;
   modelId?: string;
@@ -123,8 +123,8 @@ export type TranscriptItem =
   | { type: 'compaction'; id: string; summary: string; timestamp?: number }
   | { type: 'turn_error'; id: string; message: string; timestamp?: number };
 
-export interface SessionDetail {
-  summary: SessionSummary;
+export interface ChatDetail {
+  summary: ChatSummary;
   modes: AgentMode[];
   currentModeId?: string;
   /** The most recent page of transcript items (see transcriptTotal). Older

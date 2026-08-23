@@ -10,7 +10,7 @@ import {
   replyWith,
   resolveSessionPath,
   workspaceNotFound,
-  type SessionCwdSource,
+  type ChatCwdSource,
 } from '../util/confinedFile.js';
 import { mimeForExt } from '../util/filekind.js';
 import { sendFilePreview } from './filePreview.js';
@@ -20,7 +20,7 @@ const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 
 export function registerWorkspaceRoutes(
   app: FastifyInstance,
-  manager: SessionCwdSource,
+  manager: ChatCwdSource,
 ): void {
   /**
    * GET /api/sessions/:id/tree?path=<relative>&depth=1
@@ -30,7 +30,7 @@ export function registerWorkspaceRoutes(
    * Returns immediate children only (lazy loading; expand on demand).
    */
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
-    '/api/sessions/:id/tree',
+    '/api/chats/:id/tree',
     async (req, reply) => {
       const resolved = await resolveSessionPath(
         manager,
@@ -91,7 +91,7 @@ export function registerWorkspaceRoutes(
    * The `path` parameter is relative to the session's cwd.
    */
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
-    '/api/sessions/:id/download',
+    '/api/chats/:id/download',
     async (req, reply) => {
       const resolved = await resolveSessionPath(manager, req.params.id, req.query.path, 'file');
       if (!resolved.ok) return replyWith(reply, resolved);
@@ -127,7 +127,7 @@ export function registerWorkspaceRoutes(
    * Large files (>1 MB for text, >20 MB for images) are rejected.
    */
   app.get<{ Params: { id: string }; Querystring: { path?: string; raw?: string } }>(
-    '/api/sessions/:id/preview',
+    '/api/chats/:id/preview',
     async (req, reply) => {
       const resolved = await resolveSessionPath(manager, req.params.id, req.query.path, 'file');
       if (!resolved.ok) return replyWith(reply, resolved);

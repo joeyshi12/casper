@@ -29,11 +29,11 @@ const reduceMotion =
  * the preview panel. Shared by the sent message and the optimistic bubble.
  */
 function AttachmentList({
-  sessionId,
+  chatId,
   attachments,
   onOpen,
 }: {
-  sessionId: string;
+  chatId: string;
   attachments: MessageAttachment[];
   onOpen: (path: string) => void;
 }) {
@@ -43,13 +43,13 @@ function AttachmentList({
         a.kind === 'image' ? (
           <a
             key={a.path}
-            href={api.previewUrl(sessionId, a.path)}
+            href={api.previewUrl(chatId, a.path)}
             target="_blank"
             rel="noopener noreferrer"
             className="msg-image-link"
           >
             <img
-              src={api.previewUrl(sessionId, a.path)}
+              src={api.previewUrl(chatId, a.path)}
               alt={a.name}
               className="msg-image"
               {...lazyImageProps}
@@ -131,8 +131,8 @@ export const Transcript = memo(function Transcript() {
   if (!viewportRef.current) {
     viewportRef.current = new TranscriptViewport({
       element: () => scrollRef.current,
-      fetchPage: (sessionId, offset, limit) =>
-        api.transcriptPage(sessionId, offset, limit).then((r) => r.items),
+      fetchPage: (chatId, offset, limit) =>
+        api.transcriptPage(chatId, offset, limit).then((r) => r.items),
       prepend: (older) => useStore.getState().prependItems(older),
       onFlags: setFlags,
       reducedMotion: () => reduceMotion?.matches ?? false,
@@ -147,7 +147,7 @@ export const Transcript = memo(function Transcript() {
 
   useEffect(() => {
     viewport.onContent({
-      sessionId: activeId,
+      chatId: activeId,
       itemCount: items.length,
       pendingCount: pending.length,
       remainingOlder,
@@ -193,7 +193,7 @@ export const Transcript = memo(function Transcript() {
                 <>
                   {activeId && item.message.attachments && item.message.attachments.length > 0 && (
                     <AttachmentList
-                      sessionId={activeId}
+                      chatId={activeId}
                       attachments={item.message.attachments}
                       onOpen={openFilePreview}
                     />
@@ -220,7 +220,7 @@ export const Transcript = memo(function Transcript() {
           className={`msg msg-user msg-pending ${pm.status === 'failed' ? 'is-failed' : ''}`}
         >
           {activeId && pm.attachments && pm.attachments.length > 0 && (
-            <AttachmentList sessionId={activeId} attachments={pm.attachments} onOpen={openFilePreview} />
+            <AttachmentList chatId={activeId} attachments={pm.attachments} onOpen={openFilePreview} />
           )}
           {pm.text && <div className="msg-user-text">{pm.text}</div>}
           {pm.status === 'failed' && (

@@ -40,11 +40,11 @@ const basename = (p: string): string => p.split('/').pop() || p;
 /** The modal itself - text content, image, or a rendered page in a centered overlay. */
 function PreviewModal({
   preview,
-  sessionId,
+  chatId,
   onClose,
 }: {
   preview: PreviewState;
-  sessionId: string;
+  chatId: string;
   onClose: () => void;
 }) {
   // A class rather than the Fullscreen API, which iOS Safari won't grant to
@@ -54,7 +54,7 @@ function PreviewModal({
   const [sourceByPath, setSourceByPath] = useState<Record<string, boolean>>({});
 
   const download = () => {
-    window.open(api.downloadUrl(sessionId, preview.path), '_blank');
+    window.open(api.downloadUrl(chatId, preview.path), '_blank');
   };
 
   const onBackdropClick = (e: React.MouseEvent) => {
@@ -134,14 +134,14 @@ function PreviewModal({
           {preview.error && <div className="ftree-error">{preview.error}</div>}
           {!preview.loading && !preview.error && preview.kind === 'image' && (
             <img
-              src={api.previewUrl(sessionId, preview.path)}
+              src={api.previewUrl(chatId, preview.path)}
               alt={preview.name}
               className="fpreview-image"
             />
           )}
           {!preview.error && preview.kind === 'pdf' && (
             <iframe
-              src={api.previewUrl(sessionId, preview.path)}
+              src={api.previewUrl(chatId, preview.path)}
               title={preview.name}
               className="fpreview-pdf"
             />
@@ -150,7 +150,7 @@ function PreviewModal({
             // No allow-same-origin, so scripts run but the page can't touch the session
             // cookie or the API. The server sends a matching CSP.
             <iframe
-              src={`${api.previewUrl(sessionId, preview.path)}&raw=1`}
+              src={`${api.previewUrl(chatId, preview.path)}&raw=1`}
               title={preview.name}
               className="fpreview-html"
               sandbox="allow-scripts allow-forms"
@@ -179,7 +179,7 @@ function PreviewModal({
 
 export function FilePreview() {
   const path = useStore((s) => s.previewPath);
-  const sessionId = useStore((s) => s.activeId);
+  const chatId = useStore((s) => s.activeId);
   const closeFilePreview = useStore((s) => s.closeFilePreview);
   const [preview, setPreview] = useState<PreviewState | null>(null);
 
@@ -188,7 +188,7 @@ export function FilePreview() {
   // Load whatever the store points at. `stale` covers a second file being opened while
   // the first is still in flight, which is what the old per-path comparison did.
   useEffect(() => {
-    if (!path || !sessionId) {
+    if (!path || !chatId) {
       setPreview(null);
       return;
     }
@@ -208,7 +208,7 @@ export function FilePreview() {
 
     void (async () => {
       try {
-        const res = await fetch(api.previewUrl(sessionId, path), { credentials: 'same-origin' });
+        const res = await fetch(api.previewUrl(chatId, path), { credentials: 'same-origin' });
         if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
         const text = await res.text();
         if (stale) return;
@@ -234,11 +234,11 @@ export function FilePreview() {
     return () => {
       stale = true;
     };
-  }, [path, sessionId]);
+  }, [path, chatId]);
 
-  if (!preview || !sessionId) return null;
+  if (!preview || !chatId) return null;
   return createPortal(
-    <PreviewModal preview={preview} sessionId={sessionId} onClose={close} />,
+    <PreviewModal preview={preview} chatId={chatId} onClose={close} />,
     document.body,
   );
 }

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { workspaceRelative } from '../web/src/util/workspacePath.js';
 import type { ToolCallView } from '../web/src/state/store.js';
-import type { SessionSummary } from '@casper/shared';
+import type { ChatSummary } from '@casper/shared';
 
 describe('workspaceRelative', () => {
   const cwd = '/home/joey/workspace/casper';
@@ -127,7 +127,7 @@ describe('the file heading on a tool call (rendered in a DOM)', () => {
     useStore.getState().clearActive();
     useStore.setState({
       activeId: 's1',
-      sessions: [{ sessionId: 's1', cwd } as unknown as SessionSummary],
+      chats: [{ chatId: 's1', cwd } as unknown as ChatSummary],
       previewPath: null,
     });
   });

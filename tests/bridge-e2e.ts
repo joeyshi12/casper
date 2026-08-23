@@ -6,7 +6,7 @@ import type {
   CasperEvent,
   ModelsResponse,
   ServerMessage,
-  SessionDetail,
+  ChatDetail,
 } from '@casper/shared';
 import { buildApp } from '../server/src/app.js';
 import { config } from '../server/src/config.js';
@@ -109,7 +109,7 @@ async function main() {
     assert(models.length > 0, `GET /api/models returned ${models.length} models`);
     assert(models.some((m) => m.modelId === 'auto'), 'model list includes "auto"');
 
-    const detail = await api<SessionDetail>('POST', '/api/sessions', {
+    const detail = await api<ChatDetail>('POST', '/api/chats', {
       modelId: 'claude-haiku-4.5',
     });
     const sid = detail.summary.sessionId;
@@ -157,7 +157,7 @@ async function main() {
     assert(monotonic, 'replayed events are strictly increasing (no dupes/out-of-order)');
     assert(seqs.every((s) => s > midCursor), 'replayed events are all after the stale cursor');
 
-    const after = await api<SessionDetail>('GET', `/api/sessions/${sid}`);
+    const after = await api<ChatDetail>('GET', `/api/chats/${sid}`);
     assert(
       after.observability.creditsSpent > 0,
       `observability shows credits spent: ${after.observability.creditsSpent.toFixed(4)}`,
@@ -175,7 +175,7 @@ async function main() {
     );
     assert(userMsg, 'user prompt is present in the re-fetched transcript');
 
-    await api('POST', `/api/sessions/${sid}/model`, { modelId: 'auto' });
+    await api('POST', `/api/chats/${sid}/model`, { modelId: 'auto' });
     console.log('✅ set_model round-trip ok');
 
     // 8. Compact the conversation: exec_command 'compact' triggers kiro's
@@ -208,7 +208,7 @@ async function main() {
     );
     assert(started, 'compaction emitted a started status');
     assert(compactionEvents.length >= 2, 'compaction emitted started -> completed');
-    const afterCompact = await api<SessionDetail>('GET', `/api/sessions/${sid}`);
+    const afterCompact = await api<ChatDetail>('GET', `/api/chats/${sid}`);
     assert(
       afterCompact.observability.compacting === false,
       'compacting flag is cleared after completion',
@@ -223,7 +223,7 @@ async function main() {
     console.log('\n🎉 Bridge E2E passed.');
   } finally {
     // Clean up the throwaway session (memory + kiro files).
-    if (createdSid) await api('DELETE', `/api/sessions/${createdSid}`).catch(() => {});
+    if (createdSid) await api('DELETE', `/api/chats/${createdSid}`).catch(() => {});
     manager.disposeAll();
     await app.close();
     // kiro's wrapped chat process flushes its session file on shutdown, which

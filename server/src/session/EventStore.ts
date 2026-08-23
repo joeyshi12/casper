@@ -7,14 +7,14 @@ import { config } from '../config.js';
 // last-seen seq via getSince(). Deliberately memory-only - a client whose cursor
 // predates the buffer is told to resync and refetches the transcript instead.
 export class EventStore extends EventEmitter {
-  private readonly sessionId: string;
+  private readonly chatId: string;
   private readonly buffer: CasperEvent[] = [];
   private readonly capacity: number;
   private seq = 0;
 
-  constructor(sessionId: string) {
+  constructor(chatId: string) {
     super();
-    this.sessionId = sessionId;
+    this.chatId = chatId;
     this.capacity = config.eventBufferSize;
   }
 
@@ -24,7 +24,7 @@ export class EventStore extends EventEmitter {
     const event: CasperEvent = {
       seq: this.seq,
       ts: Date.now(),
-      sessionId: this.sessionId,
+      chatId: this.chatId,
       payload,
     };
     this.buffer.push(event);
