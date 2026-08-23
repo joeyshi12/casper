@@ -91,19 +91,24 @@ export const api = {
       `/api/sessions/${id}/tree?path=${encodeURIComponent(relativePath)}`,
     ),
   /** Trigger a file download from a session's workspace. */
-  downloadUrl: (id: string, relativePath: string) =>
-    `/api/sessions/${id}/download?path=${encodeURIComponent(relativePath)}`,
-  /** Get a preview URL for a file (inline display). */
-  previewUrl: (id: string, relativePath: string) =>
-    `/api/sessions/${id}/preview?path=${encodeURIComponent(relativePath)}`,
-  /**
-   * Attachments are absolute paths, which only the fs endpoint accepts. Transcripts
-   * written before uploads moved out of the workspace still carry relative ones.
-   */
-  attachmentUrl: (id: string, filePath: string) =>
+  downloadUrl: (id: string, filePath: string) =>
     filePath.startsWith('/')
-      ? `/api/fs/image?path=${encodeURIComponent(filePath)}`
+      ? `/api/fs/file?download=1&path=${encodeURIComponent(filePath)}`
+      : `/api/sessions/${id}/download?path=${encodeURIComponent(filePath)}`,
+  /**
+   * Preview URL for a file. An absolute path goes to the filesystem route: uploads live
+   * under the data directory, outside any session's cwd, so the workspace route cannot
+   * reach them.
+   */
+  previewUrl: (id: string, filePath: string) =>
+    filePath.startsWith('/')
+      ? `/api/fs/file?path=${encodeURIComponent(filePath)}`
       : `/api/sessions/${id}/preview?path=${encodeURIComponent(filePath)}`,
+  /**
+   * A transcript attachment. Absolute paths are uploads, which live outside every session's
+   * cwd, so they go to the filesystem route.
+   */
+  attachmentUrl: (id: string, filePath: string) => api.previewUrl(id, filePath),
   /** Upload files for a session (stored under the data directory). */
   uploadFiles: async (id: string, files: File[]): Promise<UploadResponse> => {
     const form = new FormData();

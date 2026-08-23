@@ -11,6 +11,7 @@ import {
   resolveAbsolutePath,
 } from '../util/confinedFile.js';
 import { classifyKind, mimeForExt } from '../util/filekind.js';
+import { sendFilePreview } from './filePreview.js';
 
 /** Max image file size (20 MB). */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -78,6 +79,45 @@ export function registerFsRoutes(app: FastifyInstance): void {
       }
 
       return { dir, entries, target: resolved, targetKind };
+    },
+  );
+
+  /**
+   * GET /api/fs/file?path=<absolute-path>
+   *
+   * Preview any file by absolute path, confined to the same roots as the rest of this
+   * module: config.fileRoot and the data directory. Uploads live under the data directory,
+   * outside every session's working directory, so the workspace preview route - which
+   * confines lexically to the cwd - cannot reach them. Serves whatever the file is: text as
+   * text, images and PDFs inline, binaries as a hexdump.
+   */
+  app.get<{ Querystring: { path?: string; raw?: string; download?: string } }>(
+    '/api/fs/file',
+    async (req, reply) => {
+      const filePath = (req.query.path ?? '').trim();
+      if (!filePath) {
+        reply.code(400);
+        return { error: 'path parameter is required' };
+      }
+      if (!path.isAbsolute(filePath)) {
+        reply.code(400);
+        return { error: 'path must be absolute' };
+      }
+      const resolved = await resolveAbsolutePath(filePath, 'file');
+      if (!resolved.ok) return replyWith(reply, resolved);
+      // download=1 sends the bytes as a file rather than previewing them: the preview path
+      // is inline-only and caps text at 1 MB, so routing Download at it opened an upload in
+      // a tab instead of saving it.
+      if (req.query.download === '1') {
+        reply.header('Content-Type', 'application/octet-stream');
+        reply.header(
+          'Content-Disposition',
+          `attachment; filename="${path.basename(resolved.real).replace(/"/g, '')}"`,
+        );
+        reply.header('Content-Length', resolved.stat.size);
+        return reply.send(createReadStream(resolved.real));
+      }
+      return sendFilePreview(req, reply, resolved.real, resolved.stat);
     },
   );
 
