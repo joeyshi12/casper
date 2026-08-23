@@ -22,7 +22,7 @@ import type { SessionSocketHandlers } from '../web/src/api/SessionSocket.js';
 import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
 import { lineDiff } from '../web/src/util/diff.js';
 import { matchPath } from 'react-router';
-import { CHAT_ROUTE, pathForChat } from '../web/src/util/route.js';
+import { CHAT_ROUTE, DRAFT_PATH, pathForChat } from '../web/src/util/route.js';
 import { choiceCallOf, choiceOutcome } from '../web/src/util/choiceCall.js';
 import { upsertChat } from '../web/src/state/chats.js';
 import { composerPlaceholder } from '../web/src/util/composerPlaceholder.js';
@@ -412,6 +412,13 @@ describe('chat deep links', () => {
 
   it('does not match the list route', () => {
     assert.equal(matchPath(CHAT_ROUTE, '/'), null);
+  });
+
+  // A draft has its own path, so no chat id has to avoid being called "new".
+  it('keeps the draft path clear of the chat pattern', () => {
+    assert.equal(DRAFT_PATH, '/new');
+    assert.equal(matchPath(CHAT_ROUTE, DRAFT_PATH), null);
+    assert.equal(matchPath(CHAT_ROUTE, pathForChat('new'))?.params.chatId, 'new');
   });
 });
 

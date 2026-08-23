@@ -6,7 +6,7 @@ import { sessionController } from './state/sessionController.js';
 import { Sidebar } from './components/layout/Sidebar.js';
 import { ChatPane } from './components/layout/ChatPane.js';
 import { TokenGate } from './components/common/TokenGate.js';
-import { CHAT_ROUTE } from './util/route.js';
+import { CHAT_ROUTE, DRAFT_PATH } from './util/route.js';
 
 type AuthState = 'checking' | 'gate' | 'ready';
 
@@ -38,6 +38,7 @@ export function App() {
             socket. The children only exist to put :chatId in the URL. */}
         <Route element={<Shell onLock={() => setAuth('gate')} />}>
           <Route index element={null} />
+          <Route path="new" element={null} />
           <Route path="chats/:chatId" element={null} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -62,12 +63,12 @@ function Shell({ onLock }: { onLock: () => void }) {
   const navigate = useNavigate();
   // Not useParams: the param belongs to the child route, so it isn't visible here.
   const matchedId = useMatch(CHAT_ROUTE)?.params.chatId ?? null;
-  // A draft is a session that does not exist yet: the chat opens immediately and the first
-  // prompt creates it. Both the explicit /sessions/new route and the default page, so
-  // landing with nothing open puts you in front of a composer.
-  const isDraftRoute = matchedId === 'new';
+  // A draft is a chat that does not exist yet: it opens immediately and the first prompt
+  // creates it. Both /new and the default page, so landing with nothing open still puts you
+  // in front of a composer.
+  const isDraftRoute = useMatch(DRAFT_PATH) !== null;
   const isDraft = isDraftRoute || (!matchedId && activeId === null);
-  const routeSessionId = isDraft ? null : matchedId;
+  const routeChatId = isDraft ? null : matchedId;
 
   // The two things only React can do. Re-attached rather than set once, because
   // navigate's identity changes with the router's state.
@@ -85,8 +86,8 @@ function Shell({ onLock }: { onLock: () => void }) {
   // The route owns which session is open, so cold loads, back/forward and clicks
   // all arrive here.
   useEffect(() => {
-    sessionController.syncRoute(routeSessionId, isDraft);
-  }, [routeSessionId, isDraft]);
+    sessionController.syncRoute(routeChatId, isDraft);
+  }, [routeChatId, isDraft]);
 
   useEffect(() => {
     if (connStatus !== 'connected') return;
