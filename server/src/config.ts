@@ -177,7 +177,7 @@ export const config = {
    */
   defaultAgent: setting('DEFAULT_AGENT', 'defaultAgent', 'casper'),
   /**
-   * Filesystem root the file endpoints (/api/fs/dirs, /api/fs/image) are confined to; anything
+   * Filesystem root the file endpoints (/api/fs/dirs, /api/fs/file, /api/fs/image) are confined to; anything
    * resolving outside it is rejected. Defaults to /, so browsing spans everything the process
    * can read - set a narrower path to keep authenticated users out of system files such as /etc
    * or SSH keys.

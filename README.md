@@ -133,6 +133,9 @@ Casper launches kiro with `--trust-all-tools` so unattended runs never block on
 approvals. The agent can run commands and write files without asking, so treat
 access to Casper as equivalent to a shell on the machine.
 
+`CASPER_FILE_ROOT` is the only limit on what the file endpoints will read, and it defaults
+to everything the server can read. Narrow it if that matters to you.
+
 The token is 24 random bytes, generated for you and exchanged at login for a
 per-device cookie; only its hash is stored. Comparison is constant-time, and
 `/api/login` allows ten failures per quarter hour per address before answering 429.

@@ -10,10 +10,10 @@ import {
   replyWith,
   resolveAbsolutePath,
 } from '../util/confinedFile.js';
-import { classifyKind, mimeForExt } from '../util/filekind.js';
+import { classifyKind } from '../util/filekind.js';
+import { sendFilePreview } from './filePreview.js';
 
 /** Max image file size (20 MB). */
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 // Suggests directory paths for the New Session working-directory input. Given a
 // partial path, it lists directories in the parent that match the last segment.
@@ -82,13 +82,52 @@ export function registerFsRoutes(app: FastifyInstance): void {
   );
 
   /**
+   * GET /api/fs/file?path=<absolute-path>
+   *
+   * Preview any file by absolute path, confined to the same roots as the rest of this
+   * module: config.fileRoot and the data directory. Uploads live under the data directory,
+   * outside every session's working directory, so the workspace preview route - which
+   * confines lexically to the cwd - cannot reach them. Serves whatever the file is: text as
+   * text, images and PDFs inline, binaries as a hexdump.
+   */
+  app.get<{ Querystring: { path?: string; raw?: string; download?: string } }>(
+    '/api/fs/file',
+    async (req, reply) => {
+      const filePath = (req.query.path ?? '').trim();
+      if (!filePath) {
+        reply.code(400);
+        return { error: 'path parameter is required' };
+      }
+      if (!path.isAbsolute(filePath)) {
+        reply.code(400);
+        return { error: 'path must be absolute' };
+      }
+      const resolved = await resolveAbsolutePath(filePath, 'file');
+      if (!resolved.ok) return replyWith(reply, resolved);
+      // download=1 sends the bytes as a file rather than previewing them: the preview path
+      // is inline-only and caps text at 1 MB, so routing Download at it opened an upload in
+      // a tab instead of saving it.
+      if (req.query.download === '1') {
+        reply.header('Content-Type', 'application/octet-stream');
+        reply.header(
+          'Content-Disposition',
+          `attachment; filename="${path.basename(resolved.real).replace(/"/g, '')}"`,
+        );
+        reply.header('Content-Length', resolved.stat.size);
+        return reply.send(createReadStream(resolved.real));
+      }
+      return sendFilePreview(req, reply, resolved.real, resolved.stat);
+    },
+  );
+
+  /**
    * GET /api/fs/image?path=<absolute-path>
    *
    * Serves an image file from the server filesystem. Used to render images
    * produced by tool calls (e.g. charts, screenshots) inline in the chat.
    * Only serves files with recognized image extensions; rejects anything else.
    */
-  app.get<{ Querystring: { path?: string } }>(
+  app.get<{ Querystring: { path?: string; raw?: string } }>(
     '/api/fs/image',
     async (req, reply) => {
       const filePath = (req.query.path ?? '').trim();
@@ -112,29 +151,10 @@ export function registerFsRoutes(app: FastifyInstance): void {
 
       const resolvedImage = await resolveAbsolutePath(filePath, 'file');
       if (!resolvedImage.ok) return replyWith(reply, resolvedImage);
-      const { real, stat } = resolvedImage;
-
-      if (stat.size > MAX_IMAGE_BYTES) {
-        reply.code(413);
-        return { error: 'Image too large' };
-      }
-
-      // no-cache, not max-age: the file can be rewritten at any time, so the
-      // browser must revalidate rather than trust a freshness window. Matches
-      // the workspace preview policy; unchanged files still cost only a 304.
-      const etag = `W/"${stat.size}-${stat.mtimeMs}"`;
-      reply.header('Cache-Control', 'private, no-cache');
-      reply.header('ETag', etag);
-      reply.header('Last-Modified', stat.mtime.toUTCString());
-
-      if (req.headers['if-none-match'] === etag) {
-        reply.code(304);
-        return reply.send();
-      }
-
-      reply.header('Content-Type', mimeForExt(ext));
-      reply.header('Content-Length', stat.size);
-      return reply.send(createReadStream(real));
+      // Same 20 MB ceiling, ETag policy and streaming as every other preview, so the two
+      // don't drift apart. This route's own job is the allowlist above: it exists to refuse
+      // anything that isn't an image, which /api/fs/file deliberately does not.
+      return sendFilePreview(req, reply, resolvedImage.real, resolvedImage.stat);
     },
   );
 }
