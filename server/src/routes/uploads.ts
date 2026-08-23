@@ -11,10 +11,8 @@ import { classifyKind, mimeForExt } from '../util/filekind.js';
 import { confineToRoot, isValidChatId } from '../util/paths.js';
 import { chatUploadsDir } from '../session/chats.js';
 
-/**
- * Where uploads land: the chat's own directory, deliberately not under its working
- * directory, which would leave a .casper/ folder in every project you chat about.
- */
+// Uploads land in the chat's directory, not the working one, which would leave a .casper/
+// folder in every project you chat about.
 
 /** Bytes of a binary to scan for a triage `strings` sample. */
 const STRINGS_SCAN_BYTES = 256 * 1024;
@@ -90,20 +88,15 @@ async function sampleStrings(absPath: string, limit = 40): Promise<string[]> {
   }
 }
 
-// Uploads are keyed by chat, so this no longer needs the session manager.
 export function registerUploadRoutes(app: FastifyInstance): void {
   /**
    * POST /api/chats/:chatId/uploads  (multipart/form-data)
    *
-   * Streams each file to <data dir>/chats/<chat id>/uploads/ byte-for-byte, classifies it,
-   * and for binaries adds a triage summary (type, sha256, sample strings) so the agent
-   * starts with context.
+   * Streams each file byte-for-byte, classifies it, and for binaries adds a triage summary
+   * (type, sha256, sample strings) so the agent starts with context.
    *
-   * Keyed by chat rather than session because the point is to work before the session
-   * exists: a new chat has no kiro session id until it sends its first prompt, so keying
-   * this on one meant a first message could not carry a file. Nothing is checked against
-   * the session list for the same reason - the chat id is the client's, and the uuid shape
-   * is what keeps it inside the chats directory.
+   * Deliberately checks nothing against the session list: the chat may not have one yet, so
+   * the uuid shape is what keeps the id inside the chats directory.
    */
   app.post<{ Params: { chatId: string } }>(
     '/api/chats/:chatId/uploads',

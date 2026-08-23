@@ -40,7 +40,7 @@ export type SessionLiveness = 'live' | 'dormant';
 
 export interface SessionSummary {
   sessionId: string;
-  /** The chat that owns this session's uploads. See the server's chats.ts. */
+  /** The chat that owns this session's uploads. */
   chatId: string;
   title: string;
   cwd: string;
@@ -69,10 +69,7 @@ export interface CreateSessionRequest {
    * picked: <data dir>/chats/<chat id>/workspace.
    */
   freshWorkspace?: boolean;
-  /**
-   * The chat this session belongs to, minted by the client so it can attach files before
-   * the session exists. The server generates one if it is absent or malformed.
-   */
+  /** The client's chat id. The server generates one if it is absent or malformed. */
   chatId?: string;
   /**
    * Name the session as it is created. The client knows the first prompt before the
@@ -240,14 +237,12 @@ export interface TreeResponse {
 /** How an uploaded file should be surfaced to the agent. */
 export type UploadKind = 'image' | 'text' | 'binary';
 
-/** Metadata for one stored upload (from POST /api/sessions/:id/uploads). */
+/** Metadata for one stored upload (from POST /api/chats/:chatId/uploads). */
 export interface UploadedFile {
-  /** Original (sanitized) filename. */
   name: string;
-  /** Absolute path, e.g. ~/.casper/sessions/<id>/uploads/report.pdf */
+  /** Absolute path, e.g. ~/.casper/chats/<chat id>/uploads/report.pdf */
   path: string;
   size: number;
-  /** Detected MIME type (best effort). */
   mimeType: string;
   kind: UploadKind;
   /** Best-effort triage for binaries: `file` output, sha256, sample strings. */

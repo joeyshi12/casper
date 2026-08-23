@@ -17,7 +17,7 @@ import { MarkdownRenderer } from './MarkdownRenderer.js';
 
 /**
  * The file preview, for whoever asks: the file tree, or a read/write tool call in the
- * transcript. It used to belong to the tree, which meant it could only be opened while
+ * transcript.
  * the panel was open. The store holds the path; this loads it and renders PreviewModal.
  *
  * Portalled to the body like the app's other modals - a `transform` on an ancestor would

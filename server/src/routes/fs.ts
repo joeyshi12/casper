@@ -12,8 +12,6 @@ import {
 } from '../util/confinedFile.js';
 import { sendFilePreview } from './filePreview.js';
 
-/** Max image file size (20 MB). */
-
 // Suggests directory paths for the New Session working-directory input. Given a
 // partial path, it lists directories in the parent that match the last segment.
 // Relative input is resolved against DEFAULT_CWD, and confined to fileRoot.

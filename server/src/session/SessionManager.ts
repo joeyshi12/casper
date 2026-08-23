@@ -243,9 +243,7 @@ export class SessionManager {
   }
 
   /**
-   * Re-point a session at a different working directory, for when the original was moved
-   * or deleted. Validates and creates the target exactly like a new session's cwd, so a
-   * folder is only created on this explicit action. Any live process was spawned with the
+   * Re-point a session at a different working directory. Any live process was spawned with the
    * old cwd, so it is disposed and the next turn respawns in the new one, transcript intact.
    */
   async setSessionCwd(sessionId: string, input: string): Promise<string> {
@@ -267,34 +265,23 @@ export class SessionManager {
   }
 
   /**
-   * Restart the session's kiro child, so everything kiro only reads when a child
-   * starts is read again: the agent definition, the workspace's `.kiro` directory,
-   * and the MCP servers kiro launches for itself.
+   * Restart the session's kiro child, so what kiro reads only at startup is read again: the
+   * agent definition, the workspace's `.kiro`, and the MCP servers kiro launches itself.
+   * Replacing the process is the only way - no ACP method does it, and `session/set_mode`
+   * leaves those MCP servers alone.
    *
-   * No ACP method does this. kiro advertises no reload command, and `session/set_mode`
-   * leaves the MCP servers it started alone, so replacing the process is the only
-   * way - the transcript comes back with `session/load`.
-   *
-   * The old child is awaited out before the new one starts, because kiro flushes its
-   * session file on shutdown and the replacement reads that file to reload the
-   * conversation. Respawned eagerly rather than at the next prompt, so the caller
-   * gets a detail that reflects what the fresh process reported.
-   *
-   * Needs a session that has recorded a turn, so it can be loaded back. Verified
-   * against kiro 2.11: loading one with an empty event log fails with "Session not
-   * found", and kiro deletes both its files when that process exits.
+   * The old child must be awaited out first: kiro flushes its session file on shutdown and
+   * the replacement reads that file to reload the conversation.
    */
   async reloadSession(sessionId: string): Promise<SessionDetail> {
     const s = await this.ensureOpen(sessionId);
-    // Guard and claim in one tick. Every await below yields, and a check-then-act
-    // guard excluded nothing: a prompt arriving in one of those gaps used to start a
-    // turn on the very process this is about to dispose, killing it mid-flight.
+    // Guard and claim in one tick: every await below yields, and a prompt arriving in one of
+    // those gaps would start a turn on the process this is about to dispose.
     if (s.running) {
       throw new Error('Cannot reload while a turn is running');
     }
-    // Compaction isn't a turn, so s.running says nothing about it. Replacing the process
-    // mid-compaction loses the work and leaves the compacting flag set, which disables the
-    // composer - and this reload would then hand that snapshot straight back to the client.
+    // Compaction isn't a turn, so s.running says nothing about it, and replacing the process
+    // mid-compaction loses the work and leaves the flag set, disabling the composer.
     if (s.turnState.get().compacting) {
       throw new Error('Cannot reload while the conversation is being compacted');
     }
@@ -675,15 +662,9 @@ export class SessionManager {
   // -------------------------------------------------------------------------
 
   /**
-   * The one place a SessionSummary is assembled. kiro's file and Casper's live
-   * state each hold part of the truth, so every read path - list, detail, and a
-   * freshly created session - projects them through here rather than picking a
-   * precedence per field on its own. Mirrors resolveSessionTitle, which already
-   * owns the title half of the same decision.
-   *
-   * `persisted` is kiro's own summary, absent for a session with no file yet.
-   * `live` is the in-memory session, absent for a dormant one. The overloads
-   * require one of them, so the assertions below cannot fire.
+   * The one place a SessionSummary is assembled: kiro's file and Casper's live state each hold
+   * part of the truth, so every read path projects them through here. `persisted` is absent for
+   * a session with no file yet, `live` for a dormant one, and callers guarantee one of them.
    */
   private summaryOf(
     live: Session | undefined,
@@ -790,10 +771,9 @@ export class SessionManager {
   }
 
   /**
-   * The cursor a reconnecting client should start from. Normally the store head, but kiro writes
-   * a turn to its jsonl only once the turn completes, so a hydrated transcript is missing one in
-   * flight. Rewind to just before its turn_started and let the WS replay the whole turn. Guarded
-   * against duplication in case kiro ever persists the prompt at turn start.
+   * The cursor a reconnecting client starts from. Normally the store head, but kiro writes a turn
+   * to its jsonl only once it completes, so a hydrated transcript is missing one in flight:
+   * rewind to just before its turn_started and let the socket replay the whole turn.
    */
   private replayHead(s: Session, transcript: SessionDetail['transcript']): number {
     const head = s.store.head();

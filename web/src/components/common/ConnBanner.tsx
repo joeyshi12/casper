@@ -1,10 +1,6 @@
 import type { ConnStatus } from '../../api/SessionSocket.js';
 
-/**
- * A small connection indicator: a coloured dot plus a short label. Green when
- * connected, amber while catching up, red when disconnected - quiet, but
- * readable at a glance. Replaces the old full-width "Connecting…" ribbon.
- */
+/** A coloured dot plus a short label: green connected, amber catching up, red disconnected. */
 const MAP: Record<ConnStatus, { cls: string; label: string }> = {
   connecting: { cls: 'busy', label: 'Connecting' },
   replaying: { cls: 'busy', label: 'Catching up' },

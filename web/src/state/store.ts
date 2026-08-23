@@ -54,11 +54,7 @@ interface CasperState {
 
   // Active session
   activeId: string | null;
-  /**
-   * The chat that owns the uploads directory. Minted for a draft so it can attach a file
-   * before the session exists, then adopted from the created session. See the server's
-   * chats.ts.
-   */
+  /** The chat that owns the uploads directory; minted for a draft, then adopted. */
   chatId: string | null;
   /** Session whose detail is currently being fetched (opening/switching), so
    *  the pane can show a loading state instead of the previous session's stale

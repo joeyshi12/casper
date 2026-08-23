@@ -28,11 +28,6 @@ const mount = (props: Record<string, unknown>) => {
     root.render(
       createElement(Composer, {
         chatId: 'c0ffee00-0000-4000-8000-000000000000',
-        onSend: () => {},
-        onCancel: () => {},
-        onCompact: () => {},
-        onChangeModel: () => {},
-        onChangeAgent: () => {},
         connStatus: 'connected',
         ...props,
       }),

@@ -22,10 +22,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   session_id TEXT PRIMARY KEY,
   title      TEXT,
   cwd        TEXT,
-  -- The chat this session belongs to, which owns its uploads directory. Minted by the
-  -- client before the session exists, so a new chat can attach a file before it sends.
-  -- NULL for a session Casper did not create, such as one started with kiro-cli directly;
-  -- getChatId names those after the session.
+  -- The chat that owns this session's uploads (see chats.ts). NULL for a session Casper did
+  -- not create; getChatId names those after the session.
   chat_id    TEXT
 );
 CREATE TABLE IF NOT EXISTS logins (
