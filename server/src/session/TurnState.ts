@@ -36,9 +36,14 @@ export class TurnState {
         break;
       }
       case 'process_exited': {
-        // The kiro process died; any in-flight turn is over. Match the client
-        // reducer so a REST refetch after a crash does not report 'running'.
-        this.snapshot = { ...s, turnStatus: 'idle', currentTurnStartedAt: undefined };
+        // Nothing a dead process was doing is still in flight. Compaction included: only a
+        // completed/failed notification clears it, and while set it disables the composer.
+        this.snapshot = {
+          ...s,
+          turnStatus: 'idle',
+          currentTurnStartedAt: undefined,
+          compacting: false,
+        };
         break;
       }
       case 'metadata': {

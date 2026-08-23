@@ -479,8 +479,10 @@ export const useStore = create<CasperState>((set, get) => ({
         break;
 
       case 'process_exited':
+        // compacting too: only a completed/failed notification clears it, which a dead
+        // process never sends, and while set it disables the composer.
         set({
-          observability: { ...state.observability, turnStatus: 'idle' },
+          observability: { ...state.observability, turnStatus: 'idle', compacting: false },
         });
         break;
     }
