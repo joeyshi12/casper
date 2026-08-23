@@ -1324,8 +1324,12 @@
   color: var(--n4);
 }
 .thought-chevron {
-  font-size: 14px;
-  line-height: 1;
+  display: inline-flex;
+  transform: rotate(-90deg);
+  transition: transform 0.22s ease;
+}
+.thought-chevron.is-open {
+  transform: rotate(0deg);
 }
 .thought-body {
   margin-top: 4px;
@@ -1882,12 +1886,14 @@
   flex-shrink: 0;
 }
 .toolcall-chevron {
+  display: inline-flex;
   color: var(--n3);
-  font-size: 11px;
+  /* The icon points down; a closed row points at itself. */
+  transform: rotate(-90deg);
   transition: transform 0.22s ease;
 }
 .toolcall-chevron.is-open {
-  transform: rotate(90deg);
+  transform: rotate(0deg);
 }
 /* Expand/collapse height animation: grid 0fr -> 1fr animates to the content's
    natural height without measuring it. */

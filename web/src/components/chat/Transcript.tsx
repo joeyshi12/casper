@@ -15,6 +15,7 @@ import {
   type ViewportFlags,
 } from '../../util/transcriptViewport.js';
 import { classifyTurnFailure } from '../../util/turnFailure.js';
+import { ChevronIcon } from '../common/icons.js';
 
 /** How long a running turn may be quiet before the dots come back. */
 const STALL_MS = 700;
@@ -299,7 +300,9 @@ function ThoughtBlock({ text, live = false }: { text: string; live?: boolean }) 
   return (
     <div className={`thought ${live ? 'is-live' : ''}`}>
       <button className="thought-head" onClick={() => setOpen((o) => !o)}>
-        <span className="thought-chevron">{open ? '▾' : '▸'}</span>
+        <span className={`thought-chevron ${open ? 'is-open' : ''}`}>
+          <ChevronIcon size={13} />
+        </span>
         <span className={`thought-label ${live ? 'is-live' : ''}`}>Thinking</span>
       </button>
       {open && (
