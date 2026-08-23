@@ -227,10 +227,22 @@ describe('GET /api/fs/dirs: reports what the typed path is', () => {
 
 describe('createSession resolves a missing cwd by creating it', () => {
   let root: string;
+  let dataDir: string;
+  const origData = config.casperDataDir;
+  // A manager reaches the store, so this points somewhere disposable: AGENTS.md forbids a
+  // test writing into the developer's real ~/.casper, and it did until this was added.
   before(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-mkcwd-'));
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-mkcwd-data-'));
+    (config as { casperDataDir: string }).casperDataDir = dataDir;
+    closeDb();
   });
-  after(() => fs.rmSync(root, { recursive: true, force: true }));
+  after(() => {
+    closeDb();
+    (config as { casperDataDir: string }).casperDataDir = origData;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
 
   it('setSessionCwd creates the folder, including missing parents', async () => {
     const manager = new SessionManager(noopLogger());

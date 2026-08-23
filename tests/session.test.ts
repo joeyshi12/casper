@@ -783,6 +783,29 @@ describe('default agent', () => {
   });
 });
 
+// AGENTS.md: never write into ~/.casper from a test. Importing a route module used to break
+// that - auth.ts built a LoginStore at module scope, which prunes on construction, so the
+// database opened as an import side effect before any test could redirect it. Schema changes
+// then landed in the developer's real casper.db.
+describe('importing a module does not touch the data directory', () => {
+  it('opens no database until something asks for one', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-import-'));
+    (config as { casperDataDir: string }).casperDataDir = dir;
+    closeDb();
+
+    // The module whose import used to do it, plus the manager whose constructor did later.
+    await import('../server/src/routes/auth.js');
+    await import('../server/src/session/SessionManager.js');
+
+    assert.equal(
+      fs.existsSync(path.join(dir, 'casper.db')),
+      false,
+      'importing opened a database; it must wait for a real request',
+    );
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe('the chat a session belongs to', () => {
   let dir: string;
   const origDir = config.casperDataDir;

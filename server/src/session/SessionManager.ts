@@ -46,7 +46,6 @@ import {
   readPersistedSession,
 } from './kiroFiles.js';
 import { SessionStore } from './sessionStore.js';
-import { backfillAttachments } from './backfillAttachments.js';
 
 // Resolve a working directory for a new session as an absolute path (relative input against
 // DEFAULT_CWD), created if missing, rejected if it exists as a file. Confined to
@@ -231,12 +230,6 @@ export class SessionManager {
   constructor(log: Logger, opts: SessionManagerOptions = {}) {
     this.log = log;
     this.spawnProcess = opts.spawn ?? ((o, l) => new KiroProcess(o, l));
-    // Messages sent before attachments were recorded left only the "Attached files:" line;
-    // convert them once so their files are still visible. Deliberately not awaited: it is a
-    // one-off over kiro's files and nothing depends on it having finished.
-    void backfillAttachments(this.store, log).catch((err) => {
-      log.warn({ err }, 'attachment backfill failed; older attachments stay hidden');
-    });
   }
 
   /**

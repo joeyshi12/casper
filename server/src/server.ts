@@ -2,6 +2,8 @@ import { buildApp } from './app.js';
 import { config } from './config.js';
 import { logger } from './util/logger.js';
 import { isWithinRoot } from './util/paths.js';
+import { backfillAttachments } from './session/backfillAttachments.js';
+import { SessionStore } from './session/sessionStore.js';
 
 /** Start the HTTP/WebSocket server and block until a signal stops it. */
 export async function serve(): Promise<void> {
@@ -15,6 +17,14 @@ export async function serve(): Promise<void> {
         'picker will be rejected. Set CASPER_FILE_ROOT to an ancestor of DEFAULT_CWD.',
     );
   }
+
+  // Messages sent before attachments were recorded left only the "Attached files:" line;
+  // convert them once so their files are still visible. Here rather than in SessionManager's
+  // constructor: constructing one must not touch the data directory, or a test that builds a
+  // manager writes into the developer's real ~/.casper.
+  await backfillAttachments(new SessionStore(), logger).catch((err) => {
+    logger.warn({ err }, 'attachment backfill failed; older attachments stay hidden');
+  });
 
   const { app, manager } = await buildApp();
 

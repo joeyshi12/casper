@@ -9,7 +9,15 @@ const SESSION_COOKIE = 'casper.sid';
 
 // One store for the process. Each login is a device; the cookie holds an opaque
 // random token, the store keeps only its hash.
-const logins = new LoginStore();
+// Lazily, because a LoginStore prunes on construction: at module scope that opened the
+// database as a side effect of importing this file, before a test could point
+// config.casperDataDir at a temp directory - so running the suite wrote into the
+// developer's real ~/.casper, and applied schema changes to it.
+let loginStore: LoginStore | undefined;
+function logins(): LoginStore {
+  loginStore ??= new LoginStore();
+  return loginStore;
+}
 
 // Ten wrong tokens per quarter hour: forgiving of a mistyped paste, useless for guessing 24
 // random bytes. Keyed on the socket address, so behind a reverse proxy this throttles the
@@ -56,7 +64,7 @@ function sessionToken(req: FastifyRequest): string | undefined {
 
 /** Does the request carry a valid, unexpired session cookie? */
 export function hasValidSession(req: FastifyRequest): boolean {
-  return logins.verify(sessionToken(req)) !== null;
+  return logins().verify(sessionToken(req)) !== null;
 }
 
 // Cookie options. `secure: 'auto'` sets Secure only over HTTPS, so a plain-HTTP LAN and a
@@ -103,35 +111,35 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
       loginLimiter.succeed(req.ip);
     }
     const ua = req.headers['user-agent'];
-    const { token } = logins.create(typeof ua === 'string' ? ua : undefined);
+    const { token } = logins().create(typeof ua === 'string' ? ua : undefined);
     reply.setCookie(SESSION_COOKIE, token, cookieOptions());
     return { ok: true };
   });
 
   // Log out this device: revoke its token and clear the cookie.
   app.post('/api/logout', async (req, reply) => {
-    logins.revokeToken(sessionToken(req));
+    logins().revokeToken(sessionToken(req));
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return { ok: true };
   });
 
   // List logged-in devices, marking the current one.
   app.get('/api/devices', async (req) => {
-    return { devices: logins.list(sessionToken(req)) };
+    return { devices: logins().list(sessionToken(req)) };
   });
 
   // Revoke a device by id. Revoking the current device also clears its cookie.
   app.delete('/api/devices/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const current = logins.list(sessionToken(req)).find((d) => d.current);
-    const removed = logins.revokeId(id);
+    const current = logins().list(sessionToken(req)).find((d) => d.current);
+    const removed = logins().revokeId(id);
     if (current?.id === id) reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return { ok: removed };
   });
 
   // Log out everywhere: revoke all devices and clear this cookie.
   app.post('/api/logout-all', async (_req, reply) => {
-    logins.revokeAll();
+    logins().revokeAll();
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return { ok: true };
   });
