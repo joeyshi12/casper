@@ -128,10 +128,6 @@ function renderableBlocks(content: unknown): KiroContentBlock[] {
 function summarize(j: KiroSessionJson): SessionSummary {
   const state = j.session_state;
   const turns = state?.conversation_metadata?.user_turn_metadatas ?? [];
-  const creditsSpent = turns.reduce(
-    (sum, t) => sum + (t.metering_usage ?? []).reduce((a, m) => a + m.value, 0),
-    0,
-  );
   const contextUsagePercentage =
     state?.rts_model_state?.context_usage_percentage ??
     turns[turns.length - 1]?.context_usage_percentage;
@@ -150,7 +146,6 @@ function summarize(j: KiroSessionJson): SessionSummary {
     agentId: state?.agent_name,
     modelId: state?.rts_model_state?.model_info?.model_id,
     running: false,
-    creditsSpent,
     contextUsagePercentage,
   };
 }
@@ -218,24 +213,36 @@ export async function readPersistedSession(
  * one per Prompt entry, whether or not that entry ends up rendered.
  */
 export async function promptCount(sessionId: string): Promise<number> {
-  if (!isValidSessionId(sessionId)) return 0;
+  const entries = await readJsonlEntries(sessionId);
+  return entries.filter((e) => e.kind === 'Prompt').length;
+}
+
+/**
+ * A session's jsonl as parsed entries, skipping blank and malformed lines.
+ *
+ * Both the attachment ordinal writer (promptCount) and its reader (hydrateTranscript) count
+ * Prompt entries from this one list, because an ordinal only identifies the same message if
+ * the two agree on what a line is.
+ */
+async function readJsonlEntries(sessionId: string): Promise<KiroJsonlEntry[]> {
+  if (!isValidSessionId(sessionId)) return [];
   let raw: string;
   try {
     raw = await fs.readFile(path.join(config.kiroSessionsDir, `${sessionId}.jsonl`), 'utf8');
   } catch {
-    return 0;
+    return [];
   }
-  let n = 0;
+  const entries: KiroJsonlEntry[] = [];
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
-      if ((JSON.parse(trimmed) as { kind?: string }).kind === 'Prompt') n++;
+      entries.push(JSON.parse(trimmed) as KiroJsonlEntry);
     } catch {
-      /* a malformed line is skipped here exactly as hydration skips it */
+      /* a malformed line is skipped */
     }
   }
-  return n;
+  return entries;
 }
 
 /**
@@ -269,32 +276,13 @@ export async function hydrateTranscript(
   /** Recorded attachments, keyed by the ordinal of the user message they belong to. */
   attachments?: Map<number, MessageAttachment[]>,
 ): Promise<TranscriptItem[]> {
-  if (!isValidSessionId(sessionId)) return [];
-  let raw: string;
-  try {
-    raw = await fs.readFile(
-      path.join(config.kiroSessionsDir, `${sessionId}.jsonl`),
-      'utf8',
-    );
-  } catch {
-    return [];
-  }
-
   const items: TranscriptItem[] = [];
-  // Counts user messages as they are rebuilt, so it lines up with what runPrompt recorded.
+  // Counts Prompt entries as they are rebuilt, so it lines up with what runPrompt recorded.
   let userOrdinal = 0;
   // Tool-call items awaiting their result, keyed by toolUseId.
   const toolsById = new Map<string, TranscriptToolCall>();
 
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let entry: KiroJsonlEntry;
-    try {
-      entry = JSON.parse(trimmed) as KiroJsonlEntry;
-    } catch {
-      continue;
-    }
+  for (const entry of await readJsonlEntries(sessionId)) {
     const content = contentBlocks(entry.data.content);
     const textOf = (kind: string) =>
       content.filter((c) => c.kind === kind).map(blockText).join('');

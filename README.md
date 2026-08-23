@@ -25,7 +25,7 @@ exactly what it missed.
 - **Widgets**: the agent calls a `show_widget` tool over MCP and the result renders
   inline as a live page. Charts, simulations, animated diagrams. Sandboxed, and they
   can send a message back.
-- **Observability** for credits spent, context-window usage and turn duration.
+- **Context-window usage** shown live, with one tap to compact.
 - **PWA** that installs to a home screen and reconnects when the network returns.
 
 ## Install

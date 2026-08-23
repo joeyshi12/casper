@@ -1,17 +1,10 @@
 import {
   emptyObservabilitySnapshot,
   type CasperEventPayload,
-  type McpServerHealth,
   type ObservabilitySnapshot,
 } from '@casper/shared';
 
-/**
- * Folds the stream of Casper events into a live observability snapshot:
- * cumulative credits, context-window usage, turn duration, MCP health,
- * subagents, available commands, and OAuth prompts.
- *
- * Pure and deterministic - unit-tested by replaying a fixture set.
- */
+/** Folds the event stream into the live snapshot. Pure and deterministic. */
 export class TurnState {
   private snapshot: ObservabilitySnapshot = emptyObservabilitySnapshot();
 
@@ -19,92 +12,39 @@ export class TurnState {
     return this.snapshot;
   }
 
-  /** Apply one event; returns the updated snapshot. */
   apply(payload: CasperEventPayload): ObservabilitySnapshot {
     const s = this.snapshot;
     switch (payload.kind) {
-      case 'turn_started': {
-        this.snapshot = { ...s, turnStatus: 'running', currentTurnStartedAt: Date.now() };
+      case 'turn_started':
+        this.snapshot = { ...s, turnStatus: 'running' };
         break;
-      }
-      case 'turn_ended': {
-        this.snapshot = { ...s, turnStatus: 'idle', currentTurnStartedAt: undefined };
+      case 'turn_ended':
+      case 'turn_error':
+        this.snapshot = { ...s, turnStatus: 'idle' };
         break;
-      }
-      case 'turn_error': {
-        this.snapshot = { ...s, turnStatus: 'idle', currentTurnStartedAt: undefined };
+      case 'process_exited':
+        // Nothing a dead process was doing is still in flight, compaction included: only a
+        // completed/failed notification clears that, and while set it disables the composer.
+        this.snapshot = { ...s, turnStatus: 'idle', compacting: false };
         break;
-      }
-      case 'process_exited': {
-        // Nothing a dead process was doing is still in flight. Compaction included: only a
-        // completed/failed notification clears it, and while set it disables the composer.
+      case 'metadata':
         this.snapshot = {
           ...s,
-          turnStatus: 'idle',
-          currentTurnStartedAt: undefined,
-          compacting: false,
+          contextUsagePercentage:
+            payload.params.contextUsagePercentage ?? s.contextUsagePercentage,
         };
         break;
-      }
-      case 'metadata': {
-        const p = payload.params;
-        const turnCredits = (p.meteringUsage ?? []).reduce((sum, m) => sum + m.value, 0);
-        this.snapshot = {
-          ...s,
-          contextUsagePercentage: p.contextUsagePercentage ?? s.contextUsagePercentage,
-          // meteringUsage is emitted per-turn; accumulate into the session total.
-          creditsSpent: turnCredits > 0 ? s.creditsSpent + turnCredits : s.creditsSpent,
-          lastTurnCredits: turnCredits > 0 ? turnCredits : s.lastTurnCredits,
-          lastTurnDurationMs: p.turnDurationMs ?? s.lastTurnDurationMs,
-        };
-        break;
-      }
-      case 'subagent_update': {
-        this.snapshot = {
-          ...s,
-          subagents: payload.params.subagents,
-          pendingStages: payload.params.pendingStages,
-        };
-        break;
-      }
-      case 'mcp_health': {
-        const { serverName, error } = payload.params;
-        const status: McpServerHealth['status'] = payload.ok ? 'initialized' : 'failed';
-        const next = s.mcpServers.filter((m) => m.serverName !== serverName);
-        next.push({ serverName, status, error, updatedAt: Date.now() });
-        this.snapshot = { ...s, mcpServers: next };
-        break;
-      }
-      case 'commands_available': {
-        this.snapshot = { ...s, availableCommands: payload.params.commands };
-        break;
-      }
-      case 'compaction': {
-        // 'started' -> compacting; 'completed'/'failed' -> done. Context drops
-        // arrive separately via the metadata event.
+      case 'compaction':
         this.snapshot = { ...s, compacting: payload.params.status.type === 'started' };
         break;
-      }
-      case 'oauth_request': {
-        const prompts = [
-          ...s.oauthPrompts,
-          {
-            serverName: payload.params.serverName,
-            url: payload.params.url,
-            createdAt: Date.now(),
-          },
-        ];
-        this.snapshot = { ...s, oauthPrompts: prompts };
-        break;
-      }
       default:
         break;
     }
     return this.snapshot;
   }
 
-  /** Seed cumulative credits/context from kiro's persisted metadata on resume. */
-  seed(creditsSpent: number, contextUsagePercentage: number): void {
-    this.snapshot = { ...this.snapshot, creditsSpent, contextUsagePercentage };
+  /** Seed context usage from kiro's persisted metadata on resume. */
+  seed(contextUsagePercentage: number): void {
+    this.snapshot = { ...this.snapshot, contextUsagePercentage };
   }
 }

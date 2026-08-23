@@ -418,59 +418,12 @@ export const useStore = create<CasperState>((set, get) => ({
         break;
       }
 
-      case 'metadata': {
-        const turnCredits = (p.params.meteringUsage ?? []).reduce(
-          (s, m) => s + m.value,
-          0,
-        );
+      case 'metadata':
         set({
           observability: {
             ...state.observability,
             contextUsagePercentage:
-              p.params.contextUsagePercentage ??
-              state.observability.contextUsagePercentage,
-            creditsSpent:
-              turnCredits > 0
-                ? state.observability.creditsSpent + turnCredits
-                : state.observability.creditsSpent,
-            lastTurnCredits:
-              turnCredits > 0 ? turnCredits : state.observability.lastTurnCredits,
-            lastTurnDurationMs:
-              p.params.turnDurationMs ?? state.observability.lastTurnDurationMs,
-          },
-        });
-        break;
-      }
-
-      case 'subagent_update':
-        set({
-          observability: {
-            ...state.observability,
-            subagents: p.params.subagents,
-            pendingStages: p.params.pendingStages,
-          },
-        });
-        break;
-
-      case 'mcp_health': {
-        const next = state.observability.mcpServers.filter(
-          (m) => m.serverName !== p.params.serverName,
-        );
-        next.push({
-          serverName: p.params.serverName,
-          status: p.ok ? 'initialized' : 'failed',
-          error: p.params.error,
-          updatedAt: e.ts,
-        });
-        set({ observability: { ...state.observability, mcpServers: next } });
-        break;
-      }
-
-      case 'commands_available':
-        set({
-          observability: {
-            ...state.observability,
-            availableCommands: p.params.commands,
+              p.params.contextUsagePercentage ?? state.observability.contextUsagePercentage,
           },
         });
         break;
@@ -493,18 +446,6 @@ export const useStore = create<CasperState>((set, get) => ({
         });
         break;
       }
-
-      case 'oauth_request':
-        set({
-          observability: {
-            ...state.observability,
-            oauthPrompts: [
-              ...state.observability.oauthPrompts,
-              { serverName: p.params.serverName, url: p.params.url, createdAt: e.ts },
-            ],
-          },
-        });
-        break;
 
       case 'process_exited':
         // compacting too: only a completed/failed notification clears it, which a dead

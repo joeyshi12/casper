@@ -3,10 +3,8 @@ import { EventEmitter } from 'node:events';
 import split2 from 'split2';
 import {
   ACP_METHODS,
-  type InitializeResult,
   type JsonRpcNotification,
   type SessionLoadParams,
-  type SessionLoadResult,
   type SessionNewParams,
   type SessionNewResult,
   type SessionPromptParams,
@@ -111,9 +109,9 @@ export class KiroProcess extends EventEmitter {
     this.child.stdout.on('error', () => {});
   }
 
-  /** Perform the ACP initialize handshake. Idempotent. */
-  async initialize(): Promise<InitializeResult> {
-    const result = await this.client.request<InitializeResult>(ACP_METHODS.initialize, {
+  /** Perform the ACP initialize handshake. kiro's reply is not used. */
+  async initialize(): Promise<void> {
+    await this.client.request(ACP_METHODS.initialize, {
       protocolVersion: 1,
       clientCapabilities: {
         fs: { readTextFile: false, writeTextFile: false },
@@ -123,15 +121,14 @@ export class KiroProcess extends EventEmitter {
       // worth wiring to package.json.
       clientInfo: { name: 'casper', version: '0.5.0' },
     });
-    return result;
   }
 
   newSession(params: SessionNewParams): Promise<SessionNewResult> {
     return this.client.request<SessionNewResult>(ACP_METHODS.sessionNew, params);
   }
 
-  loadSession(params: SessionLoadParams): Promise<SessionLoadResult> {
-    return this.client.request<SessionLoadResult>(ACP_METHODS.sessionLoad, params);
+  loadSession(params: SessionLoadParams): Promise<SessionNewResult> {
+    return this.client.request<SessionNewResult>(ACP_METHODS.sessionLoad, params);
   }
 
   /** Run a prompt turn to completion. Resolves with the stop reason. */

@@ -1,6 +1,7 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { config } from '../config.js';
 import { db } from './db.js';
+import { sha256 } from '../util/hash.js';
 
 /** A logged-in device. The cookie holds the raw token; we store only its hash. */
 interface LoginRecord {
@@ -27,10 +28,6 @@ export interface DeviceInfo {
 // Only write a lastSeen bump if it advanced by at least this much, so an active
 // device doesn't touch the database on every request.
 const LAST_SEEN_WRITE_INTERVAL_MS = 60_000;
-
-function sha256(s: string): string {
-  return createHash('sha256').update(s).digest('hex');
-}
 
 /** A row from `logins`, read defensively - the driver hands back loose values. */
 type Row = Record<string, unknown>;

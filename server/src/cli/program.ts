@@ -97,15 +97,11 @@ export function buildProgram(): Command {
     // this, `casper reset-token --dry-run` silently adopted "--dry-run" as the new
     // token and revoked every session - the destructive act the flag was meant to
     // avoid.
-    .allowUnknownOption(false)
-    .allowExcessArguments(false)
     .addHelpText('after', `\nSettings live in ${configFilePath()}.\nUpdate with: npm install -g @joeyshi12/casper`);
 
   program
     .command('start')
     .description('run the server in the foreground')
-    .allowUnknownOption(false)
-    .allowExcessArguments(false)
     .action(async () => {
       await bootstrap();
       const { serve } = await import('../server.js');
@@ -115,16 +111,12 @@ export function buildProgram(): Command {
   program
     .command('token')
     .description('print the access token')
-    .allowUnknownOption(false)
-    .allowExcessArguments(false)
     .action(printToken);
 
   program
     .command('reset-token')
     .argument('[value]', 'token to set; generated when omitted')
     .description('set a new token and sign every device out')
-    .allowUnknownOption(false)
-    .allowExcessArguments(false)
     .action(async (value: string | undefined) => {
       await resetToken(value);
     });
@@ -132,8 +124,6 @@ export function buildProgram(): Command {
   program
     .command('doctor')
     .description('check kiro-cli, settings, data directory and web app')
-    .allowUnknownOption(false)
-    .allowExcessArguments(false)
     .action(async () => {
       process.exitCode = (await import('./doctor.js')).doctor();
     });
@@ -141,8 +131,6 @@ export function buildProgram(): Command {
   program
     .command('mcp')
     .description('run the generative-UI MCP server on stdio (kiro spawns this itself)')
-    .allowUnknownOption(false)
-    .allowExcessArguments(false)
     .action(async () => {
       // No bootstrap: it prints, and stdout here belongs to the protocol.
       (await import('../mcp/server.js')).runMcpServer();
@@ -156,8 +144,6 @@ export function buildProgram(): Command {
     service
       .command(name)
       .description(describe)
-      .allowUnknownOption(false)
-      .allowExcessArguments(false)
       .action(async () => {
         process.exitCode = run(await import('./service.js'));
       });
