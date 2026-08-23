@@ -33,7 +33,7 @@ export interface AgentsResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Sessions
+// Chats
 // ---------------------------------------------------------------------------
 
 export type SessionLiveness = 'live' | 'dormant';
@@ -128,7 +128,7 @@ export interface ChatDetail {
   modes: AgentMode[];
   currentModeId?: string;
   /** The most recent page of transcript items (see transcriptTotal). Older
-   *  items are fetched on demand via GET /api/sessions/:id/transcript. */
+   *  items are fetched on demand via GET /api/chats/:chatId/transcript. */
   transcript: TranscriptItem[];
   /** Total number of items in the full transcript, so the client knows whether
    *  older pages remain to load. */
@@ -147,7 +147,7 @@ export interface SetModelRequest {
   modelId: string;
 }
 
-export interface RenameSessionRequest {
+export interface RenameChatRequest {
   title: string;
 }
 
@@ -221,7 +221,7 @@ export interface FileEntry {
   modifiedAt?: string;
 }
 
-/** Response from GET /api/sessions/:id/tree */
+/** Response from GET /api/chats/:chatId/tree */
 export interface TreeResponse {
   /** Absolute working directory of the session (for display). */
   cwd: string;

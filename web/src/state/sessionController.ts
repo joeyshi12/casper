@@ -484,7 +484,7 @@ export class SessionController {
       // Guarded like the success path: don't blame the session the user moved to.
       if (this.state.activeId !== id) return;
       const detail = err instanceof Error ? err.message : 'The server rejected the reload.';
-      this.state.setSessionNotice({
+      this.state.setChatNotice({
         title: "Couldn't reload the session",
         fix: detail,
         detail,
@@ -522,7 +522,7 @@ export class SessionController {
 
   async renameChat(id: string, title: string): Promise<void> {
     // Optimistic: update the list immediately, then persist.
-    this.state.renameSessionRow(id, title);
+    this.state.renameChatRow(id, title);
     await this.api.renameChat(id, title).catch(() => {
       console.error('rename session failed');
     });

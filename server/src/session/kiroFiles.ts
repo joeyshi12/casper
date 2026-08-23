@@ -8,7 +8,6 @@ import type {
 import { stripAttachmentsLine } from '@casper/shared';
 import type { MessageAttachment } from '@casper/shared';
 import { config } from '../config.js';
-import type { Logger } from '../util/logger.js';
 import { isValidSessionId } from '../util/paths.js';
 
 /**
@@ -157,28 +156,6 @@ function summarize(j: KiroSessionJson): PersistedSession {
 }
 
 /** List all persisted sessions (as DORMANT summaries), newest first. */
-export async function listPersistedSessions(log: Logger): Promise<PersistedSession[]> {
-  let files: string[];
-  try {
-    files = await fs.readdir(config.kiroSessionsDir);
-  } catch {
-    return [];
-  }
-  const jsonFiles = files.filter((f) => f.endsWith('.json'));
-  const summaries: PersistedSession[] = [];
-  await Promise.all(
-    jsonFiles.map(async (f) => {
-      try {
-        const raw = await fs.readFile(path.join(config.kiroSessionsDir, f), 'utf8');
-        summaries.push(summarize(JSON.parse(raw) as KiroSessionJson));
-      } catch (err) {
-        log.debug({ err, f }, 'kiroFiles: skipping unreadable session file');
-      }
-    }),
-  );
-  summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  return summaries;
-}
 
 // Delete a session's on-disk files: kiro's <id>.{json,jsonl,history,lock} and its
 // per-session <id>/ directory (tasks, etc.). Missing paths are ignored. The .lock is kiro's

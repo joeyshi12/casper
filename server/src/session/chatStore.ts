@@ -17,7 +17,7 @@ export interface ChatRow {
  * or a session started with kiro-cli - is not a chat and is not listed.
  */
 export class ChatStore {
-  /** Every chat, newest first by kiro's own timestamps once joined. */
+  /** Every chat. Ordering is kiro's business, applied once the file is joined on. */
   all(): ChatRow[] {
     return (
       db()
@@ -27,7 +27,14 @@ export class ChatStore {
   }
 
   get(chatId: string): ChatRow | undefined {
-    return this.all().find((c) => c.chatId === chatId);
+    const r = db()
+      .prepare('SELECT chat_id, session_id, title, cwd FROM chats WHERE chat_id = ?')
+      .get(chatId) as
+      | { chat_id: string; session_id: string | null; title: string | null; cwd: string | null }
+      | undefined;
+    return r
+      ? { chatId: r.chat_id, sessionId: r.session_id, title: r.title, cwd: r.cwd }
+      : undefined;
   }
 
   create(chatId: string): void {
@@ -45,13 +52,6 @@ export class ChatStore {
       .prepare('UPDATE chats SET session_id = NULL WHERE session_id = ? AND chat_id <> ?')
       .run(sessionId, chatId);
     this.write(chatId, 'session_id', sessionId);
-  }
-
-  chatIdForSession(sessionId: string): string | undefined {
-    const row = db()
-      .prepare('SELECT chat_id FROM chats WHERE session_id = ?')
-      .get(sessionId) as { chat_id: string } | undefined;
-    return row?.chat_id;
   }
 
   sessionIdForChat(chatId: string): string | undefined {

@@ -110,8 +110,6 @@ export class Session {
   readonly store: EventStore;
   readonly turnState = new TurnState();
   cwd: string;
-  /** The chat that owns this session's uploads. See chats.ts. */
-  chatId?: string;
   agentId?: string;
   modelId?: string;
   currentModeId?: string;
@@ -223,11 +221,11 @@ export class SessionManager {
    * ours, whose name is a uuid.
    */
   private titleOf(
-    chatId: string,
+    chat: ChatRow,
     parts: { kiroTitle?: string; firstPrompt?: string; cwd: string },
   ): string {
     return resolveSessionTitle({
-      override: this.store.getTitle(chatId),
+      override: chat.title ?? undefined,
       kiroTitle: parts.kiroTitle,
       firstPrompt: parts.firstPrompt,
       folder: isManagedWorkspace(parts.cwd) ? undefined : path.basename(parts.cwd),
@@ -293,7 +291,7 @@ export class SessionManager {
     });
 
     try {
-      return await this.replaceProcess(s);
+      return await this.replaceProcess(chatId, s);
     } finally {
       // Cleared before waking anyone, so a waiter never sees a stale claim.
       s.reloading = undefined;
@@ -302,7 +300,7 @@ export class SessionManager {
   }
 
   /** The reload itself. Only ever called with the session's reload claim held. */
-  private async replaceProcess(s: Session): Promise<ChatDetail> {
+  private async replaceProcess(chatId: string, s: Session): Promise<ChatDetail> {
     if (!(await hasRecordedTurns(s.sessionId))) {
       throw new Error(
         'kiro has not saved this session yet. Send a message first, then reload.',
@@ -327,7 +325,7 @@ export class SessionManager {
     // exactly when a newly created agent should show up.
     invalidateAgents();
     this.log.info({ sessionId: s.sessionId, cwd: s.cwd }, 'session reloaded');
-    return this.getDetail(s.sessionId);
+    return this.getDetail(chatId);
   }
 
   /**
@@ -389,7 +387,6 @@ export class SessionManager {
 
     const store = new EventStore(chatId);
     const s = new Session(sessionId, store, effectiveCwd);
-    s.chatId = chatId;
     s.title = persisted.title;
     s.agentId = persisted.agentId;
     s.currentModeId = persisted.agentId;
@@ -521,7 +518,6 @@ export class SessionManager {
     const tempId = `pending-${Date.now()}-${Math.floor(this.sessions.size)}`;
     const store = new EventStore(chatId);
     const s = new Session(tempId, store, cwd);
-    s.chatId = chatId;
     s.agentId = opts.agentId ?? config.defaultAgent;
     s.currentModeId = s.agentId;
     s.modelId = opts.modelId;
@@ -542,7 +538,6 @@ export class SessionManager {
     // the user chose. Stored as a Casper title override; the user can rename.
     this.store.create(chatId);
     this.store.bindSession(chatId, s.sessionId);
-    s.chatId = chatId;
 
     const name = sanitizeTitle(opts.title ?? '') || (opts.freshWorkspace ? '' : path.basename(s.cwd));
     if (name) {
@@ -558,11 +553,11 @@ export class SessionManager {
   // -------------------------------------------------------------------------
 
   async runPrompt(
-    sessionId: string,
+    chatId: string,
     content: PromptContentBlock[],
     attachments?: MessageAttachment[],
   ): Promise<void> {
-    const s = await this.ensureOpen(sessionId);
+    const s = await this.ensureOpen(chatId);
     // Held rather than rejected: a message typed while the process is being replaced
     // should land on the new one, not bounce back at the user.
     await this.settleReload(s);
@@ -585,10 +580,10 @@ export class SessionManager {
     // Named before the turn is announced, so a client reacting to turn_started already
     // sees it. Only when nothing has named it yet: a title the user set, or one taken
     // from a chosen working directory, is theirs to keep.
-    if (!this.store.getTitle(s.sessionId)) {
+    if (!this.store.getTitle(chatId)) {
       const title = titleFromPrompt(content);
       if (title) {
-        this.store.setTitle(s.sessionId, title);
+        this.store.setTitle(chatId, title);
         s.title = title;
       }
     }
@@ -596,8 +591,9 @@ export class SessionManager {
     // Only counted when there is something to record, so an ordinary prompt pays nothing.
     let recorded: MessageAttachment[] | undefined;
     if (attachments?.length) {
+      // Counted over kiro's file, recorded against the chat that owns it.
       const ordinal = await promptCount(s.sessionId);
-      this.store.setAttachments(s.sessionId, ordinal, attachments);
+      this.store.setAttachments(chatId, ordinal, attachments);
       recorded = attachments;
     }
 
@@ -678,7 +674,7 @@ export class SessionManager {
     return {
       chatId: chat.chatId,
       sessionId: live?.sessionId ?? chat.sessionId ?? undefined,
-      title: this.titleOf(chat.chatId, {
+      title: this.titleOf(chat, {
         // kiro's file is what kiro called it; the live copy is only a cache of it.
         kiroTitle: persisted?.title || live?.title,
         firstPrompt: transcript && firstPromptText(transcript),
@@ -744,6 +740,9 @@ export class SessionManager {
     ]);
 
     const s = sessionId ? this.sessions.get(sessionId) : undefined;
+    // listChats drops a chat with neither, so the two read paths agree rather than one of them
+    // fabricating a summary with a different timestamp on every call.
+    if (!s && !persisted) throw new Error(`Unknown chat: ${chatId}`);
     return this.buildDetail(chat, s, transcript, persisted ?? undefined);
   }
 

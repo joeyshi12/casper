@@ -426,7 +426,7 @@ describe('ChangeFolderSheet dismissal (rendered in a DOM)', () => {
     await act(async () => {
       root.render(
         createElement(ChangeFolderSheet, {
-          sessionId: 's1',
+          chatId: 's1',
           currentCwd: '/home/joey/projects',
           onChanged: () => {},
           onClose,

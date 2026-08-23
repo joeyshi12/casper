@@ -668,7 +668,7 @@ describe('importing a module does not touch the data directory', () => {
   });
 });
 
-describe('the chat a session belongs to', () => {
+describe('the session a chat is bound to', () => {
   let dir: string;
   const origDir = config.casperDataDir;
 
@@ -682,26 +682,45 @@ describe('the chat a session belongs to', () => {
     (config as { casperDataDir: string }).casperDataDir = origDir;
   });
 
-  it('remembers the chat id the client minted', () => {
+  it('binds kiro\'s session to the chat that owns it', () => {
     const store = new ChatStore();
-    const chatId = crypto.randomUUID();
-    store.bindSession(chatId, 'sess-1');
-    assert.equal(store.chatIdForSession('sess-1'), chatId);
+    store.create('chat-1');
+    store.bindSession('chat-1', 'sess-1');
+    assert.equal(store.sessionIdForChat('chat-1'), 'sess-1');
   });
 
-  it('has no chat for a session Casper did not start', () => {
+  it('has no session for a chat that has not started one', () => {
     const store = new ChatStore();
-    assert.equal(store.chatIdForSession('someone-elses-session'), undefined);
+    store.create('chat-1');
+    assert.equal(store.sessionIdForChat('chat-1'), undefined);
+    assert.equal(store.sessionIdForChat('never-heard-of-it'), undefined);
   });
 
-  it('keeps the chat id when another override is written', () => {
+  // One session, one chat: kiro reuses an id when a session is loaded back, and two chats
+  // claiming it would make the second unopenable.
+  it('releases an earlier chat\'s claim on the same session', () => {
     const store = new ChatStore();
-    const chatId = crypto.randomUUID();
-    store.bindSession(chatId, 'sess-2');
-    store.setTitle('sess-2', 'renamed');
-    store.setCwd('sess-2', '/tmp');
-    assert.equal(store.chatIdForSession('sess-2'), chatId);
-    assert.equal(store.getTitle('sess-2'), 'renamed');
+    store.create('first');
+    store.bindSession('first', 'sess-1');
+    store.create('second');
+    store.bindSession('second', 'sess-1');
+
+    assert.equal(store.sessionIdForChat('second'), 'sess-1');
+    assert.equal(store.sessionIdForChat('first'), undefined, 'the first claim is released');
+    assert.equal(store.get('first')?.chatId, 'first', 'but the chat itself survives');
+  });
+
+  it('keeps the binding when a title or cwd is written', () => {
+    const store = new ChatStore();
+    store.create('chat-2');
+    store.bindSession('chat-2', 'sess-2');
+    store.setTitle('chat-2', 'renamed');
+    store.setCwd('chat-2', '/tmp');
+
+    const row = store.get('chat-2');
+    assert.equal(row?.sessionId, 'sess-2');
+    assert.equal(row?.title, 'renamed');
+    assert.equal(row?.cwd, '/tmp');
   });
 });
 

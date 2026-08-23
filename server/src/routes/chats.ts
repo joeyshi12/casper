@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type {
   CreateChatRequest,
   PromptRequest,
-  RenameSessionRequest,
+  RenameChatRequest,
   SetCwdRequest,
   SetModeRequest,
   SetModelRequest,
@@ -104,7 +104,7 @@ export function registerChatRoutes(
   );
 
   // Rename a session (Casper-side title override).
-  app.post<{ Params: { id: string }; Body: RenameSessionRequest }>(
+  app.post<{ Params: { id: string }; Body: RenameChatRequest }>(
     '/api/chats/:id/rename',
     async (req) => {
       manager.renameChat(req.params.id, req.body.title);

@@ -106,7 +106,7 @@ interface CasperState {
   markPendingFailed: (id: string, error?: string) => void;
   dismissChatNotice: () => void;
   /** Pin a condition above the composer, for a failure with no turn to attach to. */
-  setSessionNotice: (notice: ChatNotice) => void;
+  setChatNotice: (notice: ChatNotice) => void;
   setConnStatus: (status: ConnStatus) => void;
   setCreateError: (message: string | null) => void;
   setReloadingId: (id: string | null) => void;
@@ -120,7 +120,7 @@ interface CasperState {
   setCurrentAgent: (modeId: string) => void;
   setCompacting: (compacting: boolean) => void;
   markPendingSending: (id: string) => void;
-  renameSessionRow: (id: string, title: string) => void;
+  renameChatRow: (id: string, title: string) => void;
 }
 
 export const useStore = create<CasperState>((set, get) => ({
@@ -193,7 +193,7 @@ export const useStore = create<CasperState>((set, get) => ({
       ),
     })),
 
-  renameSessionRow: (id, title) =>
+  renameChatRow: (id, title) =>
     set((s) => ({
       chats: s.chats.map((sess) =>
         sess.chatId === id ? { ...sess, title } : sess,
@@ -266,7 +266,7 @@ export const useStore = create<CasperState>((set, get) => ({
     }),
 
   dismissChatNotice: () => set({ chatNotice: null }),
-  setSessionNotice: (chatNotice) => set({ chatNotice }),
+  setChatNotice: (chatNotice) => set({ chatNotice }),
 
   // An object, not positional args: a caller that forgets one is a type error rather than
   // a silently dropped field.

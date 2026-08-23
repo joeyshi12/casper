@@ -42,7 +42,7 @@ import { closeDb } from '../server/src/session/db.js';
 import {
   classifyDirent,
   resolveAbsolutePath,
-  resolveSessionPath,
+  resolveChatPath,
 } from '../server/src/util/confinedFile.js';
 import { EventStore } from '../server/src/session/EventStore.js';
 import { handleConnection, type GatewayChats } from '../server/src/ws/gateway.js';
@@ -245,7 +245,7 @@ describe('createChat resolves a missing cwd by creating it', () => {
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('setSessionCwd creates the folder, including missing parents', async () => {
+  it('setChatCwd creates the folder, including missing parents', async () => {
     const manager = new SessionManager(noopLogger());
     const target = path.join(root, 'deep', 'nested', 'work');
     assert.equal(fs.existsSync(target), false, 'starts absent');
@@ -747,47 +747,47 @@ describe('confined file access (the sequence every file route runs)', () => {
     fs.rmSync(outside, { recursive: true, force: true });
   });
 
-  it('a session that does not exist is 404, before any path work', async () => {
-    const r = await resolveSessionPath(noSession, 'nope', 'a.txt', 'file');
-    assert.deepEqual(r, { ok: false, status: 404, error: 'Session not found' });
+  it('a chat that does not exist is 404, before any path work', async () => {
+    const r = await resolveChatPath(noSession, 'nope', 'a.txt', 'file');
+    assert.deepEqual(r, { ok: false, status: 404, error: 'Chat not found' });
   });
 
   it('download and preview require a path; the tree does not', async () => {
-    const asFile = await resolveSessionPath(sessions, 's', '', 'file');
+    const asFile = await resolveChatPath(sessions, 's', '', 'file');
     assert.deepEqual(asFile, { ok: false, status: 400, error: 'path parameter is required' });
 
-    const asDir = await resolveSessionPath(sessions, 's', '', 'directory');
+    const asDir = await resolveChatPath(sessions, 's', '', 'directory');
     assert.ok(asDir.ok && asDir.real === cwd, 'empty path lists the workspace itself');
   });
 
   it('traversal out of the workspace is 400, not 404', async () => {
-    const r = await resolveSessionPath(sessions, 's', '../etc/passwd', 'file');
+    const r = await resolveChatPath(sessions, 's', '../etc/passwd', 'file');
     assert.deepEqual(r, { ok: false, status: 400, error: 'Invalid path' });
   });
 
   it('a leading slash is stripped rather than read as absolute', async () => {
-    const r = await resolveSessionPath(sessions, 's', '//a.txt', 'file');
+    const r = await resolveChatPath(sessions, 's', '//a.txt', 'file');
     assert.ok(r.ok && r.real === path.join(cwd, 'a.txt'));
     assert.ok(r.ok && r.relative === 'a.txt');
   });
 
   it('a missing file is 404 and a directory asked for as a file is 400', async () => {
-    const missing = await resolveSessionPath(sessions, 's', 'gone.txt', 'file');
+    const missing = await resolveChatPath(sessions, 's', 'gone.txt', 'file');
     assert.deepEqual(missing, { ok: false, status: 404, error: 'File not found' });
 
-    const dir = await resolveSessionPath(sessions, 's', 'sub', 'file');
+    const dir = await resolveChatPath(sessions, 's', 'sub', 'file');
     assert.deepEqual(dir, { ok: false, status: 400, error: 'Path is not a file' });
   });
 
   it('a file asked for as a directory 404s the way readdir would have', async () => {
-    const r = await resolveSessionPath(sessions, 's', 'a.txt', 'directory');
+    const r = await resolveChatPath(sessions, 's', 'a.txt', 'directory');
     assert.deepEqual(r, { ok: false, status: 404, error: 'Directory not found' });
   });
 
   // The lexical root (the workspace) and the real root (fileRoot) are separate
   // on purpose: a project may symlink to somewhere else the user can read.
   it('a symlink leaving the workspace but staying inside fileRoot is served', async () => {
-    const r = await resolveSessionPath(sessions, 's', 'link-out/secret.txt', 'file');
+    const r = await resolveChatPath(sessions, 's', 'link-out/secret.txt', 'file');
     assert.ok(r.ok, 'expected the symlinked file to resolve');
     assert.equal(r.real, path.join(outside, 'secret.txt'));
   });
@@ -795,7 +795,7 @@ describe('confined file access (the sequence every file route runs)', () => {
   it('the same symlink is refused once fileRoot no longer contains its target', async () => {
     config.fileRoot = cwd;
     try {
-      const r = await resolveSessionPath(sessions, 's', 'link-out/secret.txt', 'file');
+      const r = await resolveChatPath(sessions, 's', 'link-out/secret.txt', 'file');
       assert.deepEqual(r, { ok: false, status: 404, error: 'File not found' });
     } finally {
       config.fileRoot = fileRoot;
@@ -805,7 +805,7 @@ describe('confined file access (the sequence every file route runs)', () => {
   it('a deleted workspace explains itself instead of saying "not found"', async () => {
     const doomed = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-gone-')));
     fs.rmSync(doomed, { recursive: true, force: true });
-    const r = await resolveSessionPath(
+    const r = await resolveChatPath(
       { getChatCwd: async () => doomed },
       's',
       '',
@@ -1142,7 +1142,7 @@ describe('POST /api/chats/:chatId/uploads', () => {
   });
 
   // The id names a directory and comes from the client, so its shape is the guard.
-  it('refuses an id that could escape the chats directory', async () => {
+  it('refuses an id that is not the shape a client should send', async () => {
     for (const bad of ['a/../../escape', '', '..'.repeat(2)]) {
       const res = await post(bad, 'a.txt', 'x');
       // 400 from the handler, or 404 when the router rejects the shape before it - either

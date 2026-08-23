@@ -76,7 +76,7 @@ export const api = {
   renameChat: (id: string, title: string) =>
     req<{ ok: boolean }>('POST', `/api/chats/${id}/rename`, { title }),
   /** Re-point a session at a different working directory. */
-  setSessionCwd: (id: string, cwd: string) =>
+  setChatCwd: (id: string, cwd: string) =>
     req<{ ok: boolean; cwd: string }>('POST', `/api/chats/${id}/cwd`, { cwd }),
   /**
    * Restart the session's kiro process so its `.kiro` directory, agent definition

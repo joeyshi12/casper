@@ -41,7 +41,7 @@ export function ChangeFolderSheet({ chatId, currentCwd, onChanged, onClose }: Pr
     setSaving(true);
     setError(null);
     try {
-      const res = await api.setSessionCwd(chatId, target);
+      const res = await api.setChatCwd(chatId, target);
       onChanged(res.cwd);
       onClose();
     } catch (err) {

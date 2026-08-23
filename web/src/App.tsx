@@ -38,8 +38,8 @@ export function App() {
             socket. The children only exist to put :chatId in the URL. */}
         <Route element={<Shell onLock={() => setAuth('gate')} />}>
           <Route index element={null} />
-          <Route path="new" element={null} />
-          <Route path="chats/:chatId" element={null} />
+          <Route path={DRAFT_PATH} element={null} />
+          <Route path={CHAT_ROUTE} element={null} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -65,10 +65,8 @@ function Shell({ onLock }: { onLock: () => void }) {
   const matchedId = useMatch(CHAT_ROUTE)?.params.chatId ?? null;
   // A draft is a chat that does not exist yet: it opens immediately and the first prompt
   // creates it. Both /new and the default page, so landing with nothing open still puts you
-  // in front of a composer.
-  const isDraftRoute = useMatch(DRAFT_PATH) !== null;
-  const isDraft = isDraftRoute || (!matchedId && activeId === null);
-  const routeChatId = isDraft ? null : matchedId;
+  // in front of a composer. The two patterns are disjoint, so a match here is never a chat.
+  const isDraft = useMatch(DRAFT_PATH) !== null || (!matchedId && activeId === null);
 
   // The two things only React can do. Re-attached rather than set once, because
   // navigate's identity changes with the router's state.
@@ -86,8 +84,8 @@ function Shell({ onLock }: { onLock: () => void }) {
   // The route owns which session is open, so cold loads, back/forward and clicks
   // all arrive here.
   useEffect(() => {
-    sessionController.syncRoute(routeChatId, isDraft);
-  }, [routeChatId, isDraft]);
+    sessionController.syncRoute(matchedId, isDraft);
+  }, [matchedId, isDraft]);
 
   useEffect(() => {
     if (connStatus !== 'connected') return;

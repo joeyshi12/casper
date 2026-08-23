@@ -8,7 +8,7 @@ import { config } from '../config.js';
 import {
   classifyDirent,
   replyWith,
-  resolveSessionPath,
+  resolveChatPath,
   workspaceNotFound,
   type ChatCwdSource,
 } from '../util/confinedFile.js';
@@ -23,7 +23,7 @@ export function registerWorkspaceRoutes(
   manager: ChatCwdSource,
 ): void {
   /**
-   * GET /api/sessions/:id/tree?path=<relative>&depth=1
+   * GET /api/chats/:chatId/tree?path=<relative>&depth=1
    *
    * Lists files and directories in the session's workspace.
    * The `path` parameter is relative to the session's cwd.
@@ -32,7 +32,7 @@ export function registerWorkspaceRoutes(
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
     '/api/chats/:id/tree',
     async (req, reply) => {
-      const resolved = await resolveSessionPath(
+      const resolved = await resolveChatPath(
         manager,
         req.params.id,
         req.query.path,
@@ -85,7 +85,7 @@ export function registerWorkspaceRoutes(
   );
 
   /**
-   * GET /api/sessions/:id/download?path=<relative>
+   * GET /api/chats/:chatId/download?path=<relative>
    *
    * Downloads a file from the session's workspace.
    * The `path` parameter is relative to the session's cwd.
@@ -93,7 +93,7 @@ export function registerWorkspaceRoutes(
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
     '/api/chats/:id/download',
     async (req, reply) => {
-      const resolved = await resolveSessionPath(manager, req.params.id, req.query.path, 'file');
+      const resolved = await resolveChatPath(manager, req.params.id, req.query.path, 'file');
       if (!resolved.ok) return replyWith(reply, resolved);
       const { real: realTarget, stat } = resolved;
 
@@ -120,7 +120,7 @@ export function registerWorkspaceRoutes(
   );
 
   /**
-   * GET /api/sessions/:id/preview?path=<relative>
+   * GET /api/chats/:chatId/preview?path=<relative>
    *
    * Returns the file content for inline preview. Text files are returned as
    * UTF-8 text; images are returned with their MIME type for inline display.
@@ -129,7 +129,7 @@ export function registerWorkspaceRoutes(
   app.get<{ Params: { id: string }; Querystring: { path?: string; raw?: string } }>(
     '/api/chats/:id/preview',
     async (req, reply) => {
-      const resolved = await resolveSessionPath(manager, req.params.id, req.query.path, 'file');
+      const resolved = await resolveChatPath(manager, req.params.id, req.query.path, 'file');
       if (!resolved.ok) return replyWith(reply, resolved);
       const { real: realTarget, stat } = resolved;
 
