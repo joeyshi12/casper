@@ -40,13 +40,16 @@ export function Dropdown({ ariaLabel, value, options, onChange }: Props) {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
 
-  // When opening, start the keyboard-active row on the current selection.
+  // When opening, start the keyboard-active row on the current selection. Only `open` is a
+  // dependency: callers build `options` inline, so a fresh array every render would reset the
+  // row under the user's arrow keys. The closure reads the values from the opening render,
+  // which is the moment that matters.
   useEffect(() => {
-    if (open) {
-      const i = options.findIndex((o) => o.value === value);
-      setActive(i >= 0 ? i : 0);
-    }
-  }, [open, options, value]);
+    if (!open) return;
+    const i = options.findIndex((o) => o.value === value);
+    setActive(i >= 0 ? i : 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const commit = (v: string) => {
     onChange(v);

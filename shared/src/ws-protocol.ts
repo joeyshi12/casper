@@ -107,7 +107,6 @@ export interface ClientSetModel {
 export interface ClientExecCommand {
   type: 'exec_command';
   command: string;
-  args?: string;
 }
 
 export interface ClientPing {

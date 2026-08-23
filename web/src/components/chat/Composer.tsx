@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MessageAttachment } from '@casper/shared';
 import type { PromptContentBlock, UploadedFile } from '@casper/shared';
 import { ATTACHMENTS_PREFIX } from '@casper/shared';
 import { useStore } from '../../state/store.js';
+import { sessionController } from '../../state/sessionController.js';
 import { api } from '../../api/rest.js';
 import type { ConnStatus } from '../../api/SessionSocket.js';
 import { PlusIcon, ArrowUpIcon, StopIcon, Spinner } from '../common/icons.js';
@@ -32,12 +32,7 @@ interface Props {
   /** Active session id - required to upload attachments. */
   /** The chat that owns the uploads directory; present for a draft too. */
   chatId: string | null;
-  onSend: (content: PromptContentBlock[], attachments?: MessageAttachment[]) => void;
-  onCancel: () => void;
   /** Trigger a /compact of the conversation to reduce context size. */
-  onCompact: () => void;
-  onChangeModel: (modelId: string) => void;
-  onChangeAgent: (modeId: string) => void;
   /** Live socket status - drives the placeholder and whether prompts can send. */
   connStatus: ConnStatus;
   /** Composing the first prompt of a session that does not exist yet. */
@@ -47,11 +42,6 @@ interface Props {
 /** ChatGPT-style input: + attach inside, paste, auto-grow, upload-on-send. */
 export function Composer({
   chatId,
-  onSend,
-  onCancel,
-  onCompact,
-  onChangeModel,
-  onChangeAgent,
   connStatus,
   draft,
 }: Props) {
@@ -180,7 +170,7 @@ export function Composer({
     const content = await buildContent(uploaded, atts, trimmed);
     if (content.length === 0) return;
 
-    onSend(
+    sessionController.send(
       content,
       uploaded.map((u) => ({ path: u.path, name: u.name, size: u.size, kind: u.kind })),
     );
@@ -306,13 +296,13 @@ export function Composer({
             <PlusIcon size={18} />
           </button>
           <div className="composer-actions-right">
-            <ContextRing onCompact={onCompact} />
-            <AgentPicker value={currentModeId} onChange={onChangeAgent} />
-            <ModelPicker value={currentModelId} onChange={onChangeModel} />
+            <ContextRing />
+            <AgentPicker value={currentModeId} onChange={(id) => sessionController.changeAgent(id)} />
+            <ModelPicker value={currentModelId} onChange={(id) => sessionController.changeModel(id)} />
             {running ? (
               <button
                 className="composer-btn composer-stop"
-                onClick={onCancel}
+                onClick={() => sessionController.cancel()}
                 title="Stop"
                 aria-label="Stop"
               >

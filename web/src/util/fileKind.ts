@@ -1,12 +1,4 @@
-/**
- * How a file should be shown, and which language to highlight it in. Extracted from the
- * file tree because the preview is no longer owned by it: both the tree and a tool call
- * in the transcript ask for a preview now.
- *
- * Note this is not the only extension table in the web app - toolRender.ts has its own
- * langFromPath, and the two disagree about scss, dockerfile and svg. Consolidating them
- * is its own change; this only moves what the preview needs.
- */
+/** How a file should be shown, and which language to highlight it in. */
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif']);
 
@@ -43,8 +35,8 @@ const EXT_TO_LANG: Record<string, string> = {
   htm: 'html',
   xml: 'xml',
   css: 'css',
-  scss: 'css',
-  less: 'css',
+  scss: 'scss',
+  less: 'less',
   py: 'python',
   rs: 'rust',
   go: 'go',
@@ -72,16 +64,29 @@ const EXT_TO_LANG: Record<string, string> = {
   bash: 'bash',
   zsh: 'bash',
   fish: 'bash',
-  dockerfile: 'dockerfile',
+  dockerfile: 'docker',
   sql: 'sql',
   diff: 'diff',
   patch: 'diff',
+  jsonc: 'json',
+  svg: 'xml',
+  vue: 'vue',
+  svelte: 'svelte',
+  env: 'ini',
+  proto: 'proto',
+  graphql: 'graphql',
 };
 
+/** As above but for a path, and always a usable shiki id: unknown highlights as plain text. */
+export function langFromPath(path: string): string {
+  return langFromFilename(path.trim().split('/').pop() ?? '') || 'text';
+}
+
+/** Empty when the extension is unknown, so a caller can skip highlighting entirely. */
 export function langFromFilename(name: string): string {
   const lower = name.toLowerCase();
   // Extensionless files with well-known names.
-  if (lower === 'dockerfile') return 'dockerfile';
+  if (lower === 'dockerfile') return 'docker';
   if (lower === 'makefile') return 'make';
   const ext = lower.split('.').pop() ?? '';
   return EXT_TO_LANG[ext] ?? '';

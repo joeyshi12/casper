@@ -151,7 +151,7 @@ export function handleConnection(
         return ack('set_model', () => manager.setModel(sessionId, msg.modelId));
       case 'exec_command':
         return ack('exec_command', () =>
-          manager.execCommand(sessionId, msg.command, msg.args),
+          manager.execCommand(sessionId, msg.command),
         );
       default:
         return send(socket, { type: 'error', message: 'Unknown message type' });

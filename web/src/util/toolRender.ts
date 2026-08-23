@@ -1,3 +1,5 @@
+export { langFromPath } from './fileKind.js';
+
 // Pure helpers for rendering tool calls. They normalize the several content
 // shapes kiro produces - persisted {kind,data} blocks, live ACP
 // {type:'content',content:{text}} blocks, and live {type:'diff'} edit blocks -
@@ -134,22 +136,6 @@ export function toolLabel(tool: { name?: string; title?: string; kind?: string; 
   if (mapped) return mapped;
   const t = tool.title ?? '';
   return t && !/\s/.test(t) ? t : 'tool';
-}
-
-/** Shiki language id from a file path's extension (falls back to 'text'). */
-export function langFromPath(path: string): string {
-  const base = path.trim().split('/').pop() ?? '';
-  const ext = base.includes('.') ? base.split('.').pop()!.toLowerCase() : base.toLowerCase();
-  const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx', mjs: 'javascript', cjs: 'javascript',
-    json: 'json', jsonc: 'json', css: 'css', scss: 'scss', less: 'less', html: 'html', htm: 'html',
-    xml: 'xml', svg: 'xml', vue: 'vue', svelte: 'svelte', md: 'markdown', markdown: 'markdown',
-    py: 'python', rb: 'ruby', rs: 'rust', go: 'go', java: 'java', kt: 'kotlin', c: 'c', h: 'c',
-    cpp: 'cpp', cc: 'cpp', hpp: 'cpp', cs: 'csharp', sh: 'bash', bash: 'bash', zsh: 'bash',
-    yml: 'yaml', yaml: 'yaml', toml: 'toml', sql: 'sql', php: 'php', swift: 'swift', lua: 'lua',
-    dockerfile: 'docker', ini: 'ini', conf: 'ini', env: 'ini', proto: 'proto', graphql: 'graphql',
-  };
-  return map[ext] ?? 'text';
 }
 
 /** Concatenated plain text from a tool call's content, across shapes:

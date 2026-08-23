@@ -222,8 +222,8 @@ export class SessionSocket {
   watchPaths(paths: string[]): void {
     this.send({ type: 'watch_paths', paths });
   }
-  execCommand(command: string, args?: string): void {
-    this.send({ type: 'exec_command', command, args });
+  execCommand(command: string): void {
+    this.send({ type: 'exec_command', command });
   }
 
   close(): void {

@@ -2,20 +2,12 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { DeviceInfo } from '@casper/shared';
 import { api } from '../../api/rest.js';
+import { relTime } from '../../util/relTime.js';
 
 interface Props {
   onClose: () => void;
   /** Called when the current device's own session is revoked (locks the app). */
   onSelfRevoked: () => void;
-}
-
-function relTime(iso: string): string {
-  const mins = Math.round((Date.now() - Date.parse(iso)) / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.round(hrs / 24)}d ago`;
 }
 
 // Turn a User-Agent into something short and readable.
@@ -109,7 +101,7 @@ export function DevicesModal({ onClose, onSelfRevoked }: Props) {
                     {deviceName(d.userAgent)}
                     {d.current && <span className="device-badge">This device</span>}
                   </span>
-                  <span className="device-sub">Active {relTime(d.lastSeenAt)}</span>
+                  <span className="device-sub">Active {relTime(d.lastSeenAt, true)}</span>
                 </span>
                 <button
                   className="btn-ghost device-revoke"

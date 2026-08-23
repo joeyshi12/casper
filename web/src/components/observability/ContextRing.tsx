@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../state/store.js';
+import { sessionController } from '../../state/sessionController.js';
 
 /** Ring geometry. Small enough to sit inline with the composer controls. */
 const SIZE = 18;
@@ -22,7 +23,7 @@ const fmt = new Intl.NumberFormat();
  * selected model's window and labelled as approximate rather than presented as
  * exact counts.
  */
-export function ContextRing({ onCompact }: { onCompact: () => void }) {
+export function ContextRing() {
   const pct = useStore((s) => s.observability.contextUsagePercentage);
   const compacting = useStore((s) => s.observability.compacting);
   const turnStatus = useStore((s) => s.observability.turnStatus);
@@ -132,10 +133,10 @@ export function ContextRing({ onCompact }: { onCompact: () => void }) {
           <button
             type="button"
             className="ctx-pop-compact"
-            disabled={!activeId || compacting || turnStatus !== 'idle'}
+            disabled={compacting || turnStatus !== 'idle'}
             onClick={() => {
               setOpen(false);
-              onCompact();
+              sessionController.compact();
             }}
           >
             {compacting ? 'Compacting…' : 'Compact conversation'}
