@@ -409,7 +409,7 @@ describe('failures explain themselves', () => {
 
   it('a failed send keeps the reason on the message, and retry clears it', () => {
     useStore.getState().clearActive();
-    useStore.getState().addPending('p1', 'hello');
+    useStore.getState().addPending({ id: 'p1', text: 'hello', content: [{ type: 'text', text: 'hello' }] });
     useStore.getState().markPendingFailed('p1', 'A turn is already running for this session');
 
     const failed = useStore.getState().pending.find((p) => p.id === 'p1');

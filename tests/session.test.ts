@@ -20,6 +20,7 @@ import { SessionManager, Session } from '../server/src/session/SessionManager.js
 import { EventStore } from '../server/src/session/EventStore.js';
 import { closeDb, db } from '../server/src/session/db.js';
 import { SessionStore } from '../server/src/session/sessionStore.js';
+import { backfillAttachments } from '../server/src/session/backfillAttachments.js';
 import { LoginStore } from '../server/src/session/logins.js';
 import { hydrateTranscript, promptCount } from '../server/src/session/kiroFiles.js';
 import { bumpSessionToTop } from '../web/src/state/sessions.js';
@@ -527,6 +528,101 @@ describe('hydrateTranscript: malformed entries do not crash hydration', () => {
   it('skips a toolUse with no toolUseId', async () => {
     const items = await hydrateTranscript(sid);
     assert.equal(items.filter((i) => i.type === 'tool_call').length, 0);
+  });
+});
+
+// Messages sent before attachments were recorded left only the "Attached files:" line.
+// Display no longer parses that line, so without this migration those files are invisible.
+describe('backfilling attachments from older messages', () => {
+  let dir: string;
+  let sessions: string;
+  const origData = config.casperDataDir;
+  const origSessions = config.kiroSessionsDir;
+  let uploads: string;
+
+  const promptWith = (text: string) => ({
+    kind: 'Prompt',
+    data: { content: [{ kind: 'text', data: { text } }] },
+  });
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-backfill-db-'));
+    sessions = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-backfill-sessions-'));
+    uploads = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-backfill-uploads-'));
+    (config as { casperDataDir: string }).casperDataDir = dir;
+    (config as { kiroSessionsDir: string }).kiroSessionsDir = sessions;
+    closeDb();
+  });
+  after(() => {
+    closeDb();
+    (config as { casperDataDir: string }).casperDataDir = origData;
+    (config as { kiroSessionsDir: string }).kiroSessionsDir = origSessions;
+  });
+
+  it('recovers a file that still exists, at the right ordinal', async () => {
+    const zip = path.join(uploads, 'old.zip');
+    fs.writeFileSync(zip, 'PK\u0003\u0004xx');
+    fs.writeFileSync(
+      path.join(sessions, 'old-1.jsonl'),
+      [
+        JSON.stringify(promptWith('first, nothing attached')),
+        JSON.stringify(promptWith(`Attached files: ${zip}\nlook at this`)),
+      ].join('\n'),
+    );
+
+    const store = new SessionStore();
+    await backfillAttachments(store, noopLogger());
+
+    const got = store.attachmentsBySession('old-1');
+    assert.deepEqual([...got.keys()], [1], 'the second prompt, counting from zero');
+    assert.equal(got.get(1)![0]!.name, 'old.zip');
+    assert.equal(got.get(1)![0]!.size, 6);
+    assert.equal(got.get(1)![0]!.kind, 'binary');
+  });
+
+  it('drops a file that is no longer on disk', async () => {
+    fs.writeFileSync(
+      path.join(sessions, 'old-2.jsonl'),
+      JSON.stringify(promptWith(`Attached files: ${path.join(uploads, 'gone.zip')}\nhi`)),
+    );
+    const store = new SessionStore();
+    await backfillAttachments(store, noopLogger());
+    assert.equal(store.attachmentsBySession('old-2').size, 0, 'nothing to preview');
+  });
+
+  it('runs once, and never overwrites what the live path recorded', async () => {
+    const zip = path.join(uploads, 'old.zip');
+    fs.writeFileSync(zip, 'PK');
+    fs.writeFileSync(
+      path.join(sessions, 'old-3.jsonl'),
+      JSON.stringify(promptWith(`Attached files: ${zip}\nhi`)),
+    );
+    const store = new SessionStore();
+    // Already recorded by the live path, with a different name.
+    store.setAttachments('old-3', 0, [
+      { path: zip, name: 'recorded-live.zip', size: 2, kind: 'binary' },
+    ]);
+
+    await backfillAttachments(store, noopLogger());
+    assert.equal(store.attachmentsBySession('old-3').get(0)![0]!.name, 'recorded-live.zip');
+
+    // Second run is a no-op even for sessions it skipped.
+    fs.writeFileSync(
+      path.join(sessions, 'old-4.jsonl'),
+      JSON.stringify(promptWith(`Attached files: ${zip}\nhi`)),
+    );
+    await backfillAttachments(store, noopLogger());
+    assert.equal(store.attachmentsBySession('old-4').size, 0, 'the marker stops a re-run');
+  });
+
+  it('ignores an attachments line that names no absolute path', async () => {
+    fs.writeFileSync(
+      path.join(sessions, 'old-5.jsonl'),
+      JSON.stringify(promptWith("Attached files: ';\nquoted source, not a real line")),
+    );
+    const store = new SessionStore();
+    await backfillAttachments(store, noopLogger());
+    assert.equal(store.attachmentsBySession('old-5').size, 0);
   });
 });
 

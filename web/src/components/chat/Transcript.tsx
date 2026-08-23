@@ -26,7 +26,7 @@ const reduceMotion =
     : null;
 
 interface Props {
-  onRetry: (id: string, text: string) => void;
+  onRetry: (id: string) => void;
   /** Re-send a prompt after a failed turn. */
   onRetryTurn: (text: string) => void;
 }
@@ -235,7 +235,7 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
           {pm.status === 'failed' && (
             <div className="msg-failed">
               <span className="msg-failed-why">{pm.error ?? 'Failed to send.'}</span>
-              <button className="msg-retry" onClick={() => onRetry(pm.id, pm.text)}>
+              <button className="msg-retry" onClick={() => onRetry(pm.id)}>
                 Retry
               </button>
             </div>

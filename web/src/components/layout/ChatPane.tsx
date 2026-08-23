@@ -23,7 +23,7 @@ interface Props {
   navOpen: boolean;
   onToggleNav: () => void;
   onSend: (content: PromptContentBlock[], attachments?: MessageAttachment[]) => void;
-  onRetry: (id: string, text: string) => void;
+  onRetry: (id: string) => void;
   /** Re-send a prompt after a failed turn. */
   onRetryTurn: (text: string) => void;
   onCancel: () => void;

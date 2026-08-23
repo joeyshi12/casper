@@ -360,8 +360,8 @@ export class SessionController {
         .map((b) => b.text)
         .join('\n'),
     );
-    // An attachment of its own is a message, so the bubble no longer needs a stand-in label.
-    this.state.addPending(id, text, attachments);
+    // An attachment of its own is a message, so the bubble needs no stand-in label.
+    this.state.addPending({ id, text, attachments, content });
 
     if (this.isDraft) {
       // Create on demand, then deliver: the socket opens as part of going to the
@@ -400,9 +400,16 @@ export class SessionController {
     );
   }
 
-  retrySend(id: string, text: string): void {
+  /**
+   * Re-send a failed message. Reads back what was actually sent rather than rebuilding it
+   * from the bubble's text, which dropped the attachments line and any image blocks - so a
+   * retried message arrived without the files it was sent with.
+   */
+  retrySend(id: string): void {
+    const pending = this.state.pending.find((p) => p.id === id);
+    if (!pending) return;
     this.state.markPendingSending(id);
-    this.deliver(id, [{ type: 'text', text }]);
+    this.deliver(id, pending.content, pending.attachments);
   }
 
   /**

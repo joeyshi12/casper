@@ -5,6 +5,7 @@ import {
   type AgentMode,
   type CasperEvent,
   type MessageAttachment,
+  type PromptContentBlock,
   type ModelInfo,
   type ObservabilitySnapshot,
   type SessionDetail,
@@ -28,6 +29,8 @@ interface PendingMessage {
   text: string;
   /** Shown on the optimistic bubble, so an attachment is visible before the server echo. */
   attachments?: MessageAttachment[];
+  /** Exactly what was sent, so a retry re-sends it rather than rebuilding from the text. */
+  content: PromptContentBlock[];
   status: 'sending' | 'failed';
   /** Why the send failed, when the server or socket told us. */
   error?: string;
@@ -95,7 +98,7 @@ interface CasperState {
   prependItems: (older: TranscriptItem[]) => void;
   clearActive: () => void;
   applyEvent: (e: CasperEvent) => void;
-  addPending: (id: string, text: string, attachments?: MessageAttachment[]) => void;
+  addPending: (pending: Omit<PendingMessage, 'status'>) => void;
   markPendingFailed: (id: string, error?: string) => void;
   dismissSessionNotice: () => void;
   /** Pin a condition above the composer, for a failure with no turn to attach to. */
@@ -253,8 +256,10 @@ export const useStore = create<CasperState>((set, get) => ({
   dismissSessionNotice: () => set({ sessionNotice: null }),
   setSessionNotice: (sessionNotice) => set({ sessionNotice }),
 
-  addPending: (id, text, attachments) =>
-    set((s) => ({ pending: [...s.pending, { id, text, attachments, status: 'sending' }] })),
+  // An object, not positional args: a caller that forgets one is a type error rather than
+  // a silently dropped field.
+  addPending: (pending) =>
+    set((s) => ({ pending: [...s.pending, { ...pending, status: 'sending' }] })),
   markPendingFailed: (id, error) =>
     set((s) => ({
       pending: s.pending.map((p) =>

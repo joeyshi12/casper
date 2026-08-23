@@ -1477,10 +1477,32 @@ describe('session controller', () => {
     const id = useStore.getState().pending[0]!.id;
     assert.equal(useStore.getState().pending[0]?.status, 'failed');
 
-    controller.retrySend(id, 'retry me');
+    controller.retrySend(id);
     const after = useStore.getState().pending.find((p) => p.id === id);
     assert.equal(after?.status, 'failed', 'still failed: the socket is still refusing');
     assert.equal(useStore.getState().pending.length, 1, 'and no duplicate bubble');
+  });
+
+  // A retry used to rebuild the prompt from the bubble's text, which dropped the attachments
+  // line and any image blocks - so a retried message arrived without its files.
+  it('a retried send keeps the files and blocks it was sent with', async () => {
+    const { controller, socket } = build();
+    await controller.openSession('s1');
+    socket.refuseDelivery();
+
+    const zip = { path: '/up/a.zip', name: 'a.zip', size: 8446, kind: 'binary' as const };
+    const content = [
+      { type: 'text' as const, text: 'Attached files: /up/a.zip\n' },
+      { type: 'text' as const, text: 'have a look' },
+    ];
+    controller.send(content, [zip]);
+    const id = useStore.getState().pending[0]!.id;
+    socket.sent.length = 0;
+
+    controller.retrySend(id);
+    assert.equal(socket.sent.length, 1);
+    assert.deepEqual(socket.sent[0]!.content, content, 'the same blocks, not just the text');
+    assert.deepEqual(socket.sent[0]!.attachments, [zip], 'and the same files');
   });
 
   it('an expired cookie tears the session down and shows the gate', async () => {
