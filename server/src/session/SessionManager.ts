@@ -302,6 +302,12 @@ export class SessionManager {
     if (s.running) {
       throw new Error('Cannot reload while a turn is running');
     }
+    // Compaction isn't a turn, so s.running says nothing about it. Replacing the process
+    // mid-compaction loses the work and leaves the compacting flag set, which disables the
+    // composer - and this reload would then hand that snapshot straight back to the client.
+    if (s.turnState.get().compacting) {
+      throw new Error('Cannot reload while the conversation is being compacted');
+    }
     if (s.reloading) {
       throw new Error('A reload is already running for this session');
     }

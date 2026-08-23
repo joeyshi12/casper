@@ -142,6 +142,16 @@ describe('TurnState: resume, crash, and oauth', () => {
     t.apply({ kind: 'process_exited', code: 1, signal: null });
     assert.equal(t.get().turnStatus, 'idle');
   });
+  it('process_exited clears compacting, which nothing else would', () => {
+    // Only a completed/failed notification clears it, and a killed process sends neither.
+    // Left set, the flag disables the composer for the life of the server.
+    const t = new TurnState();
+    t.apply({ kind: 'compaction', params: { sessionId: 's', status: { type: 'started' }, summary: null } });
+    assert.equal(t.get().compacting, true);
+    t.apply({ kind: 'process_exited', code: null, signal: 'SIGTERM' });
+    assert.equal(t.get().compacting, false);
+  });
+
   it('oauth_request accumulates an oauth prompt', () => {
     const t = new TurnState();
     t.apply({ kind: 'oauth_request', params: { sessionId: 's', serverName: 'gh', url: 'https://x' } });
@@ -800,6 +810,51 @@ describe('reloading a session re-detects its setup', () => {
       (await mgr.ensureOpen('reloadable')).running = true;
       await assert.rejects(mgr.reloadSession('reloadable'), /turn is running/);
       assert.equal(spawned.length, 1, 'the running turn keeps its process');
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  it('refuses to reload while the conversation is being compacted', async () => {
+    // Compaction is not a turn, so the running guard says nothing about it. Replacing the
+    // process would lose the work and strand the compacting flag, which this reload would
+    // then hand back to the client in the detail it returns.
+    const spawned: FakeProcess[] = [];
+    const mgr = managerWithSpawns(spawned);
+    try {
+      await mgr.createSession({ cwd: sessionsCwd });
+      persist('reloadable');
+      const s = await mgr.ensureOpen('reloadable');
+      s.record({
+        kind: 'compaction',
+        params: { sessionId: 'reloadable', status: { type: 'started' }, summary: null },
+      });
+
+      await assert.rejects(mgr.reloadSession('reloadable'), /being compacted/);
+      assert.equal(spawned.length, 1, 'the process doing the work is left alone');
+      assert.equal(spawned[0]?.disposed(), false);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  it('reloads once the compaction finishes', async () => {
+    const spawned: FakeProcess[] = [];
+    const mgr = managerWithSpawns(spawned);
+    try {
+      await mgr.createSession({ cwd: sessionsCwd });
+      persist('reloadable');
+      const s = await mgr.ensureOpen('reloadable');
+      const compaction = (type: 'started' | 'completed') =>
+        s.record({
+          kind: 'compaction',
+          params: { sessionId: 'reloadable', status: { type }, summary: null },
+        });
+      compaction('started');
+      compaction('completed');
+
+      await mgr.reloadSession('reloadable');
+      assert.equal(spawned.length, 2, 'no longer blocked once it is done');
     } finally {
       mgr.disposeAll();
     }
