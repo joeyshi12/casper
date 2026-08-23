@@ -7,6 +7,7 @@ import { PopoverMenu } from '../common/PopoverMenu.js';
 import { SearchModal } from '../sessions/SearchModal.js';
 import { DevicesModal } from '../sessions/DevicesModal.js';
 import { ConfirmDialog } from '../common/ConfirmDialog.js';
+import { relTime } from '../../util/relTime.js';
 
 interface Props {
   sessions: SessionSummary[];
@@ -20,17 +21,6 @@ interface Props {
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onLock: () => void;
-}
-
-function relTime(iso: string): string {
-  const d = Date.parse(iso);
-  if (Number.isNaN(d)) return '';
-  const mins = Math.round((Date.now() - d) / 60000);
-  if (mins < 1) return 'now';
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  return `${Math.round(hrs / 24)}d`;
 }
 
 /** Session list: left of the chat on desktop, the home screen on mobile. */

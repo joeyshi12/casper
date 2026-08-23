@@ -46,7 +46,7 @@ export interface ControlledSocket {
   setMode(modeId: string): void;
   setModel(modelId: string): void;
   watchPaths(paths: string[]): void;
-  execCommand(command: string, args?: string): void;
+  execCommand(command: string): void;
 }
 
 export type CreateSocket = (

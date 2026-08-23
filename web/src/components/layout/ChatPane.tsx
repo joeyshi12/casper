@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import type { MessageAttachment, PromptContentBlock } from '@casper/shared';
 import { useStore } from '../../state/store.js';
-import type { ConnStatus } from '../../api/SessionSocket.js';
+import { sessionController } from '../../state/sessionController.js';
 import { Transcript } from '../chat/Transcript.js';
 import { FileTree } from '../chat/FileTree.js';
 import { FilePreview } from '../chat/FilePreview.js';
@@ -12,47 +11,17 @@ import { Spinner, FilesIcon, MenuIcon, RefreshIcon } from '../common/icons.js';
 interface Props {
   /** A session being composed: no id yet, created by the first prompt. */
   isDraft: boolean;
-  /** Session whose detail is being fetched (switching sessions), distinct from
-   *  the currently-loaded one so we don't render its stale transcript while
-   *  waiting on a slow hydrate. */
-  loadingSessionId: string | null;
-  connStatus: ConnStatus;
-  createError: string | null;
-  onRetryCreate: () => void;
-  onDismissError: () => void;
   navOpen: boolean;
   onToggleNav: () => void;
-  onSend: (content: PromptContentBlock[], attachments?: MessageAttachment[]) => void;
-  onRetry: (id: string) => void;
-  /** Re-send a prompt after a failed turn. */
-  onRetryTurn: (text: string) => void;
-  onCancel: () => void;
-  onChangeModel: (modelId: string) => void;
-  onChangeAgent: (modeId: string) => void;
-  onCompact: () => void;
-  /** Restart the session's kiro process, re-detecting .kiro and MCP servers. */
-  onReload: () => void;
 }
 
 /** The right-hand chat area. Shows an empty prompt when no session is open. */
-export function ChatPane({
-  isDraft,
-  loadingSessionId,
-  connStatus,
-  createError,
-  onRetryCreate,
-  onDismissError,
-  navOpen,
-  onToggleNav,
-  onSend,
-  onRetry,
-  onRetryTurn,
-  onCancel,
-  onChangeModel,
-  onChangeAgent,
-  onCompact,
-  onReload,
-}: Props) {
+export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
+  // Session whose detail is being fetched, distinct from the loaded one so a stale transcript
+  // is not rendered while a slow hydrate is in flight.
+  const loadingSessionId = useStore((s) => s.loadingSessionId);
+  const connStatus = useStore((s) => s.connStatus);
+  const createError = useStore((s) => s.createError);
   const title = useStore((s) => s.sessions.find((x) => x.sessionId === s.activeId)?.title);
   // The hero belongs to an empty draft: sending hands over to the transcript at once, so the
   // message shows while the session is still being created.
@@ -118,10 +87,10 @@ export function ChatPane({
           <p className="chat-blank-title">Couldn't start the session</p>
           <p className="chat-blank-sub">{createError}</p>
           <div className="chat-error-actions">
-            <button className="btn-primary" onClick={onRetryCreate}>
+            <button className="btn-primary" onClick={() => sessionController.retryCreate()}>
               Try again
             </button>
-            <button className="btn-ghost" onClick={onDismissError}>
+            <button className="btn-ghost" onClick={() => sessionController.dismissCreateError()}>
               Back to sessions
             </button>
           </div>
@@ -153,11 +122,6 @@ export function ChatPane({
       )}
       <Composer
         chatId={chatId}
-        onSend={onSend}
-        onCancel={onCancel}
-        onCompact={onCompact}
-        onChangeModel={onChangeModel}
-        onChangeAgent={onChangeAgent}
         connStatus={connStatus}
         draft={isDraft}
       />
@@ -179,7 +143,7 @@ export function ChatPane({
   const sessionBody = (
     <>
       <div className="chat-body">
-        <Transcript onRetry={onRetry} onRetryTurn={onRetryTurn} />
+        <Transcript />
       </div>
       {composer}
     </>
@@ -209,7 +173,7 @@ export function ChatPane({
           {!isDraft && (
             <button
               className="chat-head-btn chat-reload"
-              onClick={onReload}
+              onClick={() => void sessionController.reloadSession()}
               disabled={reloading || turnRunning}
               title={turnRunning ? 'Reload after the turn' : 'Reload session'}
               aria-label="Reload session"

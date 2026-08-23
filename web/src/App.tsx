@@ -56,10 +56,9 @@ export function App() {
 function Shell({ onLock }: { onLock: () => void }) {
   const sessions = useStore((s) => s.sessions);
   const activeId = useStore((s) => s.activeId);
-  const loadingSessionId = useStore((s) => s.loadingSessionId);
-  const connStatus = useStore((s) => s.connStatus);
-  const createError = useStore((s) => s.createError);
   const watchedPaths = useStore((s) => s.watchedPaths);
+  const connStatus = useStore((s) => s.connStatus);
+  const loadingSessionId = useStore((s) => s.loadingSessionId);
   const navigate = useNavigate();
   // Not useParams: the param belongs to the child route, so it isn't visible here.
   const matchedId = useMatch(SESSION_ROUTE)?.params.sessionId ?? null;
@@ -105,6 +104,14 @@ function Shell({ onLock }: { onLock: () => void }) {
   // The panel is a column beside the chat where there is room, and a drawer over it where
   // there is not. Either way, the chat is what you land on.
   const [navOpen, setNavOpen] = useState(() => window.innerWidth > MOBILE_MAX);
+  // Follow the breakpoint when it is crossed - rotating a phone or resizing a window - since
+  // the panel is a column where there is room and a drawer where there is not.
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${MOBILE_MAX}px)`);
+    const onChange = (e: MediaQueryListEvent) => setNavOpen(!e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
   const closeNavOnMobile = useCallback(() => {
     if (window.innerWidth <= MOBILE_MAX) setNavOpen(false);
   }, []);
@@ -139,19 +146,6 @@ function Shell({ onLock }: { onLock: () => void }) {
         navOpen={navOpen}
         onToggleNav={() => setNavOpen((o) => !o)}
         isDraft={isDraft}
-        loadingSessionId={loadingSessionId}
-        connStatus={connStatus}
-        createError={createError}
-        onRetryCreate={() => sessionController.retryCreate()}
-        onDismissError={() => sessionController.dismissCreateError()}
-        onSend={(content, attachments) => sessionController.send(content, attachments)}
-        onRetry={(id) => sessionController.retrySend(id)}
-        onRetryTurn={(text) => sessionController.retryTurn(text)}
-        onCancel={() => sessionController.cancel()}
-        onChangeModel={(id) => sessionController.changeModel(id)}
-        onChangeAgent={(id) => sessionController.changeAgent(id)}
-        onCompact={() => sessionController.compact()}
-        onReload={() => void sessionController.reloadSession()}
       />
     </div>
   );

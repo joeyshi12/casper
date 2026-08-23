@@ -16,10 +16,10 @@ import {
   toolLabel,
 } from '../../util/toolRender.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
-import { WidgetToolCall } from './WidgetToolCall.js';
-import { widgetCallOf } from '../../util/widgetCall.js';
+import { prettyWidgetTitle, widgetCallOf } from '../../util/widgetCall.js';
 import { choiceCallOf } from '../../util/choiceCall.js';
 import { ChoiceTemplate } from './ChoiceTemplate.js';
+import { WidgetBlock } from './WidgetBlock.js';
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'queued',
@@ -110,19 +110,36 @@ const imageUrl = (absolutePath: string) =>
  * input/output view. Collapsed by default (failures start open) with an
  * informative header so the transcript stays compact.
  */
-function ToolCallCardBody({
-  tool,
-  arriving = false,
-}: {
+interface ToolCallCardProps {
   tool: ToolCallView;
   /** Arrived during this turn rather than with the transcript, so it fades in. */
   arriving?: boolean;
-}) {
-  // A widget or template is the point of its own call, not a tool to inspect.
-  if (widgetCallOf(tool)) return <WidgetToolCall tool={tool} />;
+}
+
+/**
+ * A widget or template is the point of its own call, not a tool to inspect. Dispatched here
+ * rather than inside the body, because the body holds state: a call that gains recognisable
+ * input mid-stream would otherwise change how many hooks run and React would throw.
+ */
+function ToolCallCardBody({ tool, arriving }: ToolCallCardProps) {
+  const widget = widgetCallOf(tool);
+  if (widget) {
+    if (tool.status === 'failed') {
+      return (
+        <div className="widget-error">
+          Widget {prettyWidgetTitle(widget.title) || 'call'} failed.
+        </div>
+      );
+    }
+    // kiro reports the arguments with the call, so there is nothing to wait for.
+    return widget.code ? <WidgetBlock code={widget.code} /> : null;
+  }
   const choice = choiceCallOf(tool);
   if (choice) return <ChoiceTemplate data={choice} toolId={tool.id} />;
+  return <GenericToolCall tool={tool} arriving={arriving} />;
+}
 
+function GenericToolCall({ tool, arriving = false }: ToolCallCardProps) {
   const status = tool.status;
   const [open, setOpen] = useState(status === 'failed');
   const summary = summaryOf(tool);

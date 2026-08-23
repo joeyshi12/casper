@@ -87,7 +87,7 @@ export interface ManagedProcess {
   cancel(sessionId: string): void;
   setMode(sessionId: string, modeId: string): Promise<unknown>;
   setModel(sessionId: string, modelId: string): Promise<unknown>;
-  execCommand(sessionId: string, command: string, args?: string): Promise<unknown>;
+  execCommand(sessionId: string, command: string): Promise<unknown>;
   dispose(): void;
   disposeAndWait(timeoutMs?: number): Promise<void>;
 }
@@ -662,11 +662,11 @@ export class SessionManager {
     s.lastActivity = Date.now();
   }
 
-  async execCommand(sessionId: string, command: string, args?: string): Promise<void> {
+  async execCommand(sessionId: string, command: string): Promise<void> {
     const s = await this.ensureOpen(sessionId);
     await this.settleReload(s);
     const proc = await this.ensureProc(s);
-    await proc.execCommand(s.sessionId, command, args);
+    await proc.execCommand(s.sessionId, command);
     s.lastActivity = Date.now();
   }
 

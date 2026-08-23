@@ -1,5 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '../../state/store.js';
+import { sessionController } from '../../state/sessionController.js';
 import type { MessageAttachment } from '@casper/shared';
 import { api } from '../../api/rest.js';
 import { formatSize } from '../../util/formatSize.js';
@@ -24,12 +25,6 @@ const reduceMotion =
   typeof window !== 'undefined'
     ? window.matchMedia('(prefers-reduced-motion: reduce)')
     : null;
-
-interface Props {
-  onRetry: (id: string) => void;
-  /** Re-send a prompt after a failed turn. */
-  onRetryTurn: (text: string) => void;
-}
 
 /**
  * The files attached to one message: images as thumbnails, anything else a chip that opens
@@ -89,7 +84,7 @@ function AttachmentList({
  * Memoized: toggling unrelated ChatPane state (like the file panel) must not
  * re-render the whole transcript, which is expensive for long histories.
  */
-export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Props) {
+export const Transcript = memo(function Transcript() {
   const items = useStore((s) => s.items);
   const streamingText = useStore((s) => s.streamingText);
   const streamingThought = useStore((s) => s.streamingThought);
@@ -217,7 +212,7 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
         ) : item.type === 'tool_call' ? (
           <ToolCallCard key={item.tool.id} tool={item.tool} arriving={arrivedLive(item.tool.id)} />
         ) : item.type === 'turn_error' ? (
-          <TurnErrorBlock key={item.id} message={item.message} onRetry={onRetryTurn} />
+          <TurnErrorBlock key={item.id} message={item.message} />
         ) : (
           <CompactionBlock key={item.id} summary={item.summary} />
         ),
@@ -235,7 +230,7 @@ export const Transcript = memo(function Transcript({ onRetry, onRetryTurn }: Pro
           {pm.status === 'failed' && (
             <div className="msg-failed">
               <span className="msg-failed-why">{pm.error ?? 'Failed to send.'}</span>
-              <button className="msg-retry" onClick={() => onRetry(pm.id)}>
+              <button className="msg-retry" onClick={() => sessionController.retrySend(pm.id)}>
                 Retry
               </button>
             </div>
@@ -333,10 +328,8 @@ function ThoughtBlock({ text, live = false }: { text: string; live?: boolean }) 
  */
 function TurnErrorBlock({
   message,
-  onRetry,
 }: {
   message: string;
-  onRetry?: (text: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -379,8 +372,8 @@ function TurnErrorBlock({
           {failure.fix && <p className="sysnote-fix">{failure.fix}</p>}
           <pre className="sysnote-raw">{message}</pre>
           <div className="sysnote-actions">
-            {onRetry && lastPrompt && (
-              <button className="btn-sm is-danger" onClick={() => onRetry(lastPrompt)}>
+            {lastPrompt && (
+              <button className="btn-sm is-danger" onClick={() => sessionController.retryTurn(lastPrompt)}>
                 Retry turn
               </button>
             )}
