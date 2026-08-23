@@ -6,9 +6,10 @@ import { config } from '../config.js';
 /**
  * Casper's own persistence: one SQLite file for the state kiro doesn't keep.
  *
- * `sessions` holds the per-session overrides layered on kiro's files (renamed title,
- * re-pointed working directory); `logins` holds the device sessions the auth cookie is
- * checked against; `message_attachments` records what was attached to each prompt.
+ * `chats` is the chat itself, keyed by the id the client mints: the session kiro later binds to
+ * it, plus the title and working directory Casper layers over kiro's files; `logins` holds the
+ * device sessions the auth cookie is checked against; `message_attachments` records what was
+ * attached to each prompt.
  * node:sqlite is built in, which is why the Node floor is 24 rather than a native driver.
  *
  * Attachments are keyed by ordinal - the position of the user message within the session -
