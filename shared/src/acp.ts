@@ -55,35 +55,12 @@ export function isJsonRpcNotification(
   return !('id' in m) && 'method' in m;
 }
 
-export interface AgentCapabilities {
-  loadSession: boolean;
-  promptCapabilities: {
-    image: boolean;
-    audio: boolean;
-    embeddedContext: boolean;
-  };
-  mcpCapabilities?: { http?: boolean; sse?: boolean };
-  sessionCapabilities?: Record<string, unknown>;
-  auth?: Record<string, unknown>;
-}
-
-export interface InitializeResult {
-  protocolVersion: number;
-  agentCapabilities: AgentCapabilities;
-  authMethods?: unknown[];
-  agentInfo: { name: string; title?: string; version: string };
-}
-
 // session/new, session/load
 
-export interface McpServerConfig {
-  // kiro spawns MCP servers itself from its config; Casper passes [].
-  [key: string]: unknown;
-}
-
+// kiro spawns MCP servers itself from its config, so Casper always passes [].
 export interface SessionNewParams {
   cwd: string;
-  mcpServers: McpServerConfig[];
+  mcpServers: never[];
 }
 
 /** An ACP "mode", which maps to a selectable kiro-cli agent. */
@@ -110,10 +87,8 @@ export interface SessionNewResult {
 export interface SessionLoadParams {
   sessionId: string;
   cwd: string;
-  mcpServers: McpServerConfig[];
+  mcpServers: never[];
 }
-
-export type SessionLoadResult = SessionNewResult;
 
 // session/prompt
 
@@ -194,17 +169,11 @@ export interface ToolCallProgressUpdate {
   rawOutput?: unknown;
 }
 
-export interface PlanUpdate {
-  sessionUpdate: 'plan';
-  entries?: unknown[];
-}
-
 export type SessionUpdate =
   | AgentMessageChunkUpdate
   | AgentThoughtChunkUpdate
   | ToolCallUpdate
   | ToolCallProgressUpdate
-  | PlanUpdate
   | { sessionUpdate: string; [key: string]: unknown };
 
 export interface SessionUpdateParams {
@@ -229,56 +198,12 @@ export interface KiroMetadataParams {
   turnDurationMs?: number;
 }
 
-export interface KiroSubagent {
-  id?: string;
-  name?: string;
-  status?: string;
-  [key: string]: unknown;
-}
-
-export interface KiroSubagentListParams {
-  sessionId?: string;
-  subagents: KiroSubagent[];
-  pendingStages: unknown[];
-}
-
-export interface KiroMcpServerParams {
-  sessionId: string;
-  serverName: string;
-  error?: string;
-}
-
-export interface KiroCommand {
-  name: string;
-  description?: string;
-  meta?: {
-    optionsMethod?: string;
-    inputType?: string;
-    local?: boolean;
-    hint?: string;
-    subcommands?: string[];
-    subcommandHints?: Record<string, string>;
-    [key: string]: unknown;
-  };
-}
-
-export interface KiroCommandsAvailableParams {
-  sessionId: string;
-  commands: KiroCommand[];
-}
-
 /** Progress of a /compact operation (`_kiro.dev/compaction/status`). */
 export interface KiroCompactionStatusParams {
   sessionId: string;
   status: { type: 'started' | 'completed' | 'failed' | string };
   /** The conversation summary once compaction completes (null while running). */
   summary: string | null;
-}
-
-export interface KiroOauthRequestParams {
-  sessionId: string;
-  serverName?: string;
-  url: string;
 }
 
 // Well-known method names, so string literals never drift.

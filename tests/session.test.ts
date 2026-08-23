@@ -60,106 +60,63 @@ after(() => {
 });
 
 
-describe('TurnState: observability fold across a full turn', () => {
-  const events: CasperEventPayload[] = [
-    { kind: 'commands_available', params: { sessionId: 's', commands: [{ name: '/agent' }] } },
-    { kind: 'mcp_health', params: { sessionId: 's', serverName: 'builder-mcp' }, ok: true },
-    { kind: 'mcp_health', params: { sessionId: 's', serverName: 'pippin-mcp', error: 'boom' }, ok: false },
-    { kind: 'turn_started', prompt: [{ type: 'text', text: 'hi' }] },
-    { kind: 'session_update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'PONG' } } },
-    { kind: 'metadata', params: { sessionId: 's', contextUsagePercentage: 15.9, meteringUsage: [{ value: 0.04, unit: 'credit', unitPlural: 'credits' }], turnDurationMs: 1916 } },
-    { kind: 'turn_ended', stopReason: 'end_turn' },
-    { kind: 'turn_started', prompt: [{ type: 'text', text: 'again' }] },
-    { kind: 'metadata', params: { sessionId: 's', contextUsagePercentage: 22.1, meteringUsage: [{ value: 0.06, unit: 'credit', unitPlural: 'credits' }], turnDurationMs: 3000 } },
-    { kind: 'turn_ended', stopReason: 'end_turn' },
-  ];
-  const ts = new TurnState();
-  for (const e of events) ts.apply(e);
-  const snap = ts.get();
+describe('TurnState: the observability fold', () => {
+  const started = { kind: 'turn_started', prompt: [{ type: 'text', text: 'hi' }] } as const;
+  const compaction = (type: 'started' | 'completed') =>
+    ({ kind: 'compaction', params: { sessionId: 's', status: { type }, summary: null } }) as const;
 
-  it('cumulative credits accumulate across turns', () => {
-    assert.ok(Math.abs(snap.creditsSpent - 0.1) < 1e-9, `creditsSpent=${snap.creditsSpent}`);
+  it('takes the latest context usage and returns to idle', () => {
+    const t = new TurnState();
+    for (const e of [
+      started,
+      { kind: 'metadata', params: { sessionId: 's', contextUsagePercentage: 15.9 } },
+      { kind: 'turn_ended', stopReason: 'end_turn' },
+      started,
+      { kind: 'metadata', params: { sessionId: 's', contextUsagePercentage: 22.1 } },
+      { kind: 'turn_ended', stopReason: 'end_turn' },
+    ] as CasperEventPayload[]) {
+      t.apply(e);
+    }
+    assert.equal(t.get().contextUsagePercentage, 22.1);
+    assert.equal(t.get().turnStatus, 'idle');
   });
-  it('lastTurnCredits reflects most recent turn', () => {
-    assert.ok(Math.abs(snap.lastTurnCredits - 0.06) < 1e-9, `lastTurnCredits=${snap.lastTurnCredits}`);
-  });
-  it('contextUsagePercentage takes latest value', () => {
-    assert.equal(snap.contextUsagePercentage, 22.1);
-  });
-  it('lastTurnDurationMs takes latest value', () => {
-    assert.equal(snap.lastTurnDurationMs, 3000);
-  });
-  it('turnStatus returns to idle after turn_ended', () => {
-    assert.equal(snap.turnStatus, 'idle');
-  });
-  it('both MCP servers tracked', () => {
-    assert.equal(snap.mcpServers.length, 2);
-  });
-  it('failed MCP server marked failed', () => {
-    assert.equal(snap.mcpServers.find((m) => m.serverName === 'pippin-mcp')?.status, 'failed');
-  });
-  it('healthy MCP server marked initialized', () => {
-    assert.equal(snap.mcpServers.find((m) => m.serverName === 'builder-mcp')?.status, 'initialized');
-  });
-  it('available commands captured', () => {
-    assert.equal(snap.availableCommands.length, 1);
-  });
-});
 
-describe('TurnState: compaction status', () => {
-  it('compacting defaults to false', () => {
-    assert.equal(new TurnState().get().compacting, false);
-  });
-  it('compaction started sets compacting true', () => {
+  it('runs while a turn is in flight', () => {
     const t = new TurnState();
-    t.apply({ kind: 'compaction', params: { sessionId: 's', status: { type: 'started' }, summary: null } });
-    assert.equal(t.get().compacting, true);
-  });
-  it('compaction completed clears compacting', () => {
-    const t = new TurnState();
-    t.apply({ kind: 'compaction', params: { sessionId: 's', status: { type: 'started' }, summary: null } });
-    t.apply({ kind: 'compaction', params: { sessionId: 's', status: { type: 'completed' }, summary: 'sum' } });
-    assert.equal(t.get().compacting, false);
-  });
-});
-
-describe('TurnState: resume, crash, and oauth', () => {
-  it('seed sets cumulative credits on resume', () => {
-    const t = new TurnState();
-    t.seed(1.5, 40);
-    assert.equal(t.get().creditsSpent, 1.5);
-  });
-  it('seed sets context usage on resume', () => {
-    const t = new TurnState();
-    t.seed(1.5, 40);
-    assert.equal(t.get().contextUsagePercentage, 40);
-  });
-  it('turnStatus running after turn_started', () => {
-    const t = new TurnState();
-    t.apply({ kind: 'turn_started', prompt: [{ type: 'text', text: 'hi' }] });
+    t.apply(started);
     assert.equal(t.get().turnStatus, 'running');
   });
-  it('process_exited resets turnStatus to idle', () => {
-    // A crash mid-turn must not leave a REST refetch reporting a stuck 'running'.
+
+  it('seeds context usage on resume', () => {
     const t = new TurnState();
-    t.apply({ kind: 'turn_started', prompt: [{ type: 'text', text: 'hi' }] });
+    t.seed(40);
+    assert.equal(t.get().contextUsagePercentage, 40);
+  });
+
+  it('tracks a compaction from start to finish', () => {
+    const t = new TurnState();
+    assert.equal(t.get().compacting, false);
+    t.apply(compaction('started'));
+    assert.equal(t.get().compacting, true);
+    t.apply(compaction('completed'));
+    assert.equal(t.get().compacting, false);
+  });
+
+  // A crash mid-turn must not leave a REST refetch reporting a stuck 'running'.
+  it('resets turnStatus when the process exits', () => {
+    const t = new TurnState();
+    t.apply(started);
     t.apply({ kind: 'process_exited', code: 1, signal: null });
     assert.equal(t.get().turnStatus, 'idle');
   });
-  it('process_exited clears compacting, which nothing else would', () => {
-    // Only a completed/failed notification clears it, and a killed process sends neither.
-    // Left set, the flag disables the composer for the life of the server.
+
+  // Only a completed/failed notification clears it, and a killed process sends neither.
+  // Left set, the flag disables the composer for the life of the server.
+  it('clears compacting when the process exits, which nothing else would', () => {
     const t = new TurnState();
-    t.apply({ kind: 'compaction', params: { sessionId: 's', status: { type: 'started' }, summary: null } });
-    assert.equal(t.get().compacting, true);
+    t.apply(compaction('started'));
     t.apply({ kind: 'process_exited', code: null, signal: 'SIGTERM' });
     assert.equal(t.get().compacting, false);
-  });
-
-  it('oauth_request accumulates an oauth prompt', () => {
-    const t = new TurnState();
-    t.apply({ kind: 'oauth_request', params: { sessionId: 's', serverName: 'gh', url: 'https://x' } });
-    assert.equal(t.get().oauthPrompts.length, 1);
   });
 });
 
@@ -1338,7 +1295,6 @@ describe('session summary: one projection over kiro’s file and live state', ()
       assert.equal(summary?.agentId, 'file-agent');
       assert.equal(summary?.modelId, 'file-model');
       assert.equal(summary?.contextUsagePercentage, 42);
-      assert.ok(Math.abs((summary?.creditsSpent ?? 0) - 0.25) < 1e-9);
     } finally {
       mgr.disposeAll();
       cleanup('dormant-1');
@@ -1360,8 +1316,7 @@ describe('session summary: one projection over kiro’s file and live state', ()
       assert.deepEqual(fromDetail, fromList, 'the two read paths must project identically');
       // createdAt comes from kiro's file, not from when the process started.
       assert.equal(fromDetail.createdAt, '2026-01-01T00:00:00.000Z');
-      // A live session with no turn yet still reports the file's totals.
-      assert.ok(Math.abs((fromDetail.creditsSpent ?? 0) - 0.25) < 1e-9);
+      // A live session with no turn yet still reports the file's value.
       assert.equal(fromDetail.contextUsagePercentage, 42);
       assert.equal(fromDetail.liveness, 'live');
     } finally {

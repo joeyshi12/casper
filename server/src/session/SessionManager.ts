@@ -7,12 +7,8 @@ import {
   type CasperEventPayload,
   type MessageAttachment,
   type JsonRpcNotification,
-  type KiroCommandsAvailableParams,
   type KiroCompactionStatusParams,
-  type KiroMcpServerParams,
   type KiroMetadataParams,
-  type KiroOauthRequestParams,
-  type KiroSubagentListParams,
   type PromptContentBlock,
   type SessionDetail,
   type SessionLoadParams,
@@ -179,18 +175,8 @@ function mapNotification(n: JsonRpcNotification): CasperEventPayload | null {
       return { kind: 'session_update', update: (n.params as SessionUpdateParams).update };
     case KIRO_NOTIFICATIONS.metadata:
       return { kind: 'metadata', params: n.params as KiroMetadataParams };
-    case KIRO_NOTIFICATIONS.subagentListUpdate:
-      return { kind: 'subagent_update', params: n.params as KiroSubagentListParams };
-    case KIRO_NOTIFICATIONS.mcpServerInitialized:
-      return { kind: 'mcp_health', params: n.params as KiroMcpServerParams, ok: true };
-    case KIRO_NOTIFICATIONS.mcpServerInitFailure:
-      return { kind: 'mcp_health', params: n.params as KiroMcpServerParams, ok: false };
-    case KIRO_NOTIFICATIONS.commandsAvailable:
-      return { kind: 'commands_available', params: n.params as KiroCommandsAvailableParams };
     case KIRO_NOTIFICATIONS.compactionStatus:
       return { kind: 'compaction', params: n.params as KiroCompactionStatusParams };
-    case KIRO_NOTIFICATIONS.mcpOauthRequest:
-      return { kind: 'oauth_request', params: n.params as KiroOauthRequestParams };
     default:
       return null;
   }
@@ -425,10 +411,7 @@ export class SessionManager {
     s.createdAt = persisted.createdAt;
     s.updatedAt = persisted.updatedAt;
     s.markLive(); // it exists on disk, so kiro can load it on demand
-    s.turnState.seed(
-      persisted.creditsSpent ?? 0,
-      persisted.contextUsagePercentage ?? 0,
-    );
+    s.turnState.seed(persisted.contextUsagePercentage ?? 0);
     this.sessions.set(sessionId, s);
     return s;
   }
@@ -703,16 +686,6 @@ export class SessionManager {
    * require one of them, so the assertions below cannot fire.
    */
   private summaryOf(
-    live: Session,
-    persisted: SessionSummary | undefined,
-    transcript?: TranscriptItem[],
-  ): SessionSummary;
-  private summaryOf(
-    live: undefined,
-    persisted: SessionSummary,
-    transcript?: TranscriptItem[],
-  ): SessionSummary;
-  private summaryOf(
     live: Session | undefined,
     persisted: SessionSummary | undefined,
     transcript?: TranscriptItem[],
@@ -739,9 +712,8 @@ export class SessionManager {
       agentId: live?.agentId ?? persisted?.agentId,
       modelId: live?.modelId ?? persisted?.modelId,
       running: live?.running ?? false,
-      // A dormant session's totals live in kiro's file; a live one's snapshot
-      // starts at zero until the first turn reports, so fall back to the file.
-      creditsSpent: snap?.creditsSpent || persisted?.creditsSpent,
+      // A live snapshot starts at zero until the first turn reports, so a dormant
+      // session's value comes from kiro's file.
       contextUsagePercentage:
         snap?.contextUsagePercentage || persisted?.contextUsagePercentage,
     };
@@ -773,22 +745,8 @@ export class SessionManager {
     ]);
 
     const s = this.sessions.get(sessionId);
-    if (s) return this.buildDetail(s, transcript, persisted ?? undefined);
-
-    if (!persisted) throw new Error(`Unknown session: ${sessionId}`);
-    return {
-      summary: this.summaryOf(undefined, persisted, transcript),
-      modes: [],
-      currentModeId: persisted.agentId,
-      transcript: transcript.slice(-TRANSCRIPT_PAGE_SIZE),
-      transcriptTotal: transcript.length,
-      observability: {
-        ...emptyObservabilitySnapshot(),
-        creditsSpent: persisted.creditsSpent ?? 0,
-        contextUsagePercentage: persisted.contextUsagePercentage ?? 0,
-      },
-      head: 0,
-    };
+    if (!s && !persisted) throw new Error(`Unknown session: ${sessionId}`);
+    return this.buildDetail(s, transcript, persisted ?? undefined);
   }
 
   /**
@@ -810,21 +768,24 @@ export class SessionManager {
     return transcript.slice(start, end);
   }
 
+  /** One projection, so a dormant session and a live one cannot disagree. */
   private buildDetail(
-    s: Session,
+    s: Session | undefined,
     transcript: SessionDetail['transcript'],
     persisted?: SessionSummary,
   ): SessionDetail {
-    const snap = s.turnState.get();
     return {
       summary: this.summaryOf(s, persisted, transcript),
-      modes: s.availableModes,
-      currentModeId: s.currentModeId,
+      modes: s?.availableModes ?? [],
+      currentModeId: s?.currentModeId ?? persisted?.agentId,
       // Only the tail is sent on load; replayHead/title use the full transcript.
       transcript: transcript.slice(-TRANSCRIPT_PAGE_SIZE),
       transcriptTotal: transcript.length,
-      observability: snap,
-      head: this.replayHead(s, transcript),
+      observability: s?.turnState.get() ?? {
+        ...emptyObservabilitySnapshot(),
+        contextUsagePercentage: persisted?.contextUsagePercentage ?? 0,
+      },
+      head: s ? this.replayHead(s, transcript) : 0,
     };
   }
 

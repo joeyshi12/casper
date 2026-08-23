@@ -8,12 +8,8 @@
  */
 
 import type {
-  KiroCommandsAvailableParams,
   KiroCompactionStatusParams,
-  KiroMcpServerParams,
   KiroMetadataParams,
-  KiroOauthRequestParams,
-  KiroSubagentListParams,
   PromptContentBlock,
   SessionUpdate,
   StopReason,
@@ -35,31 +31,10 @@ export interface MetadataEvent {
   params: KiroMetadataParams;
 }
 
-export interface SubagentEvent {
-  kind: 'subagent_update';
-  params: KiroSubagentListParams;
-}
-
-export interface McpHealthEvent {
-  kind: 'mcp_health';
-  params: KiroMcpServerParams;
-  ok: boolean;
-}
-
-export interface CommandsAvailableEvent {
-  kind: 'commands_available';
-  params: KiroCommandsAvailableParams;
-}
-
 /** Progress of a /compact operation, so the client can show a compacting state. */
 export interface CompactionEvent {
   kind: 'compaction';
   params: KiroCompactionStatusParams;
-}
-
-export interface OauthRequestEvent {
-  kind: 'oauth_request';
-  params: KiroOauthRequestParams;
 }
 
 // Synthetic lifecycle events injected by the server.
@@ -90,11 +65,7 @@ export interface ProcessExitedEvent {
 export type CasperEventPayload =
   | SessionUpdateEvent
   | MetadataEvent
-  | SubagentEvent
-  | McpHealthEvent
-  | CommandsAvailableEvent
   | CompactionEvent
-  | OauthRequestEvent
   | TurnStartedEvent
   | TurnEndedEvent
   | TurnErrorEvent

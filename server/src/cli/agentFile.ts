@@ -1,7 +1,7 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import url from 'node:url';
+import { sha256 } from '../util/hash.js';
 
 /**
  * Write the casper agent where kiro looks for it, so `--agent casper` resolves from any
@@ -80,10 +80,6 @@ export function agentConfig(prompt: string, mcp: string | null): KiroAgent {
     includeMcpJson: true,
     model: null,
   };
-}
-
-function sha256(text: string): string {
-  return crypto.createHash('sha256').update(text).digest('hex');
 }
 
 export function installAgentFile(home: string, dataDir: string): AgentResult {

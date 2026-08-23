@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
-import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import multipart from '@fastify/multipart';
@@ -41,7 +40,6 @@ export async function buildApp(): Promise<CasperApp> {
   const manager = new SessionManager(logger);
   const startedAt = Date.now();
 
-  await app.register(cors, { origin: true });
   await app.register(websocket, {
     options: { maxPayload: 16 * 1024 * 1024 },
   });

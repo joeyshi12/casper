@@ -101,7 +101,7 @@ function extractImagePaths(input: unknown): string[] {
 }
 
 const imageUrl = (absolutePath: string) =>
-  `/api/fs/image?path=${encodeURIComponent(absolutePath)}`;
+  `/api/fs/file?path=${encodeURIComponent(absolutePath)}`;
 
 /**
  * A tool invocation. Common tools get a tailored, syntax-highlighted body

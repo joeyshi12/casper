@@ -97,7 +97,7 @@ export async function sendFilePreview(
   if (isImage || isPdf) {
     // Transcript images re-render on every reload and every reconnect
     // replay, so without a validator the browser refetches each one in full
-    // every time. Matches the /api/fs/image cache policy. The validator is
+    // every time. The validator is
     // size+mtime rather than a content hash to avoid reading the file.
     //
     // no-cache, not max-age: workspace files are mutable, and a freshness

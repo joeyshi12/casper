@@ -53,8 +53,6 @@ export interface SessionSummary {
   modelId?: string;
   /** Whether a turn is actively running server-side. */
   running: boolean;
-  /** Cumulative credits spent (from live TurnState or persisted metadata). */
-  creditsSpent?: number;
   contextUsagePercentage?: number;
 }
 

@@ -10,7 +10,6 @@ import {
   replyWith,
   resolveAbsolutePath,
 } from '../util/confinedFile.js';
-import { classifyKind } from '../util/filekind.js';
 import { sendFilePreview } from './filePreview.js';
 
 /** Max image file size (20 MB). */
@@ -120,41 +119,4 @@ export function registerFsRoutes(app: FastifyInstance): void {
     },
   );
 
-  /**
-   * GET /api/fs/image?path=<absolute-path>
-   *
-   * Serves an image file from the server filesystem. Used to render images
-   * produced by tool calls (e.g. charts, screenshots) inline in the chat.
-   * Only serves files with recognized image extensions; rejects anything else.
-   */
-  app.get<{ Querystring: { path?: string; raw?: string } }>(
-    '/api/fs/image',
-    async (req, reply) => {
-      const filePath = (req.query.path ?? '').trim();
-      if (!filePath) {
-        reply.code(400);
-        return { error: 'path parameter is required' };
-      }
-
-      if (!path.isAbsolute(filePath)) {
-        reply.code(400);
-        return { error: 'path must be absolute' };
-      }
-
-      // Extension allowlist first: pure input validation, no filesystem access.
-      // classifyKind reads the same table the ACP image blocks use.
-      const ext = path.extname(filePath).toLowerCase();
-      if (classifyKind(filePath) !== 'image') {
-        reply.code(400);
-        return { error: `Not a supported image type: ${ext}` };
-      }
-
-      const resolvedImage = await resolveAbsolutePath(filePath, 'file');
-      if (!resolvedImage.ok) return replyWith(reply, resolvedImage);
-      // Same 20 MB ceiling, ETag policy and streaming as every other preview, so the two
-      // don't drift apart. This route's own job is the allowlist above: it exists to refuse
-      // anything that isn't an image, which /api/fs/file deliberately does not.
-      return sendFilePreview(req, reply, resolvedImage.real, resolvedImage.stat);
-    },
-  );
 }
