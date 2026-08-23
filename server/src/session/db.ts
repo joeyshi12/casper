@@ -36,10 +36,6 @@ CREATE TABLE IF NOT EXISTS logins (
   user_agent   TEXT
 );
 CREATE INDEX IF NOT EXISTS logins_hash ON logins (hash);
-CREATE TABLE IF NOT EXISTS meta (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
 CREATE TABLE IF NOT EXISTS message_attachments (
   session_id TEXT    NOT NULL,
   ordinal    INTEGER NOT NULL,

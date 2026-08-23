@@ -75,23 +75,6 @@ export class SessionStore {
     return out;
   }
 
-  /** A one-off marker, so a migration doesn't run on every boot. */
-  getMeta(key: string): string | undefined {
-    const row = db().prepare('SELECT value FROM meta WHERE key = ?').get(key) as
-      | { value: string }
-      | undefined;
-    return row?.value;
-  }
-
-  setMeta(key: string, value: string): void {
-    db()
-      .prepare(
-        `INSERT INTO meta (key, value) VALUES (?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      )
-      .run(key, value);
-  }
-
   /** Forget every override for a session, when it's permanently deleted. */
   remove(sessionId: string): void {
     db().prepare('DELETE FROM sessions WHERE session_id = ?').run(sessionId);
