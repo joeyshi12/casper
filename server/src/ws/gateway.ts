@@ -34,20 +34,20 @@ export function send(socket: GatewaySocket, msg: ServerMessage): void {
  * What a connection needs from SessionManager. Narrower than the class so a
  * test can drive a connection with a stub instead of a kiro process.
  */
-export interface GatewaySessions {
-  ensureOpen(sessionId: string): Promise<unknown>;
-  getStore(sessionId: string): EventStore | undefined;
-  onEvent(sessionId: string, cb: (e: CasperEvent) => void): (() => void) | null;
-  getSessionCwd(sessionId: string): Promise<string>;
+export interface GatewayChats {
+  ensureOpen(chatId: string): Promise<unknown>;
+  getStore(chatId: string): EventStore | undefined;
+  onEvent(chatId: string, cb: (e: CasperEvent) => void): (() => void) | null;
+  getChatCwd(chatId: string): Promise<string>;
   runPrompt(
-    sessionId: string,
+    chatId: string,
     content: PromptContentBlock[],
     attachments?: MessageAttachment[],
   ): Promise<void>;
-  cancel(sessionId: string): void;
-  setMode(sessionId: string, modeId: string): Promise<void>;
-  setModel(sessionId: string, modelId: string): Promise<void>;
-  execCommand(sessionId: string, command: string, args?: string): Promise<void>;
+  cancel(chatId: string): void;
+  setMode(chatId: string, modeId: string): Promise<void>;
+  setModel(chatId: string, modelId: string): Promise<void>;
+  execCommand(chatId: string, command: string, args?: string): Promise<void>;
 }
 
 /**
@@ -60,8 +60,8 @@ export interface GatewaySessions {
  */
 export function handleConnection(
   socket: GatewaySocket,
-  manager: GatewaySessions,
-  sessionId: string,
+  manager: GatewayChats,
+  chatId: string,
   startCursor: number,
 ): void {
   let cursor = startCursor;
@@ -75,7 +75,7 @@ export function handleConnection(
   const watchers = createDirWatchers({
     resolve: async (relative) => {
       try {
-        return confineToRoot(await manager.getSessionCwd(sessionId), relative);
+        return confineToRoot(await manager.getChatCwd(chatId), relative);
       } catch {
         return null;
       }
@@ -93,14 +93,14 @@ export function handleConnection(
     // Open the session in memory WITHOUT spawning a kiro process - viewing is
     // instant. A process is spawned lazily only when the user sends a prompt.
     try {
-      await manager.ensureOpen(sessionId);
+      await manager.ensureOpen(chatId);
     } catch (err) {
       send(socket, { type: 'error', message: (err as Error).message });
       socket.close(1011, 'open failed');
       return;
     }
 
-    const store = manager.getStore(sessionId);
+    const store = manager.getStore(chatId);
     if (!store) {
       send(socket, { type: 'error', message: 'Session store unavailable' });
       socket.close(1011, 'no store');
@@ -119,7 +119,7 @@ export function handleConnection(
     }
     send(socket, { type: 'replay_complete', head: store.head() });
 
-    unsubscribe = manager.onEvent(sessionId, forward);
+    unsubscribe = manager.onEvent(chatId, forward);
     ready = true;
   };
 
@@ -142,16 +142,16 @@ export function handleConnection(
       case 'watch_paths':
         return watchers.sync(msg.paths);
       case 'prompt':
-        return ack('prompt', () => manager.runPrompt(sessionId, msg.content, msg.attachments));
+        return ack('prompt', () => manager.runPrompt(chatId, msg.content, msg.attachments));
       case 'cancel':
-        return ack('cancel', () => manager.cancel(sessionId));
+        return ack('cancel', () => manager.cancel(chatId));
       case 'set_mode':
-        return ack('set_mode', () => manager.setMode(sessionId, msg.modeId));
+        return ack('set_mode', () => manager.setMode(chatId, msg.modeId));
       case 'set_model':
-        return ack('set_model', () => manager.setModel(sessionId, msg.modelId));
+        return ack('set_model', () => manager.setModel(chatId, msg.modelId));
       case 'exec_command':
         return ack('exec_command', () =>
-          manager.execCommand(sessionId, msg.command),
+          manager.execCommand(chatId, msg.command),
         );
       default:
         return send(socket, { type: 'error', message: 'Unknown message type' });
@@ -199,13 +199,13 @@ export function handleConnection(
   });
 }
 
-// WebSocket gateway at /ws?sessionId=&cursor=. Auth is the same-origin session
+// WebSocket gateway at /ws?chatId=&cursor=. Auth is the same-origin session
 // cookie sent on the upgrade request. On connect it replays buffered events
 // after the client's cursor, then streams live ones. Socket loss never touches
 // the child process, so the turn keeps running.
 export function registerWsGateway(app: FastifyInstance, manager: SessionManager): void {
   app.get('/ws', { websocket: true }, (socket: WebSocket, req) => {
-    const query = req.query as { sessionId?: string; cursor?: string };
+    const query = req.query as { chatId?: string; cursor?: string };
 
     if (!authDisabled() && !hasValidSession(req)) {
       send(socket, { type: 'error', message: 'Unauthorized' });
@@ -213,16 +213,16 @@ export function registerWsGateway(app: FastifyInstance, manager: SessionManager)
       return;
     }
 
-    if (!query.sessionId) {
-      send(socket, { type: 'error', message: 'Missing sessionId' });
-      socket.close(1008, 'Missing sessionId');
+    if (!query.chatId) {
+      send(socket, { type: 'error', message: 'Missing chatId' });
+      socket.close(1008, 'Missing chatId');
       return;
     }
 
     handleConnection(
       socket,
       manager,
-      query.sessionId,
+      query.chatId,
       Number.parseInt(query.cursor ?? '0', 10) || 0,
     );
   });

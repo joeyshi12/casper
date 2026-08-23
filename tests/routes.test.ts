@@ -13,8 +13,8 @@ import type {
   CasperEventPayload,
   DirListing,
   ServerMessage,
-  SessionDetail,
-  SessionSummary,
+  ChatDetail,
+  ChatSummary,
   TreeResponse,
   UploadResponse,
 } from '@casper/shared';
@@ -27,7 +27,7 @@ import { SessionManager, Session } from '../server/src/session/SessionManager.js
 import { describeError } from '../server/src/acp/errors.js';
 import { registerFsRoutes } from '../server/src/routes/fs.js';
 import { registerUploadRoutes } from '../server/src/routes/uploads.js';
-import { registerSessionRoutes } from '../server/src/routes/sessions.js';
+import { registerChatRoutes } from '../server/src/routes/chats.js';
 import { registerWorkspaceRoutes } from '../server/src/routes/workspace.js';
 import { KiroProcess } from '../server/src/session/KiroProcess.js';
 import { listAgents, invalidateAgents } from '../server/src/session/agents.js';
@@ -42,10 +42,10 @@ import { closeDb } from '../server/src/session/db.js';
 import {
   classifyDirent,
   resolveAbsolutePath,
-  resolveSessionPath,
+  resolveChatPath,
 } from '../server/src/util/confinedFile.js';
 import { EventStore } from '../server/src/session/EventStore.js';
-import { handleConnection, type GatewaySessions } from '../server/src/ws/gateway.js';
+import { handleConnection, type GatewayChats } from '../server/src/ws/gateway.js';
 import { noopLogger } from './helpers.js';
 import {
   createDirWatchers,
@@ -226,7 +226,7 @@ describe('GET /api/fs/dirs: reports what the typed path is', () => {
   });
 });
 
-describe('createSession resolves a missing cwd by creating it', () => {
+describe('createChat resolves a missing cwd by creating it', () => {
   let root: string;
   let dataDir: string;
   const origData = config.casperDataDir;
@@ -245,14 +245,14 @@ describe('createSession resolves a missing cwd by creating it', () => {
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('setSessionCwd creates the folder, including missing parents', async () => {
+  it('setChatCwd creates the folder, including missing parents', async () => {
     const manager = new SessionManager(noopLogger());
     const target = path.join(root, 'deep', 'nested', 'work');
     assert.equal(fs.existsSync(target), false, 'starts absent');
 
     // The session does not exist, so this rejects - but resolveCwd runs first,
     // which is the step that creates the directory.
-    await manager.setSessionCwd('no-such-session', target).catch(() => {});
+    await manager.setChatCwd('no-such-session', target).catch(() => {});
 
     assert.equal(fs.existsSync(target), true, 'directory was created');
     assert.equal(fs.statSync(target).isDirectory(), true);
@@ -481,7 +481,7 @@ describe('turn failures surface as system events, not assistant messages', () =>
 
   it('pins a session notice for a session-wide failure', () => {
     useStore.getState().applyEvent(turnError(1, 'Error: credentials have expired'));
-    const notice = useStore.getState().sessionNotice;
+    const notice = useStore.getState().chatNotice;
     assert.ok(notice, 'notice is pinned');
     assert.equal(notice.title, "Kiro isn't authenticated");
     assert.match(notice.fix ?? '', /kiro-cli login/);
@@ -489,22 +489,22 @@ describe('turn failures surface as system events, not assistant messages', () =>
 
   it('does not pin a notice for a one-off failure', () => {
     useStore.getState().applyEvent(turnError(1, 'A turn is already running for this session'));
-    assert.equal(useStore.getState().sessionNotice, null);
+    assert.equal(useStore.getState().chatNotice, null);
     // ...but it's still in the transcript.
     assert.equal(useStore.getState().items[0]!.type, 'turn_error');
   });
 
   it('clears the notice once a turn gets through', () => {
     useStore.getState().applyEvent(turnError(1, 'Error: credentials have expired'));
-    assert.ok(useStore.getState().sessionNotice);
+    assert.ok(useStore.getState().chatNotice);
     useStore.getState().applyEvent(turnEnded(2));
-    assert.equal(useStore.getState().sessionNotice, null);
+    assert.equal(useStore.getState().chatNotice, null);
   });
 
   it('can be dismissed', () => {
     useStore.getState().applyEvent(turnError(1, 'Error: credentials have expired'));
-    useStore.getState().dismissSessionNotice();
-    assert.equal(useStore.getState().sessionNotice, null);
+    useStore.getState().dismissChatNotice();
+    assert.equal(useStore.getState().chatNotice, null);
   });
 });
 
@@ -723,9 +723,9 @@ describe('confined file access (the sequence every file route runs)', () => {
   let outside: string;
   let fileRoot: string;
 
-  const sessions = { getSessionCwd: async () => cwd };
+  const sessions = { getChatCwd: async () => cwd };
   const noSession = {
-    getSessionCwd: async (): Promise<string> => {
+    getChatCwd: async (): Promise<string> => {
       throw new Error('Session not found');
     },
   };
@@ -747,47 +747,47 @@ describe('confined file access (the sequence every file route runs)', () => {
     fs.rmSync(outside, { recursive: true, force: true });
   });
 
-  it('a session that does not exist is 404, before any path work', async () => {
-    const r = await resolveSessionPath(noSession, 'nope', 'a.txt', 'file');
-    assert.deepEqual(r, { ok: false, status: 404, error: 'Session not found' });
+  it('a chat that does not exist is 404, before any path work', async () => {
+    const r = await resolveChatPath(noSession, 'nope', 'a.txt', 'file');
+    assert.deepEqual(r, { ok: false, status: 404, error: 'Chat not found' });
   });
 
   it('download and preview require a path; the tree does not', async () => {
-    const asFile = await resolveSessionPath(sessions, 's', '', 'file');
+    const asFile = await resolveChatPath(sessions, 's', '', 'file');
     assert.deepEqual(asFile, { ok: false, status: 400, error: 'path parameter is required' });
 
-    const asDir = await resolveSessionPath(sessions, 's', '', 'directory');
+    const asDir = await resolveChatPath(sessions, 's', '', 'directory');
     assert.ok(asDir.ok && asDir.real === cwd, 'empty path lists the workspace itself');
   });
 
   it('traversal out of the workspace is 400, not 404', async () => {
-    const r = await resolveSessionPath(sessions, 's', '../etc/passwd', 'file');
+    const r = await resolveChatPath(sessions, 's', '../etc/passwd', 'file');
     assert.deepEqual(r, { ok: false, status: 400, error: 'Invalid path' });
   });
 
   it('a leading slash is stripped rather than read as absolute', async () => {
-    const r = await resolveSessionPath(sessions, 's', '//a.txt', 'file');
+    const r = await resolveChatPath(sessions, 's', '//a.txt', 'file');
     assert.ok(r.ok && r.real === path.join(cwd, 'a.txt'));
     assert.ok(r.ok && r.relative === 'a.txt');
   });
 
   it('a missing file is 404 and a directory asked for as a file is 400', async () => {
-    const missing = await resolveSessionPath(sessions, 's', 'gone.txt', 'file');
+    const missing = await resolveChatPath(sessions, 's', 'gone.txt', 'file');
     assert.deepEqual(missing, { ok: false, status: 404, error: 'File not found' });
 
-    const dir = await resolveSessionPath(sessions, 's', 'sub', 'file');
+    const dir = await resolveChatPath(sessions, 's', 'sub', 'file');
     assert.deepEqual(dir, { ok: false, status: 400, error: 'Path is not a file' });
   });
 
   it('a file asked for as a directory 404s the way readdir would have', async () => {
-    const r = await resolveSessionPath(sessions, 's', 'a.txt', 'directory');
+    const r = await resolveChatPath(sessions, 's', 'a.txt', 'directory');
     assert.deepEqual(r, { ok: false, status: 404, error: 'Directory not found' });
   });
 
   // The lexical root (the workspace) and the real root (fileRoot) are separate
   // on purpose: a project may symlink to somewhere else the user can read.
   it('a symlink leaving the workspace but staying inside fileRoot is served', async () => {
-    const r = await resolveSessionPath(sessions, 's', 'link-out/secret.txt', 'file');
+    const r = await resolveChatPath(sessions, 's', 'link-out/secret.txt', 'file');
     assert.ok(r.ok, 'expected the symlinked file to resolve');
     assert.equal(r.real, path.join(outside, 'secret.txt'));
   });
@@ -795,7 +795,7 @@ describe('confined file access (the sequence every file route runs)', () => {
   it('the same symlink is refused once fileRoot no longer contains its target', async () => {
     config.fileRoot = cwd;
     try {
-      const r = await resolveSessionPath(sessions, 's', 'link-out/secret.txt', 'file');
+      const r = await resolveChatPath(sessions, 's', 'link-out/secret.txt', 'file');
       assert.deepEqual(r, { ok: false, status: 404, error: 'File not found' });
     } finally {
       config.fileRoot = fileRoot;
@@ -805,8 +805,8 @@ describe('confined file access (the sequence every file route runs)', () => {
   it('a deleted workspace explains itself instead of saying "not found"', async () => {
     const doomed = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-gone-')));
     fs.rmSync(doomed, { recursive: true, force: true });
-    const r = await resolveSessionPath(
-      { getSessionCwd: async () => doomed },
+    const r = await resolveChatPath(
+      { getChatCwd: async () => doomed },
       's',
       '',
       'directory',
@@ -910,14 +910,14 @@ describe('ws gateway connection', () => {
     };
   };
 
-  const stubSessions = (store: EventStore, over: Partial<GatewaySessions> = {}) => {
+  const stubSessions = (store: EventStore, over: Partial<GatewayChats> = {}) => {
     const calls: string[] = [];
-    const sessions: GatewaySessions & { calls: string[] } = {
+    const sessions: GatewayChats & { calls: string[] } = {
       calls,
       ensureOpen: async () => ({}),
       getStore: () => store,
       onEvent: () => () => calls.push('unsubscribed'),
-      getSessionCwd: async () => os.tmpdir(),
+      getChatCwd: async () => os.tmpdir(),
       runPrompt: async () => calls.push('runPrompt'),
       cancel: () => calls.push('cancel'),
       setMode: async () => calls.push('setMode'),
@@ -1052,18 +1052,18 @@ describe('ws gateway connection', () => {
 
 // The reason uploads are keyed by chat: a new chat has no kiro session id until it sends,
 // so keying them on one meant a first message could not carry a file.
-// The create route copies the body field by field, so a field added to CreateSessionRequest
+// The create route copies the body field by field, so a field added to CreateChatRequest
 // and not added here is dropped silently. chatId was, and it stranded every file attached to
 // a first prompt: the upload went to the chat the client minted, then the server minted a
 // different one for the session, so nothing referred to that directory again.
-describe('POST /api/sessions forwards the whole request', () => {
+describe('POST /api/chats forwards the whole request', () => {
   it('passes every field through to the manager', async () => {
     let got: Record<string, unknown> | undefined;
     const app = Fastify();
-    registerSessionRoutes(app, {
-      createSession: async (opts: Record<string, unknown>) => {
+    registerChatRoutes(app, {
+      createChat: async (opts: Record<string, unknown>) => {
         got = opts;
-        return { summary: { sessionId: 's1' } } as unknown as SessionDetail;
+        return { summary: { sessionId: 's1' } } as unknown as ChatDetail;
       },
     } as unknown as SessionManager);
     await app.ready();
@@ -1076,7 +1076,7 @@ describe('POST /api/sessions forwards the whole request', () => {
       title: 'a title',
       chatId: 'c0ffee00-0000-4000-8000-000000000000',
     };
-    const res = await app.inject({ method: 'POST', url: '/api/sessions', payload: body });
+    const res = await app.inject({ method: 'POST', url: '/api/chats', payload: body });
     assert.equal(res.statusCode, 200);
     for (const [k, v] of Object.entries(body)) {
       assert.equal(got?.[k], v, `${k} did not reach the manager`);
@@ -1084,9 +1084,6 @@ describe('POST /api/sessions forwards the whole request', () => {
     await app.close();
   });
 });
-
-const isUuid = (s: string) =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 describe('POST /api/chats/:chatId/uploads', () => {
   let dataDir: string;
@@ -1145,14 +1142,14 @@ describe('POST /api/chats/:chatId/uploads', () => {
   });
 
   // The id names a directory and comes from the client, so its shape is the guard.
-  it('refuses an id that is not a uuid', async () => {
-    for (const bad of ['not-a-uuid', 'a/../../escape', '']) {
+  it('refuses an id that is not the shape a client should send', async () => {
+    for (const bad of ['a/../../escape', '', '..'.repeat(2)]) {
       const res = await post(bad, 'a.txt', 'x');
       // 400 from the handler, or 404 when the router rejects the shape before it - either
       // way it does not land.
       assert.notEqual(res.statusCode, 200, bad);
     }
-    assert.deepEqual(fs.readdirSync(path.join(dataDir, 'chats')).filter((d) => !isUuid(d)), []);
+    assert.deepEqual(fs.readdirSync(path.join(dataDir, 'chats')).filter((d) => d.includes('escape')), []);
   });
 });
 
@@ -1164,7 +1161,7 @@ describe('workspace file routes', () => {
 
   const buildApp = async (dir: string) => {
     const instance = Fastify();
-    registerWorkspaceRoutes(instance, { getSessionCwd: async () => dir });
+    registerWorkspaceRoutes(instance, { getChatCwd: async () => dir });
     await instance.ready();
     return instance;
   };
@@ -1184,7 +1181,7 @@ describe('workspace file routes', () => {
   const get = (route: string, p?: string) =>
     app.inject({
       method: 'GET',
-      url: `/api/sessions/s1/${route}`,
+      url: `/api/chats/s1/${route}`,
       query: p === undefined ? {} : { path: p },
     });
 
@@ -1230,7 +1227,7 @@ describe('workspace file routes', () => {
     const instance = await buildApp(doomed);
     fs.rmSync(doomed, { recursive: true, force: true });
     try {
-      const res = await instance.inject({ method: 'GET', url: '/api/sessions/s1/tree' });
+      const res = await instance.inject({ method: 'GET', url: '/api/chats/s1/tree' });
       assert.equal(res.statusCode, 404);
       assert.match((res.json() as { error: string }).error, /Workspace folder no longer exists/);
     } finally {

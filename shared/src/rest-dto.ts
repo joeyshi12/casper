@@ -33,15 +33,15 @@ export interface AgentsResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Sessions
+// Chats
 // ---------------------------------------------------------------------------
 
 export type SessionLiveness = 'live' | 'dormant';
 
-export interface SessionSummary {
-  sessionId: string;
-  /** The chat that owns this session's uploads. */
+export interface ChatSummary {
   chatId: string;
+  /** kiro's session behind this chat, absent until it has started one. */
+  sessionId?: string;
   title: string;
   cwd: string;
   createdAt: string;
@@ -56,11 +56,11 @@ export interface SessionSummary {
   contextUsagePercentage?: number;
 }
 
-export interface SessionListResponse {
-  sessions: SessionSummary[];
+export interface ChatListResponse {
+  chats: ChatSummary[];
 }
 
-export interface CreateSessionRequest {
+export interface CreateChatRequest {
   cwd?: string;
   agentId?: string;
   modelId?: string;
@@ -123,12 +123,12 @@ export type TranscriptItem =
   | { type: 'compaction'; id: string; summary: string; timestamp?: number }
   | { type: 'turn_error'; id: string; message: string; timestamp?: number };
 
-export interface SessionDetail {
-  summary: SessionSummary;
+export interface ChatDetail {
+  summary: ChatSummary;
   modes: AgentMode[];
   currentModeId?: string;
   /** The most recent page of transcript items (see transcriptTotal). Older
-   *  items are fetched on demand via GET /api/sessions/:id/transcript. */
+   *  items are fetched on demand via GET /api/chats/:chatId/transcript. */
   transcript: TranscriptItem[];
   /** Total number of items in the full transcript, so the client knows whether
    *  older pages remain to load. */
@@ -147,7 +147,7 @@ export interface SetModelRequest {
   modelId: string;
 }
 
-export interface RenameSessionRequest {
+export interface RenameChatRequest {
   title: string;
 }
 
@@ -221,7 +221,7 @@ export interface FileEntry {
   modifiedAt?: string;
 }
 
-/** Response from GET /api/sessions/:id/tree */
+/** Response from GET /api/chats/:chatId/tree */
 export interface TreeResponse {
   /** Absolute working directory of the session (for display). */
   cwd: string;

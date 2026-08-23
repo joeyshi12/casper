@@ -265,7 +265,7 @@ function renderShell(tool: ToolCallView): ReactNode {
  */
 function FileHeading({ path }: { path: string }) {
   const activeId = useStore((s) => s.activeId);
-  const cwd = useStore((s) => s.sessions.find((x) => x.sessionId === s.activeId)?.cwd ?? '');
+  const cwd = useStore((s) => s.chats.find((x) => x.chatId === s.activeId)?.cwd ?? '');
   const openFilePreview = useStore((s) => s.openFilePreview);
   const relative = activeId ? workspaceRelative(cwd, path) : null;
   // Inside the workspace, the relative path is the useful one: it says where the file

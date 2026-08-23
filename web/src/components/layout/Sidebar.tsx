@@ -1,7 +1,7 @@
 import { Link } from 'react-router';
-import { pathForSession } from '../../util/route.js';
+import { pathForChat } from '../../util/route.js';
 import { useCallback, useEffect, useState } from 'react';
-import type { SessionSummary } from '@casper/shared';
+import type { ChatSummary } from '@casper/shared';
 import { LockIcon, MoreIcon, PlusIcon, SearchIcon, Spinner } from '../common/icons.js';
 import { PopoverMenu } from '../common/PopoverMenu.js';
 import { SearchModal } from '../sessions/SearchModal.js';
@@ -10,7 +10,7 @@ import { ConfirmDialog } from '../common/ConfirmDialog.js';
 import { relTime } from '../../util/relTime.js';
 
 interface Props {
-  sessions: SessionSummary[];
+  sessions: ChatSummary[];
   activeId: string | null;
   /** Session currently being fetched after a click, for a small inline spinner
    *  while a slow transcript hydrates. */
@@ -133,12 +133,12 @@ export function Sidebar({
         ) : (
           sessions.map((s) => (
             <div
-              key={s.sessionId}
-              className={`srow ${s.sessionId === activeId ? 'is-active' : ''} ${
-                menuId === s.sessionId ? 'is-menu-open' : ''
+              key={s.chatId}
+              className={`srow ${s.chatId === activeId ? 'is-active' : ''} ${
+                menuId === s.chatId ? 'is-menu-open' : ''
               }`}
             >
-              {renamingId === s.sessionId ? (
+              {renamingId === s.chatId ? (
                 <input
                   className="srow-rename"
                   autoFocus
@@ -146,9 +146,9 @@ export function Sidebar({
                   onFocus={(e) => e.currentTarget.select()}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
-                  onBlur={() => commitRename(s.sessionId)}
+                  onBlur={() => commitRename(s.chatId)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitRename(s.sessionId);
+                    if (e.key === 'Enter') commitRename(s.chatId);
                     if (e.key === 'Escape') setRenamingId(null);
                   }}
                   onClick={(e) => e.stopPropagation()}
@@ -156,11 +156,11 @@ export function Sidebar({
               ) : (
                 <Link
                   className="srow-open"
-                  to={pathForSession(s.sessionId)}
+                  to={pathForChat(s.chatId)}
                   onClick={(e) => {
                     // A modified click opens a new tab; don't mark this one loading.
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-                    onOpen(s.sessionId);
+                    onOpen(s.chatId);
                   }}
                 >
                   <span className="srow-main">
@@ -170,7 +170,7 @@ export function Sidebar({
                     <span className="srow-sub">
                       <span className="srow-agent">{s.agentId ?? 'kiro_default'}</span>
                       <span className="srow-dot">·</span>
-                      {loadingId === s.sessionId && (
+                      {loadingId === s.chatId && (
                         <Spinner size={11} className="srow-spinner" />
                       )}
                       <span className="srow-when">{relTime(s.updatedAt)}</span>
@@ -184,23 +184,23 @@ export function Sidebar({
                   className="iconbtn srow-menu-btn"
                   aria-label="Session actions"
                   aria-haspopup="menu"
-                  aria-expanded={menuId === s.sessionId}
+                  aria-expanded={menuId === s.chatId}
                   onClick={(e) => {
                     e.stopPropagation();
-                    const open = menuId === s.sessionId;
+                    const open = menuId === s.chatId;
                     setMenuAnchor(open ? null : e.currentTarget);
-                    setMenuId(open ? null : s.sessionId);
+                    setMenuId(open ? null : s.chatId);
                   }}
                 >
                   <MoreIcon size={16} />
                 </button>
-                {menuId === s.sessionId && (
+                {menuId === s.chatId && (
                   <PopoverMenu anchor={menuAnchor} onClose={closeRowMenu}>
                     <button
                       className="menu-item"
                       onClick={() => {
                         setDraft(s.title);
-                        setRenamingId(s.sessionId);
+                        setRenamingId(s.chatId);
                         closeRowMenu();
                       }}
                     >
@@ -210,7 +210,7 @@ export function Sidebar({
                       className="menu-item menu-item-danger"
                       onClick={() => {
                         closeRowMenu();
-                        setConfirmingId(s.sessionId);
+                        setConfirmingId(s.chatId);
                       }}
                     >
                       Delete

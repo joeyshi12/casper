@@ -19,21 +19,21 @@ interface Props {
 export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
   // Session whose detail is being fetched, distinct from the loaded one so a stale transcript
   // is not rendered while a slow hydrate is in flight.
-  const loadingSessionId = useStore((s) => s.loadingSessionId);
+  const loadingChatId = useStore((s) => s.loadingChatId);
   const connStatus = useStore((s) => s.connStatus);
   const createError = useStore((s) => s.createError);
-  const title = useStore((s) => s.sessions.find((x) => x.sessionId === s.activeId)?.title);
+  const title = useStore((s) => s.chats.find((x) => x.chatId === s.activeId)?.title);
   // The hero belongs to an empty draft: sending hands over to the transcript at once, so the
   // message shows while the session is still being created.
   const composing = useStore((st) => isDraft && st.pending.length === 0 && st.items.length === 0);
   const activeId = useStore((s) => s.activeId);
   const chatId = useStore((s) => s.chatId);
-  const sessionNotice = useStore((s) => s.sessionNotice);
+  const chatNotice = useStore((s) => s.chatNotice);
   // A derived boolean, so this re-renders only when the answer for this session flips.
   const reloading = useStore((s) => s.reloadingId !== null && s.reloadingId === s.activeId);
   // A restart mid-turn would lose the turn, so the control waits for it.
   const turnRunning = useStore((s) => s.observability.turnStatus === 'running');
-  const dismissSessionNotice = useStore((s) => s.dismissSessionNotice);
+  const dismissChatNotice = useStore((s) => s.dismissChatNotice);
   const [showTree, setShowTree] = useState(false);
 
   // The panel belongs to the session it was opened in. Without this it survives a
@@ -46,7 +46,7 @@ export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
   // Switching sessions: the detail is still being fetched. Checked before the main branch
   // so a slow hydrate doesn't leave the previous session's transcript on screen under a new
   // header, which reads as the click having done nothing.
-  if (loadingSessionId) {
+  if (loadingChatId) {
     return (
       <main className="chatpane">
         <header className="chat-head">
@@ -102,18 +102,18 @@ export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
   // Prompt, then a single bar: config on the left, live stats on the right.
   const composer = (
     <div className="composer-wrap">
-      {sessionNotice && (
+      {chatNotice && (
         <div className="notice-banner" role="alert">
           <span className="notice-icon" aria-hidden>
             ⚠
           </span>
           <div className="notice-text">
-            <p className="notice-title">{sessionNotice.title}</p>
-            {sessionNotice.fix && <p className="notice-sub">{sessionNotice.fix}</p>}
+            <p className="notice-title">{chatNotice.title}</p>
+            {chatNotice.fix && <p className="notice-sub">{chatNotice.fix}</p>}
           </div>
           <button
             className="notice-x"
-            onClick={dismissSessionNotice}
+            onClick={dismissChatNotice}
             aria-label="Dismiss"
           >
             ×
@@ -173,7 +173,7 @@ export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
           {!isDraft && (
             <button
               className="chat-head-btn chat-reload"
-              onClick={() => void sessionController.reloadSession()}
+              onClick={() => void sessionController.reloadChat()}
               disabled={reloading || turnRunning}
               title={turnRunning ? 'Reload after the turn' : 'Reload session'}
               aria-label="Reload session"
@@ -200,7 +200,7 @@ export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
 
       {activeId && (
         <aside className={`ftree-aside ${showTree ? 'is-open' : ''}`}>
-          {showTree && <FileTree sessionId={activeId} onClose={() => setShowTree(false)} />}
+          {showTree && <FileTree chatId={activeId} onClose={() => setShowTree(false)} />}
           {/* Outside the panel: a tool call can open a preview with the panel closed. */}
           <FilePreview />
         </aside>

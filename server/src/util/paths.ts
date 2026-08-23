@@ -55,7 +55,7 @@ export function isValidSessionId(id: string): boolean {
   return /^[A-Za-z0-9._-]+$/.test(id) && id !== '.' && !id.includes('..');
 }
 
-/** A chat id comes from the client, so it is held to the exact shape it should send. */
+/** A chat id comes from the client and names a directory, so restrict it the same way. */
 export function isValidChatId(id: string | undefined): id is string {
-  return !!id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  return !!id && isValidSessionId(id);
 }

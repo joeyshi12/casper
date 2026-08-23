@@ -20,7 +20,7 @@ import {
 } from '../common/icons.js';
 
 interface FileTreeProps {
-  sessionId: string;
+  chatId: string;
   /** Collapse the panel. Used by the mobile close button, where the header
    *  toggle is covered by the panel overlay. */
   onClose?: () => void;
@@ -98,13 +98,13 @@ function FileTypeIcon({ name }: { name: string }) {
 
 function TreeEntry({
   entry,
-  sessionId,
+  chatId,
   depth,
   onPreview,
   onExpanded,
 }: {
   entry: FileEntry;
-  sessionId: string;
+  chatId: string;
   depth: number;
   onPreview: (entry: FileEntry) => void;
   onExpanded: (path: string, expanded: boolean) => void;
@@ -128,7 +128,7 @@ function TreeEntry({
     if (!changed || !folder.expanded) return;
     let live = true;
     api
-      .tree(sessionId, entry.path)
+      .tree(chatId, entry.path)
       .then((res) => {
         if (live) setFolder((f) => ({ ...f, children: res.entries }));
       })
@@ -151,7 +151,7 @@ function TreeEntry({
     if (folder.children === null) {
       setFolder((f) => ({ ...f, loading: true }));
       try {
-        const res = await api.tree(sessionId, entry.path);
+        const res = await api.tree(chatId, entry.path);
         setFolder({ expanded: true, children: res.entries, loading: false });
       } catch {
         setFolder((f) => ({ ...f, loading: false }));
@@ -159,7 +159,7 @@ function TreeEntry({
     } else {
       setFolder((f) => ({ ...f, expanded: true }));
     }
-  }, [entry, sessionId, folder.expanded, folder.children, folder.loading]);
+  }, [entry, chatId, folder.expanded, folder.children, folder.loading]);
 
   const handleClick = useCallback(() => {
     if (entry.type === 'file') {
@@ -199,7 +199,7 @@ function TreeEntry({
               <TreeEntry
                 key={child.path}
                 entry={child}
-                sessionId={sessionId}
+                chatId={chatId}
                 depth={depth + 1}
                 onPreview={onPreview}
                 onExpanded={onExpanded}
@@ -238,19 +238,19 @@ function TreeEntry({
 }
 
 /** Workspace file tree panel with lazy folder expansion, preview, and download. */
-export function FileTree({ sessionId, onClose }: FileTreeProps) {
+export function FileTree({ chatId, onClose }: FileTreeProps) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [cwd, setCwd] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [changingFolder, setChangingFolder] = useState(false);
-  const sessions = useStore((s) => s.sessions);
+  const sessions = useStore((s) => s.chats);
   const setWatchedPaths = useStore((st) => st.setWatchedPaths);
   const rootChanged = useStore((st) => st.fsVersion[''] ?? 0);
   const expandedRef = useRef<Set<string>>(new Set());
-  const setSessions = useStore((s) => s.setSessions);
+  const setChats = useStore((s) => s.setChats);
   const openFilePreview = useStore((s) => s.openFilePreview);
-  const summaryCwd = sessions.find((s) => s.sessionId === sessionId)?.cwd;
+  const summaryCwd = sessions.find((s) => s.chatId === chatId)?.cwd;
 
   // Watch the root plus every expanded directory: exactly what the tree can show,
   // so the server holds a handful of watches instead of the whole workspace.
@@ -284,7 +284,7 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
       if (!background) setLoading(true);
       setError(null);
       try {
-        const res = await api.tree(sessionId);
+        const res = await api.tree(chatId);
         setEntries(res.entries);
         setCwd(res.cwd);
       } catch (err) {
@@ -293,7 +293,7 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
         if (!background) setLoading(false);
       }
     },
-    [sessionId],
+    [chatId],
   );
 
   useEffect(() => {
@@ -354,7 +354,7 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
             <TreeEntry
               key={entry.path}
               entry={entry}
-              sessionId={sessionId}
+              chatId={chatId}
               depth={0}
               onPreview={(entry) => openFilePreview(entry.path)}
               onExpanded={onExpanded}
@@ -364,14 +364,14 @@ export function FileTree({ sessionId, onClose }: FileTreeProps) {
 
       {changingFolder && (
         <ChangeFolderSheet
-          sessionId={sessionId}
+          chatId={chatId}
           // The tree request fails when the folder is gone, so fall back to the
           // cwd from the session list to prefill the input.
           currentCwd={cwd || summaryCwd}
           onChanged={(next) => {
-            setSessions(
+            setChats(
               sessions.map((s) =>
-                s.sessionId === sessionId ? { ...s, cwd: next } : s,
+                s.chatId === chatId ? { ...s, cwd: next } : s,
               ),
             );
             refresh();

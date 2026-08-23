@@ -37,7 +37,7 @@ export interface ViewportFlags {
 
 /** What the transcript looks like right now, as the viewport needs to see it. */
 export interface ViewportContent {
-  sessionId: string | null;
+  chatId: string | null;
   itemCount: number;
   pendingCount: number;
   /** Older items not yet loaded, before the loaded window. */
@@ -48,7 +48,7 @@ export interface ViewportPorts {
   /** The container, or null while it is unmounted. */
   element: () => ViewportElement | null;
   /** Older transcript items, oldest first. */
-  fetchPage: (sessionId: string, offset: number, limit: number) => Promise<TranscriptItem[]>;
+  fetchPage: (chatId: string, offset: number, limit: number) => Promise<TranscriptItem[]>;
   /** Hand an older page to the store, which prepends it. */
   prepend: (items: TranscriptItem[]) => void;
   /** Flags changed, so the component can render them. Only called on a change. */
@@ -109,7 +109,7 @@ export class TranscriptViewport {
   private prevPendingCount = 0;
   private raf = 0;
   private content: ViewportContent = {
-    sessionId: null,
+    chatId: null,
     itemCount: 0,
     pendingCount: 0,
     remainingOlder: 0,
@@ -147,8 +147,8 @@ export class TranscriptViewport {
     const el = this.ports.element();
     if (!el) return;
 
-    if (this.initializedFor !== content.sessionId && content.itemCount > 0) {
-      this.initializedFor = content.sessionId;
+    if (this.initializedFor !== content.chatId && content.itemCount > 0) {
+      this.initializedFor = content.chatId;
       this.follow = false;
       el.scrollTop = this.bottomOf(el);
       this.lastScrollTop = el.scrollTop;
@@ -202,20 +202,20 @@ export class TranscriptViewport {
 
   private loadOlder(): void {
     const el = this.ports.element();
-    const sessionId = this.content.sessionId;
-    if (!el || !sessionId || this.loadingOlder || this.content.remainingOlder <= 0) return;
+    const chatId = this.content.chatId;
+    if (!el || !chatId || this.loadingOlder || this.content.remainingOlder <= 0) return;
 
     this.setFlags({ loadingOlder: true });
     const { offset, limit } = olderPageRequest(this.content.remainingOlder, PAGE_SIZE);
     this.anchor = el.scrollHeight - el.scrollTop;
 
     this.ports
-      .fetchPage(sessionId, offset, limit)
+      .fetchPage(chatId, offset, limit)
       .then((items) => {
         // Switched sessions while the page was in flight: these items belong to a
         // transcript that is no longer on screen. Judged against the session this
         // viewport is showing, not against whatever the store now holds.
-        if (this.content.sessionId !== sessionId) return this.abandonPage();
+        if (this.content.chatId !== chatId) return this.abandonPage();
         if (items.length === 0) return this.abandonPage();
         this.ports.prepend(items); // anchor restored in restoreAnchor()
       })

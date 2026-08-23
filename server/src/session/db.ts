@@ -18,13 +18,11 @@ import { config } from '../config.js';
  * reconstructed from kiro's file, where position is all there is.
  */
 const SCHEMA = `
-CREATE TABLE IF NOT EXISTS sessions (
-  session_id TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS chats (
+  chat_id    TEXT PRIMARY KEY,
+  session_id TEXT UNIQUE,
   title      TEXT,
-  cwd        TEXT,
-  -- The chat that owns this session's uploads (see chats.ts). NULL for a session Casper did
-  -- not create; getChatId names those after the session.
-  chat_id    TEXT
+  cwd        TEXT
 );
 CREATE TABLE IF NOT EXISTS logins (
   id           TEXT PRIMARY KEY,
@@ -35,13 +33,13 @@ CREATE TABLE IF NOT EXISTS logins (
 );
 CREATE INDEX IF NOT EXISTS logins_hash ON logins (hash);
 CREATE TABLE IF NOT EXISTS message_attachments (
-  session_id TEXT    NOT NULL,
-  ordinal    INTEGER NOT NULL,
-  path       TEXT    NOT NULL,
-  name       TEXT    NOT NULL,
-  size       INTEGER NOT NULL,
-  kind       TEXT    NOT NULL,
-  PRIMARY KEY (session_id, ordinal, path)
+  chat_id  TEXT    NOT NULL,
+  ordinal  INTEGER NOT NULL,
+  path     TEXT    NOT NULL,
+  name     TEXT    NOT NULL,
+  size     INTEGER NOT NULL,
+  kind     TEXT    NOT NULL,
+  PRIMARY KEY (chat_id, ordinal, path)
 );
 `;
 

@@ -10,7 +10,7 @@ import { registerAuth } from './routes/auth.js';
 import { registerModelRoutes } from './routes/models.js';
 import { registerAgentRoutes } from './routes/agents.js';
 import { registerFsRoutes } from './routes/fs.js';
-import { registerSessionRoutes } from './routes/sessions.js';
+import { registerChatRoutes } from './routes/chats.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { registerUploadRoutes } from './routes/uploads.js';
 import { registerHealthRoute } from './routes/health.js';
@@ -52,7 +52,7 @@ export async function buildApp(): Promise<CasperApp> {
   registerModelRoutes(app);
   registerAgentRoutes(app);
   registerFsRoutes(app);
-  registerSessionRoutes(app, manager);
+  registerChatRoutes(app, manager);
   registerWorkspaceRoutes(app, manager);
   registerUploadRoutes(app);
   registerWsGateway(app, manager);

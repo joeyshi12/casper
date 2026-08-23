@@ -3,7 +3,7 @@ import { api } from '../../api/rest.js';
 import { DirectoryPicker } from './DirectoryPicker.js';
 
 interface Props {
-  sessionId: string;
+  chatId: string;
   /** Current working directory, where browsing starts. */
   currentCwd?: string;
   /** Called with the resolved path after a successful change. */
@@ -16,7 +16,7 @@ interface Props {
  * folder a session was created in has been moved or deleted, which otherwise
  * leaves its file tree and prompts broken.
  */
-export function ChangeFolderSheet({ sessionId, currentCwd, onChanged, onClose }: Props) {
+export function ChangeFolderSheet({ chatId, currentCwd, onChanged, onClose }: Props) {
   const [cwd, setCwd] = useState(currentCwd ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +41,7 @@ export function ChangeFolderSheet({ sessionId, currentCwd, onChanged, onClose }:
     setSaving(true);
     setError(null);
     try {
-      const res = await api.setSessionCwd(sessionId, target);
+      const res = await api.setChatCwd(chatId, target);
       onChanged(res.cwd);
       onClose();
     } catch (err) {

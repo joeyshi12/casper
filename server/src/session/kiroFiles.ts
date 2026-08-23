@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
-  SessionSummary,
   TranscriptItem,
   TranscriptMessage,
   TranscriptToolCall,
@@ -9,7 +8,6 @@ import type {
 import { stripAttachmentsLine } from '@casper/shared';
 import type { MessageAttachment } from '@casper/shared';
 import { config } from '../config.js';
-import type { Logger } from '../util/logger.js';
 import { isValidSessionId } from '../util/paths.js';
 
 /**
@@ -125,7 +123,19 @@ function renderableBlocks(content: unknown): KiroContentBlock[] {
   return contentBlocks(content).filter((b) => b.kind !== 'image');
 }
 
-function summarize(j: KiroSessionJson): SessionSummary {
+/** What kiro's own session file knows. A chat's identity and overrides live in casper.db. */
+export interface PersistedSession {
+  sessionId: string;
+  title: string;
+  cwd: string;
+  createdAt: string;
+  updatedAt: string;
+  agentId?: string;
+  modelId?: string;
+  contextUsagePercentage?: number;
+}
+
+function summarize(j: KiroSessionJson): PersistedSession {
   const state = j.session_state;
   const turns = state?.conversation_metadata?.user_turn_metadatas ?? [];
   const contextUsagePercentage =
@@ -134,45 +144,18 @@ function summarize(j: KiroSessionJson): SessionSummary {
 
   return {
     sessionId: j.session_id,
-    // kiro's file knows nothing about chats; summaryOf replaces this with the recorded id
-    // when there is one, and this matches what getChatId names a session without a row.
-    chatId: j.session_id,
     // Left empty when kiro has not named it; resolveSessionTitle decides what to show.
     title: j.title?.trim() ?? '',
     cwd: j.cwd,
     createdAt: j.created_at,
     updatedAt: j.updated_at,
-    liveness: 'dormant',
     agentId: state?.agent_name,
     modelId: state?.rts_model_state?.model_info?.model_id,
-    running: false,
     contextUsagePercentage,
   };
 }
 
 /** List all persisted sessions (as DORMANT summaries), newest first. */
-export async function listPersistedSessions(log: Logger): Promise<SessionSummary[]> {
-  let files: string[];
-  try {
-    files = await fs.readdir(config.kiroSessionsDir);
-  } catch {
-    return [];
-  }
-  const jsonFiles = files.filter((f) => f.endsWith('.json'));
-  const summaries: SessionSummary[] = [];
-  await Promise.all(
-    jsonFiles.map(async (f) => {
-      try {
-        const raw = await fs.readFile(path.join(config.kiroSessionsDir, f), 'utf8');
-        summaries.push(summarize(JSON.parse(raw) as KiroSessionJson));
-      } catch (err) {
-        log.debug({ err, f }, 'kiroFiles: skipping unreadable session file');
-      }
-    }),
-  );
-  summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  return summaries;
-}
 
 // Delete a session's on-disk files: kiro's <id>.{json,jsonl,history,lock} and its
 // per-session <id>/ directory (tasks, etc.). Missing paths are ignored. The .lock is kiro's
@@ -192,7 +175,7 @@ export async function deletePersistedSession(sessionId: string): Promise<void> {
 /** Read one session's metadata summary, or null if it doesn't exist. */
 export async function readPersistedSession(
   sessionId: string,
-): Promise<SessionSummary | null> {
+): Promise<PersistedSession | null> {
   if (!isValidSessionId(sessionId)) return null;
   try {
     const raw = await fs.readFile(

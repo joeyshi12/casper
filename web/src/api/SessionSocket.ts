@@ -49,7 +49,7 @@ export class SessionSocket {
   private watchdog: number | null = null;
 
   constructor(
-    private readonly sessionId: string,
+    private readonly chatId: string,
     private readonly handlers: SessionSocketHandlers,
     startCursor = 0,
   ) {
@@ -127,7 +127,7 @@ export class SessionSocket {
     // WS upgrade request automatically.
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const url =
-      `${proto}://${location.host}/ws?sessionId=${encodeURIComponent(this.sessionId)}` +
+      `${proto}://${location.host}/ws?chatId=${encodeURIComponent(this.chatId)}` +
       `&cursor=${this.cursor}`;
 
     const ws = new WebSocket(url);

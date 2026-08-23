@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { SessionSummary } from '@casper/shared';
+import type { ChatSummary } from '@casper/shared';
 import { fuzzyScore } from '../../util/fuzzy.js';
 import { SearchIcon } from '../common/icons.js';
 
 interface Props {
-  sessions: SessionSummary[];
+  sessions: ChatSummary[];
   onOpen: (id: string) => void;
   onClose: () => void;
 }
@@ -54,7 +54,7 @@ export function SearchModal({ sessions, onOpen, onClose }: Props) {
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const hit = results[active];
-      if (hit) choose(hit.sessionId);
+      if (hit) choose(hit.chatId);
     }
   };
 
@@ -89,10 +89,10 @@ export function SearchModal({ sessions, onOpen, onClose }: Props) {
           ) : (
             results.map((s, i) => (
               <button
-                key={s.sessionId}
+                key={s.chatId}
                 className={`search-result ${i === active ? 'is-active' : ''}`}
                 onMouseEnter={() => setActive(i)}
-                onClick={() => choose(s.sessionId)}
+                onClick={() => choose(s.chatId)}
               >
                 <span className="search-result-title">{s.title}</span>
                 <span className="search-result-agent">{s.agentId ?? 'kiro_default'}</span>

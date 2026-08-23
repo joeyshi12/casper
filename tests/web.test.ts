@@ -8,8 +8,8 @@ import type {
   CasperEvent,
   CasperEventPayload,
   DirListing,
-  SessionDetail,
-  SessionSummary,
+  ChatDetail,
+  ChatSummary,
 } from '@casper/shared';
 import { emptyObservabilitySnapshot } from '@casper/shared';
 import { useStore } from '../web/src/state/store.js';
@@ -22,9 +22,9 @@ import type { SessionSocketHandlers } from '../web/src/api/SessionSocket.js';
 import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
 import { lineDiff } from '../web/src/util/diff.js';
 import { matchPath } from 'react-router';
-import { SESSION_ROUTE, pathForSession } from '../web/src/util/route.js';
+import { CHAT_ROUTE, DRAFT_PATH, pathForChat } from '../web/src/util/route.js';
 import { choiceCallOf, choiceOutcome } from '../web/src/util/choiceCall.js';
-import { upsertSession } from '../web/src/state/sessions.js';
+import { upsertChat } from '../web/src/state/chats.js';
 import { composerPlaceholder } from '../web/src/util/composerPlaceholder.js';
 import { splitWords, rehypeFadeWords } from '../web/src/util/rehypeFadeWords.js';
 import { widgetCallOf } from '../web/src/util/widgetCall.js';
@@ -269,7 +269,7 @@ describe('line diff (LCS): context kept, only changed lines marked', () => {
 describe('store.applyEvent (duplicate event suppression)', () => {
   const userTurn = (seq: number, text: string): CasperEvent => ({
     seq,
-    sessionId: 's1',
+    chatId: 's1',
     ts: new Date('2026-07-29T12:00:00Z').toISOString(),
     payload: {
       kind: 'turn_started',
@@ -279,7 +279,7 @@ describe('store.applyEvent (duplicate event suppression)', () => {
 
   const toolCall = (seq: number, id: string): CasperEvent => ({
     seq,
-    sessionId: 's1',
+    chatId: 's1',
     ts: new Date('2026-07-29T12:00:01Z').toISOString(),
     payload: {
       kind: 'session_update',
@@ -331,13 +331,13 @@ describe('store.applyEvent (duplicate event suppression)', () => {
 
   it('loadDetail seeds the high-water mark so replayed events are dropped', () => {
     useStore.getState().loadDetail({
-      summary: { sessionId: 's1', title: 't', updatedAt: '', modelId: 'auto' },
+      summary: { chatId: 's1', title: 't', updatedAt: '', modelId: 'auto' },
       transcript: [],
       transcriptTotal: 0,
       head: 5,
       modes: [],
       observability: emptyObservabilitySnapshot(),
-    } as unknown as SessionDetail);
+    } as unknown as ChatDetail);
 
     // Everything up to head is already in the fetched transcript.
     useStore.getState().applyEvent(userTurn(3, 'already in the transcript'));
@@ -402,16 +402,23 @@ describe('classifyTurnFailure', () => {
   });
 });
 
-describe('session deep links', () => {
+describe('chat deep links', () => {
   // The builder and the route pattern have to agree, or a link navigates to a
   // URL the app doesn't match and quietly lands on the session list.
   it('builds paths the route pattern matches', () => {
     const id = 'c959cc04-2a80-494b-bef8-9e7315ff4abd';
-    assert.equal(matchPath(SESSION_ROUTE, pathForSession(id))?.params.sessionId, id);
+    assert.equal(matchPath(CHAT_ROUTE, pathForChat(id))?.params.chatId, id);
   });
 
   it('does not match the list route', () => {
-    assert.equal(matchPath(SESSION_ROUTE, '/'), null);
+    assert.equal(matchPath(CHAT_ROUTE, '/'), null);
+  });
+
+  // A draft has its own path, so no chat id has to avoid being called "new".
+  it('keeps the draft path clear of the chat pattern', () => {
+    assert.equal(DRAFT_PATH, '/new');
+    assert.equal(matchPath(CHAT_ROUTE, DRAFT_PATH), null);
+    assert.equal(matchPath(CHAT_ROUTE, pathForChat('new'))?.params.chatId, 'new');
   });
 });
 
@@ -496,7 +503,7 @@ describe('transcript viewport', () => {
     over: { pages?: TranscriptItem[][]; reducedMotion?: boolean } = {},
   ) => {
     const frames = manualFrames();
-    const requests: Array<{ sessionId: string; offset: number; limit: number }> = [];
+    const requests: Array<{ chatId: string; offset: number; limit: number }> = [];
     const prepended: TranscriptItem[][] = [];
     let resolvePage: ((items: TranscriptItem[]) => void) | undefined;
     let flags: ViewportFlags = { loadingOlder: false, showScrollButton: false };
@@ -504,8 +511,8 @@ describe('transcript viewport', () => {
 
     const viewport = new TranscriptViewport({
       element: () => el,
-      fetchPage: (sessionId, offset, limit) => {
-        requests.push({ sessionId, offset, limit });
+      fetchPage: (chatId, offset, limit) => {
+        requests.push({ chatId, offset, limit });
         const canned = over.pages?.[round++];
         if (canned) return Promise.resolve(canned);
         return new Promise<TranscriptItem[]>((r) => (resolvePage = r));
@@ -529,7 +536,7 @@ describe('transcript viewport', () => {
   };
 
   const content = (over: Partial<ViewportContent> = {}): ViewportContent => ({
-    sessionId: 's1',
+    chatId: 's1',
     itemCount: 10,
     pendingCount: 0,
     remainingOlder: 0,
@@ -677,7 +684,7 @@ describe('transcript viewport', () => {
       el.scrollTop = 100; // near the top
       h.viewport.onScroll();
       assert.equal(h.flags().loadingOlder, true);
-      assert.deepEqual(h.requests, [{ sessionId: 's1', offset: 120, limit: 80 }]);
+      assert.deepEqual(h.requests, [{ chatId: 's1', offset: 120, limit: 80 }]);
 
       return Promise.resolve().then(() => {
         assert.equal(h.prepended.length, 1, 'the page reached the store');
@@ -734,12 +741,12 @@ describe('transcript viewport', () => {
     it('discards a page that arrives after the session changed', async () => {
       const el = fakeElement(2000, 600, 100);
       const h = build(el);
-      h.viewport.onContent(content({ sessionId: 's1', remainingOlder: 200 }));
+      h.viewport.onContent(content({ chatId: 's1', remainingOlder: 200 }));
       el.scrollTop = 100;
       h.viewport.onScroll();
-      assert.deepEqual(h.requests, [{ sessionId: 's1', offset: 120, limit: 80 }]);
+      assert.deepEqual(h.requests, [{ chatId: 's1', offset: 120, limit: 80 }]);
 
-      h.viewport.onContent(content({ sessionId: 's2', remainingOlder: 0 }));
+      h.viewport.onContent(content({ chatId: 's2', remainingOlder: 0 }));
       h.resolvePage(page(80));
       await Promise.resolve();
 
@@ -778,7 +785,7 @@ describe('transcript viewport', () => {
     assert.equal(h.flags().loadingOlder, false);
     assert.equal(h.flags().showScrollButton, false);
     assert.equal(
-      isFollowing(h, content({ sessionId: 's2', itemCount: 0 })),
+      isFollowing(h, content({ chatId: 's2', itemCount: 0 })),
       false,
       'switching sessions must not inherit follow',
     );
@@ -1067,7 +1074,7 @@ describe('currency versus inline math', () => {
 describe('session list', () => {
   const row = (id: string, title: string, updatedAt: string) =>
     ({
-      sessionId: id,
+      chatId: id,
       title,
       cwd: '/tmp',
       createdAt: updatedAt,
@@ -1079,7 +1086,7 @@ describe('session list', () => {
   it('folds a session\'s own summary into the list, newest first', () => {
     // A session the list has not caught up with is added, not dropped: this is what stops a
     // just-created session showing a placeholder title until the next list fetch.
-    const added = upsertSession(
+    const added = upsertChat(
       [row('a', 'Alpha', '2026-01-01T00:00:00Z')],
       row('b', 'test', '2026-01-02T00:00:00Z'),
     );
@@ -1089,7 +1096,7 @@ describe('session list', () => {
     );
 
     // An existing row is replaced rather than duplicated.
-    const replaced = upsertSession(added, row('b', 'renamed', '2026-01-02T00:00:00Z'));
+    const replaced = upsertChat(added, row('b', 'renamed', '2026-01-02T00:00:00Z'));
     assert.equal(replaced.length, 2);
     assert.deepEqual(
       replaced.map((s) => s.title),
@@ -1101,9 +1108,9 @@ describe('session list', () => {
     // The list and a session's own detail learn about activity by different routes, so
     // opening a session used to replace a fresh timestamp with an older one.
     const listed = [row('b', 'test', '2026-01-02T09:00:00Z')];
-    const stale = upsertSession(listed, row('b', 'test', '2026-01-02T08:00:00Z'));
+    const stale = upsertChat(listed, row('b', 'test', '2026-01-02T08:00:00Z'));
     assert.equal(stale[0]!.updatedAt, '2026-01-02T09:00:00Z');
-    const fresher = upsertSession(listed, row('b', 'test', '2026-01-02T10:00:00Z'));
+    const fresher = upsertChat(listed, row('b', 'test', '2026-01-02T10:00:00Z'));
     assert.equal(fresher[0]!.updatedAt, '2026-01-02T10:00:00Z');
   });
 });
@@ -1204,16 +1211,16 @@ describe('choice outcome', () => {
 // None of this was reachable before the lifecycle moved out of Shell: it lived in
 // a component the test runner cannot import, behind refs nothing could observe.
 describe('session controller', () => {
-  const detailFor = (id: string, head = 0): SessionDetail =>
+  const detailFor = (id: string, head = 0): ChatDetail =>
     ({
-      summary: { sessionId: id, title: `title-${id}`, updatedAt: '', modelId: 'auto' },
+      summary: { chatId: id, title: `title-${id}`, updatedAt: '', modelId: 'auto' },
       transcript: [],
       transcriptTotal: 0,
       head,
       modes: [],
       currentModeId: 'casper',
       observability: emptyObservabilitySnapshot(),
-    }) as unknown as SessionDetail;
+    }) as unknown as ChatDetail;
 
   /** Records what the controller did to its socket, and lets a test answer back. */
   const socketDouble = () => {
@@ -1257,26 +1264,26 @@ describe('session controller', () => {
   const apiDouble = (over: Partial<SessionApi> = {}) => {
     const calls: string[] = [];
     const base: SessionApi = {
-      listSessions: async () => {
-        calls.push('listSessions');
-        return { sessions: [] } as unknown as Awaited<ReturnType<SessionApi['listSessions']>>;
+      listChats: async () => {
+        calls.push('listChats');
+        return { chats: [] } as unknown as Awaited<ReturnType<SessionApi['listChats']>>;
       },
-      getSession: async (id) => {
-        calls.push(`getSession:${id}`);
+      getChat: async (id) => {
+        calls.push(`getChat:${id}`);
         return detailFor(id);
       },
-      createSession: async () => {
-        calls.push('createSession');
+      createChat: async () => {
+        calls.push('createChat');
         return detailFor('created-1');
       },
-      deleteSession: async (id) => {
-        calls.push(`deleteSession:${id}`);
+      deleteChat: async (id) => {
+        calls.push(`deleteChat:${id}`);
       },
-      renameSession: async (id, title) => {
-        calls.push(`renameSession:${id}:${title}`);
+      renameChat: async (id, title) => {
+        calls.push(`renameChat:${id}:${title}`);
       },
-      reloadSession: async (id) => {
-        calls.push(`reloadSession:${id}`);
+      reloadChat: async (id) => {
+        calls.push(`reloadChat:${id}`);
         return detailFor(id);
       },
       models: async () => {
@@ -1339,21 +1346,22 @@ describe('session controller', () => {
 
   beforeEach(() => {
     useStore.getState().clearActive();
-    useStore.setState({ sessions: [], connStatus: 'closed', createError: null });
+    useStore.setState({
+      chats: [], connStatus: 'closed', createError: null });
   });
 
   it('opens a session: fetches it, seeds the store, connects at its head', async () => {
     const { controller, socket } = build();
-    await controller.openSession('s1');
+    await controller.openChat('s1');
 
     assert.equal(useStore.getState().activeId, 's1');
-    assert.equal(useStore.getState().loadingSessionId, null);
+    assert.equal(useStore.getState().loadingChatId, null);
     assert.deepEqual(socket.calls, ['create:s1@0', 'connect']);
   });
 
   it('uses the detail it already has, with no fetch and no loading flash', async () => {
     const { controller, socket, rest } = build();
-    await controller.openSession('s9', detailFor('s9', 4));
+    await controller.openChat('s9', detailFor('s9', 4));
 
     assert.deepEqual(rest.calls, [], 'an adopted detail must not be refetched');
     assert.deepEqual(socket.calls, ['create:s9@4', 'connect']);
@@ -1362,18 +1370,18 @@ describe('session controller', () => {
   // The bug this guards: switching away mid-fetch used to let the abandoned
   // session's detail land and overwrite the one the user moved to.
   it('drops a detail that arrives after the user moved on', async () => {
-    let releaseFirst: ((d: SessionDetail) => void) | undefined;
+    let releaseFirst: ((d: ChatDetail) => void) | undefined;
     const { controller } = build({
       api: {
-        getSession: async (id) =>
+        getChat: async (id) =>
           id === 'slow'
-            ? new Promise<SessionDetail>((r) => (releaseFirst = r))
+            ? new Promise<ChatDetail>((r) => (releaseFirst = r))
             : detailFor(id),
       },
     });
 
-    const first = controller.openSession('slow');
-    await controller.openSession('quick');
+    const first = controller.openChat('slow');
+    await controller.openChat('quick');
     releaseFirst?.(detailFor('slow'));
     await first;
 
@@ -1383,26 +1391,26 @@ describe('session controller', () => {
   it('a session that will not open sends the user home rather than stranding them', async () => {
     const { controller, nav } = build({
       api: {
-        getSession: async () => {
+        getChat: async () => {
           throw new Error('gone');
         },
       },
     });
-    await controller.openSession('missing');
+    await controller.openChat('missing');
 
     assert.equal(useStore.getState().connStatus, 'closed');
-    assert.equal(useStore.getState().loadingSessionId, null);
+    assert.equal(useStore.getState().loadingChatId, null);
     assert.deepEqual(nav.to, ['/ (replace)']);
   });
 
   it('creating a session claims its route, so syncRoute leaves it alone', async () => {
     const { controller, nav, rest, socket } = build();
-    assert.equal(await controller.createSession({}), true);
+    assert.equal(await controller.createChat({}), true);
     await settle();
 
-    assert.deepEqual(nav.to, ['/sessions/created-1']);
+    assert.deepEqual(nav.to, ['/chats/created-1']);
     assert.equal(useStore.getState().activeId, 'created-1');
-    const fetches = rest.calls.filter((c) => c.startsWith('getSession'));
+    const fetches = rest.calls.filter((c) => c.startsWith('getChat'));
     assert.deepEqual(fetches, [], 'the created detail is adopted, not refetched');
 
     // The route arriving must not reopen what is already open.
@@ -1457,7 +1465,7 @@ describe('session controller', () => {
   it('a create that fails explains itself on the bubble and the pane', async () => {
     const { controller } = build({
       api: {
-        createSession: async () => {
+        createChat: async () => {
           throw new Error('working directory is a file');
         },
       },
@@ -1474,7 +1482,7 @@ describe('session controller', () => {
 
   it('a send that never left the browser says so on the bubble', async () => {
     const { controller, socket } = build();
-    await controller.openSession('s1');
+    await controller.openChat('s1');
     socket.refuseDelivery();
 
     controller.send([{ type: 'text', text: 'into the void' }]);
@@ -1485,7 +1493,7 @@ describe('session controller', () => {
 
   it("a rejected prompt carries the server's reason to the bubble", async () => {
     const { controller, socket } = build();
-    await controller.openSession('s1');
+    await controller.openChat('s1');
     controller.send([{ type: 'text', text: 'go' }]);
 
     socket.handlers().onAck?.('prompt', false, 'A turn is already running for this session');
@@ -1496,7 +1504,7 @@ describe('session controller', () => {
 
   it('retrying a failed send puts the same bubble back to sending', async () => {
     const { controller, socket } = build();
-    await controller.openSession('s1');
+    await controller.openChat('s1');
     socket.refuseDelivery();
     controller.send([{ type: 'text', text: 'retry me' }]);
     const id = useStore.getState().pending[0]!.id;
@@ -1512,7 +1520,7 @@ describe('session controller', () => {
   // line and any image blocks - so a retried message arrived without its files.
   it('a retried send keeps the files and blocks it was sent with', async () => {
     const { controller, socket } = build();
-    await controller.openSession('s1');
+    await controller.openChat('s1');
     socket.refuseDelivery();
 
     const zip = { path: '/up/a.zip', name: 'a.zip', size: 8446, kind: 'binary' as const };
@@ -1536,7 +1544,7 @@ describe('session controller', () => {
     let sentChatId: string | undefined;
     const { controller } = build({
       api: {
-        createSession: async (req) => {
+        createChat: async (req) => {
           sentChatId = req.chatId;
           return detailFor('created-1');
         },
@@ -1555,7 +1563,7 @@ describe('session controller', () => {
 
   it('a new draft after an open session does not reuse its chat', async () => {
     const { controller } = build();
-    await controller.openSession('s1');
+    await controller.openChat('s1');
     const openChatId = useStore.getState().chatId;
 
     controller.startDraft();
@@ -1565,7 +1573,7 @@ describe('session controller', () => {
 
   it('an expired cookie tears the session down and shows the gate', async () => {
     const { controller, socket, nav } = build();
-    await controller.openSession('s1');
+    await controller.openChat('s1');
     socket.handlers().onUnauthorized?.();
 
     assert.equal(useStore.getState().activeId, null);
@@ -1574,8 +1582,8 @@ describe('session controller', () => {
   });
 
   it('a resync refetches the transcript and moves the cursor with it', async () => {
-    const { controller, socket } = build({ api: { getSession: async (id) => detailFor(id, 12) } });
-    await controller.openSession('s1');
+    const { controller, socket } = build({ api: { getChat: async (id) => detailFor(id, 12) } });
+    await controller.openChat('s1');
     await socket.handlers().onResync();
 
     assert.ok(socket.calls.includes('reset:12'));
@@ -1587,7 +1595,7 @@ describe('session controller', () => {
   // second parameter silently discarded it and still compiled.
   it('carries attachment metadata to the socket, not just the prompt text', async () => {
     const { controller, socket } = build();
-    await controller.openSession('s1');
+    await controller.openChat('s1');
     const zip = { path: '/up/a.zip', name: 'a.zip', size: 8446, kind: 'binary' as const };
     controller.send([{ type: 'text', text: 'have a look' }], [zip]);
 
@@ -1599,14 +1607,14 @@ describe('session controller', () => {
     const reloaded: string[] = [];
     const { controller, socket, rest } = build({
       api: {
-        reloadSession: async (id) => {
+        reloadChat: async (id) => {
           reloaded.push(id);
           return detailFor(id, 9);
         },
       },
     });
-    await controller.openSession('s1');
-    await controller.reloadSession();
+    await controller.openChat('s1');
+    await controller.reloadChat();
 
     assert.deepEqual(reloaded, ['s1']);
     assert.ok(socket.calls.includes('reset:9'));
@@ -1619,18 +1627,18 @@ describe('session controller', () => {
   it('a failed reload clears the flag rather than leaving the button spinning', async () => {
     const { controller } = build({
       api: {
-        reloadSession: async () => {
+        reloadChat: async () => {
           throw new Error('kiro has not saved this session yet.');
         },
       },
     });
-    await controller.openSession('s1');
-    await controller.reloadSession();
+    await controller.openChat('s1');
+    await controller.reloadChat();
 
     assert.equal(useStore.getState().reloadingId, null);
     // The reasons a reload is refused are all actionable, so they must be visible.
     assert.equal(
-      useStore.getState().sessionNotice?.fix,
+      useStore.getState().chatNotice?.fix,
       'kiro has not saved this session yet.',
     );
   });
@@ -1638,17 +1646,17 @@ describe('session controller', () => {
   // A reload belongs to one session. Held as a global flag it disabled the control on every
   // other session, and a refusal that landed after switching blamed the wrong session.
   it('leaves another session\'s reload control alone while one is restarting', async () => {
-    let release!: (d: SessionDetail) => void;
+    let release!: (d: ChatDetail) => void;
     const { controller } = build({
-      api: { reloadSession: () => new Promise<SessionDetail>((r) => { release = r; }) },
+      api: { reloadChat: () => new Promise<ChatDetail>((r) => { release = r; }) },
     });
-    await controller.openSession('s1');
-    void controller.reloadSession();
+    await controller.openChat('s1');
+    void controller.reloadChat();
     await settle();
 
     assert.equal(useStore.getState().reloadingId, 's1', 'the reload is attributed to s1');
 
-    await controller.openSession('s2');
+    await controller.openChat('s2');
     const st = useStore.getState();
     assert.notEqual(st.reloadingId, st.activeId, 's2 is not the one reloading');
 
@@ -1659,18 +1667,18 @@ describe('session controller', () => {
   it('does not blame the session you switched to when a reload is refused', async () => {
     let reject!: (e: Error) => void;
     const { controller } = build({
-      api: { reloadSession: () => new Promise<SessionDetail>((_, rj) => { reject = rj; }) },
+      api: { reloadChat: () => new Promise<ChatDetail>((_, rj) => { reject = rj; }) },
     });
-    await controller.openSession('s1');
-    void controller.reloadSession();
+    await controller.openChat('s1');
+    void controller.reloadChat();
     await settle();
 
-    await controller.openSession('s2');
+    await controller.openChat('s2');
     reject(new Error('kiro has not saved this session yet.'));
     await settle();
 
     assert.equal(
-      useStore.getState().sessionNotice,
+      useStore.getState().chatNotice,
       null,
       "s1's refusal must not pin itself above s2's composer",
     );
@@ -1678,14 +1686,14 @@ describe('session controller', () => {
 
   it('a reload with nothing open is a no-op', async () => {
     const { controller, rest } = build();
-    await controller.reloadSession();
+    await controller.reloadChat();
 
-    assert.deepEqual(rest.calls.filter((c) => c.startsWith('reloadSession')), []);
+    assert.deepEqual(rest.calls.filter((c) => c.startsWith('reloadChat')), []);
   });
 
   it('leaving the route closes the socket and clears the session', async () => {
     const { controller, socket } = build();
-    await controller.openSession('s1');
+    await controller.openChat('s1');
     controller.syncRoute(null, false);
 
     assert.equal(useStore.getState().activeId, null);
@@ -1694,31 +1702,31 @@ describe('session controller', () => {
 
   it('deleting the open session goes home; deleting another only refreshes', async () => {
     const { controller, nav, rest } = build();
-    await controller.openSession('s1');
+    await controller.openChat('s1');
 
-    await controller.deleteSession('s1');
+    await controller.deleteChat('s1');
     assert.deepEqual(nav.to, ['/']);
 
     nav.to.length = 0;
-    await controller.deleteSession('other');
+    await controller.deleteChat('other');
     assert.deepEqual(nav.to, [], 'deleting a different session must not navigate');
-    assert.ok(rest.calls.includes('deleteSession:other'));
+    assert.ok(rest.calls.includes('deleteChat:other'));
   });
 
   it('a rename shows immediately and is persisted after', async () => {
     useStore.setState({
-      sessions: [{ sessionId: 's1', title: 'old' } as unknown as SessionSummary],
+      chats: [{ chatId: 's1', title: 'old' } as unknown as ChatSummary],
     });
     const { controller, rest } = build();
-    await controller.renameSession('s1', 'new name');
+    await controller.renameChat('s1', 'new name');
 
-    assert.equal(useStore.getState().sessions[0]?.title, 'new name');
-    assert.ok(rest.calls.includes('renameSession:s1:new name'));
+    assert.equal(useStore.getState().chats[0]?.title, 'new name');
+    assert.ok(rest.calls.includes('renameChat:s1:new name'));
   });
 
   it('control actions reach the socket and show optimistically', async () => {
     const { controller, socket } = build();
-    await controller.openSession('s1');
+    await controller.openChat('s1');
     useStore.setState({
       observability: { ...useStore.getState().observability, turnStatus: 'running' },
     });
@@ -1750,19 +1758,19 @@ describe('session controller', () => {
 
   it('a turn ending reconciles the list once kiro has persisted it', async () => {
     const { controller, socket, rest } = build();
-    await controller.openSession('s1');
+    await controller.openChat('s1');
     rest.calls.length = 0;
 
     socket.handlers().onEvent({
       seq: 1,
-      sessionId: 's1',
+      chatId: 's1',
       ts: new Date().toISOString(),
       payload: { kind: 'turn_ended', stopReason: 'end_turn' },
     } as unknown as CasperEvent);
 
     assert.deepEqual(rest.calls, [], 'not immediately: kiro has not written the file yet');
     await waitFor('the delayed list refresh', () => rest.calls.length > 0);
-    assert.deepEqual(rest.calls, ['listSessions']);
+    assert.deepEqual(rest.calls, ['listChats']);
   });
 
   it('the pickers load through the same port the tests substitute', async () => {
@@ -1785,7 +1793,7 @@ describe('session controller', () => {
     assert.equal(controller.canSend, true, 'a draft accepts a message');
 
     controller.syncRoute(null, false);
-    await controller.openSession('s1');
+    await controller.openChat('s1');
     assert.equal(controller.canSend, true, 'and so does an open session');
   });
 });

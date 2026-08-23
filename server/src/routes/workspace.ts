@@ -8,9 +8,9 @@ import { config } from '../config.js';
 import {
   classifyDirent,
   replyWith,
-  resolveSessionPath,
+  resolveChatPath,
   workspaceNotFound,
-  type SessionCwdSource,
+  type ChatCwdSource,
 } from '../util/confinedFile.js';
 import { mimeForExt } from '../util/filekind.js';
 import { sendFilePreview } from './filePreview.js';
@@ -20,19 +20,19 @@ const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 
 export function registerWorkspaceRoutes(
   app: FastifyInstance,
-  manager: SessionCwdSource,
+  manager: ChatCwdSource,
 ): void {
   /**
-   * GET /api/sessions/:id/tree?path=<relative>&depth=1
+   * GET /api/chats/:chatId/tree?path=<relative>&depth=1
    *
    * Lists files and directories in the session's workspace.
    * The `path` parameter is relative to the session's cwd.
    * Returns immediate children only (lazy loading; expand on demand).
    */
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
-    '/api/sessions/:id/tree',
+    '/api/chats/:id/tree',
     async (req, reply) => {
-      const resolved = await resolveSessionPath(
+      const resolved = await resolveChatPath(
         manager,
         req.params.id,
         req.query.path,
@@ -85,15 +85,15 @@ export function registerWorkspaceRoutes(
   );
 
   /**
-   * GET /api/sessions/:id/download?path=<relative>
+   * GET /api/chats/:chatId/download?path=<relative>
    *
    * Downloads a file from the session's workspace.
    * The `path` parameter is relative to the session's cwd.
    */
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
-    '/api/sessions/:id/download',
+    '/api/chats/:id/download',
     async (req, reply) => {
-      const resolved = await resolveSessionPath(manager, req.params.id, req.query.path, 'file');
+      const resolved = await resolveChatPath(manager, req.params.id, req.query.path, 'file');
       if (!resolved.ok) return replyWith(reply, resolved);
       const { real: realTarget, stat } = resolved;
 
@@ -120,16 +120,16 @@ export function registerWorkspaceRoutes(
   );
 
   /**
-   * GET /api/sessions/:id/preview?path=<relative>
+   * GET /api/chats/:chatId/preview?path=<relative>
    *
    * Returns the file content for inline preview. Text files are returned as
    * UTF-8 text; images are returned with their MIME type for inline display.
    * Large files (>1 MB for text, >20 MB for images) are rejected.
    */
   app.get<{ Params: { id: string }; Querystring: { path?: string; raw?: string } }>(
-    '/api/sessions/:id/preview',
+    '/api/chats/:id/preview',
     async (req, reply) => {
-      const resolved = await resolveSessionPath(manager, req.params.id, req.query.path, 'file');
+      const resolved = await resolveChatPath(manager, req.params.id, req.query.path, 'file');
       if (!resolved.ok) return replyWith(reply, resolved);
       const { real: realTarget, stat } = resolved;
 

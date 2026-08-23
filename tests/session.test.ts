@@ -12,18 +12,18 @@ import type {
   CasperEvent,
   CasperEventPayload,
   DirListing,
-  SessionDetail,
-  SessionSummary,
+  ChatDetail,
+  ChatSummary,
 } from '@casper/shared';
 import { config, parseConfigDoc, pickInt, pickString } from '../server/src/config.js';
 import { TurnState } from '../server/src/session/TurnState.js';
 import { SessionManager, Session } from '../server/src/session/SessionManager.js';
 import { EventStore } from '../server/src/session/EventStore.js';
 import { closeDb, db } from '../server/src/session/db.js';
-import { SessionStore } from '../server/src/session/sessionStore.js';
+import { ChatStore } from '../server/src/session/chatStore.js';
 import { LoginStore } from '../server/src/session/logins.js';
 import { hydrateTranscript, promptCount } from '../server/src/session/kiroFiles.js';
-import { bumpSessionToTop } from '../web/src/state/sessions.js';
+import { bumpChatToTop } from '../web/src/state/chats.js';
 import { noopLogger, fakeKiroProcess, type FakeProcess } from './helpers.js';
 import {
   chatDir,
@@ -137,8 +137,8 @@ describe('EventStore.getSince + replay gating', () => {
   before(async () => {
     proc = fakeKiroProcess({ sessionId: 'replay-regression-test' });
     mgr = new SessionManager(noopLogger(), { spawn: () => proc });
-    const detail = await mgr.createSession({ cwd: sessionsCwd });
-    session = await mgr.ensureOpen(detail.summary.sessionId);
+    const detail = await mgr.createChat({ cwd: sessionsCwd });
+    session = await mgr.ensureOpen(detail.summary.chatId);
     store = session.store;
   });
   after(() => mgr.disposeAll());
@@ -200,16 +200,16 @@ describe('re-open mid-turn must not drop the prompt', () => {
   // through getDetail, which is how a client actually asks.
   let mgr: SessionManager;
   let session: Session;
-  let sessionId: string;
+  let chatId: string;
   let evSeq: number;
 
   before(async () => {
     mgr = new SessionManager(noopLogger(), {
       spawn: () => fakeKiroProcess({ sessionId: 'replayhead-test' }),
     });
-    const detail = await mgr.createSession({ cwd: sessionsCwd });
-    sessionId = detail.summary.sessionId;
-    session = await mgr.ensureOpen(sessionId);
+    const detail = await mgr.createChat({ cwd: sessionsCwd });
+    chatId = detail.summary.chatId;
+    session = await mgr.ensureOpen(chatId);
     session.running = true;
     evSeq = session.record({
       kind: 'turn_started',
@@ -219,12 +219,12 @@ describe('re-open mid-turn must not drop the prompt', () => {
   after(() => mgr.disposeAll());
 
   it('rewinds to replay an in-flight turn missing from hydrate', async () => {
-    const detail = await mgr.getDetail(sessionId);
+    const detail = await mgr.getDetail(chatId);
     assert.equal(detail.head, evSeq - 1);
   });
 
   it('no rewind when the prompt is already hydrated', async () => {
-    const file = path.join(config.kiroSessionsDir, `${sessionId}.jsonl`);
+    const file = path.join(config.kiroSessionsDir, `${session.sessionId}.jsonl`);
     fs.writeFileSync(
       file,
       JSON.stringify({
@@ -233,7 +233,7 @@ describe('re-open mid-turn must not drop the prompt', () => {
       }) + '\n',
     );
     try {
-      const detail = await mgr.getDetail(sessionId);
+      const detail = await mgr.getDetail(chatId);
       assert.equal(detail.head, session.store.head());
     } finally {
       fs.rmSync(file, { force: true });
@@ -242,14 +242,14 @@ describe('re-open mid-turn must not drop the prompt', () => {
 
   it('uses head when no turn is in flight', async () => {
     session.running = false;
-    const detail = await mgr.getDetail(sessionId);
+    const detail = await mgr.getDetail(chatId);
     assert.equal(detail.head, session.store.head());
   });
 });
 
 describe('sidebar reorder (prompt floats the active session to the top)', () => {
-  const mk = (id: string, updatedAt: string): SessionSummary =>
-    ({ sessionId: id, title: id, cwd: '/', createdAt: updatedAt, updatedAt }) as SessionSummary;
+  const mk = (id: string, updatedAt: string): ChatSummary =>
+    ({ chatId: id, title: id, cwd: '/', createdAt: updatedAt, updatedAt }) as ChatSummary;
   const list = [
     mk('a', '2026-07-16T10:00:00.000Z'),
     mk('b', '2026-07-16T09:00:00.000Z'),
@@ -257,20 +257,20 @@ describe('sidebar reorder (prompt floats the active session to the top)', () => 
   ];
 
   it('bumped session moves to the top', () => {
-    const reordered = bumpSessionToTop(list, 'c', '2026-07-16T11:00:00.000Z');
-    assert.equal(reordered[0].sessionId, 'c');
+    const reordered = bumpChatToTop(list, 'c', '2026-07-16T11:00:00.000Z');
+    assert.equal(reordered[0].chatId, 'c');
   });
   it('the rest keep their relative order', () => {
-    const reordered = bumpSessionToTop(list, 'c', '2026-07-16T11:00:00.000Z');
-    assert.equal(reordered.map((s) => s.sessionId).join(), 'c,a,b');
+    const reordered = bumpChatToTop(list, 'c', '2026-07-16T11:00:00.000Z');
+    assert.equal(reordered.map((s) => s.chatId).join(), 'c,a,b');
   });
   it('does not mutate the input array', () => {
-    bumpSessionToTop(list, 'c', '2026-07-16T11:00:00.000Z');
-    assert.equal(list[0].sessionId, 'a');
+    bumpChatToTop(list, 'c', '2026-07-16T11:00:00.000Z');
+    assert.equal(list[0].chatId, 'a');
   });
-  it('unknown session id leaves the order unchanged', () => {
+  it('unknown chat id leaves the order unchanged', () => {
     assert.equal(
-      bumpSessionToTop(list, 'missing', '2026-07-16T12:00:00.000Z').map((s) => s.sessionId).join(),
+      bumpChatToTop(list, 'missing', '2026-07-16T12:00:00.000Z').map((s) => s.chatId).join(),
       'a,b,c',
     );
   });
@@ -510,14 +510,14 @@ describe('SQLite stores', () => {
   // Attachments are recorded per message so the transcript never has to parse the
   // "Attached files:" line back out of the prose it was written into.
   it('round-trips attachments, grouped by the message they belong to', () => {
-    const store = new SessionStore();
+    const store = new ChatStore();
     store.setAttachments('s1', 0, [
       { path: '/up/a.zip', name: 'a.zip', size: 2048, kind: 'binary' },
       { path: '/up/b.png', name: 'b.png', size: 99, kind: 'image' },
     ]);
     store.setAttachments('s1', 3, [{ path: '/up/c.txt', name: 'c.txt', size: 7, kind: 'text' }]);
 
-    const got = store.attachmentsBySession('s1');
+    const got = store.attachmentsByChat('s1');
     assert.deepEqual([...got.keys()].sort(), [0, 3]);
     assert.deepEqual(got.get(0)!.map((a) => a.name), ['a.zip', 'b.png']);
     assert.equal(got.get(0)![0]!.size, 2048);
@@ -525,54 +525,54 @@ describe('SQLite stores', () => {
   });
 
   it('keeps one session\'s attachments out of another\'s', () => {
-    const store = new SessionStore();
+    const store = new ChatStore();
     store.setAttachments('s1', 0, [{ path: '/up/a.zip', name: 'a.zip', size: 1, kind: 'binary' }]);
-    assert.equal(store.attachmentsBySession('s2').size, 0);
+    assert.equal(store.attachmentsByChat('s2').size, 0);
   });
 
   it('re-recording the same file at the same message does not duplicate it', () => {
-    const store = new SessionStore();
+    const store = new ChatStore();
     const one = { path: '/up/a.zip', name: 'a.zip', size: 1, kind: 'binary' as const };
     store.setAttachments('s1', 0, [one]);
     store.setAttachments('s1', 0, [one]);
-    assert.equal(store.attachmentsBySession('s1').get(0)!.length, 1);
+    assert.equal(store.attachmentsByChat('s1').get(0)!.length, 1);
   });
 
   it('deleting a session forgets its attachments too', () => {
-    const store = new SessionStore();
+    const store = new ChatStore();
     store.setAttachments('s1', 0, [{ path: '/up/a.zip', name: 'a.zip', size: 1, kind: 'binary' }]);
     store.remove('s1');
-    assert.equal(store.attachmentsBySession('s1').size, 0);
+    assert.equal(store.attachmentsByChat('s1').size, 0);
   });
 
   it('keeps a title and a cwd for one session in a single row', () => {
-    const store = new SessionStore();
+    const store = new ChatStore();
     store.setTitle('s1', 'My session');
     store.setCwd('s1', '/tmp/work');
     assert.equal(store.getTitle('s1'), 'My session');
     assert.equal(store.getCwd('s1'), '/tmp/work');
-    const rows = db().prepare('SELECT count(*) c FROM sessions').get() as { c: number };
+    const rows = db().prepare('SELECT count(*) c FROM chats').get() as { c: number };
     assert.equal(rows.c, 1, 'one row, not one per field');
   });
 
   it('returns undefined for an override that was never set', () => {
-    const store = new SessionStore();
+    const store = new ChatStore();
     assert.equal(store.getTitle('nope'), undefined);
     store.setTitle('s1', 'only a title');
     assert.equal(store.getCwd('s1'), undefined, 'absent column reads as undefined, not null');
   });
 
   it('overwrites rather than duplicating on repeated sets', () => {
-    const store = new SessionStore();
+    const store = new ChatStore();
     store.setTitle('s1', 'first');
     store.setTitle('s1', 'second');
     assert.equal(store.getTitle('s1'), 'second');
-    const rows = db().prepare('SELECT count(*) c FROM sessions').get() as { c: number };
+    const rows = db().prepare('SELECT count(*) c FROM chats').get() as { c: number };
     assert.equal(rows.c, 1);
   });
 
   it('remove clears both overrides at once', () => {
-    const store = new SessionStore();
+    const store = new ChatStore();
     store.setTitle('s1', 't');
     store.setCwd('s1', '/tmp');
     store.remove('s1');
@@ -628,7 +628,7 @@ describe('SQLite stores', () => {
 
   it('creates the database on first use', () => {
     closeDb();
-    const store = new SessionStore();
+    const store = new ChatStore();
     assert.equal(store.getTitle('anything'), undefined);
     assert.equal(fs.existsSync(path.join(dir, 'casper.db')), true);
   });
@@ -668,7 +668,7 @@ describe('importing a module does not touch the data directory', () => {
   });
 });
 
-describe('the chat a session belongs to', () => {
+describe('the session a chat is bound to', () => {
   let dir: string;
   const origDir = config.casperDataDir;
 
@@ -682,29 +682,45 @@ describe('the chat a session belongs to', () => {
     (config as { casperDataDir: string }).casperDataDir = origDir;
   });
 
-  it('remembers the chat id the client minted', () => {
-    const store = new SessionStore();
-    const chatId = crypto.randomUUID();
-    store.setChatId('sess-1', chatId);
-    assert.equal(store.getChatId('sess-1'), chatId);
+  it('binds kiro\'s session to the chat that owns it', () => {
+    const store = new ChatStore();
+    store.create('chat-1');
+    store.bindSession('chat-1', 'sess-1');
+    assert.equal(store.sessionIdForChat('chat-1'), 'sess-1');
   });
 
-  // Sessions that predate the chats layout have no row. Falling back to the session id gives
-  // them one stable directory rather than a new one per call.
-  it('falls back to the session id for a session that has none', () => {
-    const store = new SessionStore();
-    assert.equal(store.getChatId('legacy-session'), 'legacy-session');
-    assert.equal(store.getChatId('legacy-session'), 'legacy-session');
+  it('has no session for a chat that has not started one', () => {
+    const store = new ChatStore();
+    store.create('chat-1');
+    assert.equal(store.sessionIdForChat('chat-1'), undefined);
+    assert.equal(store.sessionIdForChat('never-heard-of-it'), undefined);
   });
 
-  it('keeps the chat id when another override is written', () => {
-    const store = new SessionStore();
-    const chatId = crypto.randomUUID();
-    store.setChatId('sess-2', chatId);
-    store.setTitle('sess-2', 'renamed');
-    store.setCwd('sess-2', '/tmp');
-    assert.equal(store.getChatId('sess-2'), chatId);
-    assert.equal(store.getTitle('sess-2'), 'renamed');
+  // One session, one chat: kiro reuses an id when a session is loaded back, and two chats
+  // claiming it would make the second unopenable.
+  it('releases an earlier chat\'s claim on the same session', () => {
+    const store = new ChatStore();
+    store.create('first');
+    store.bindSession('first', 'sess-1');
+    store.create('second');
+    store.bindSession('second', 'sess-1');
+
+    assert.equal(store.sessionIdForChat('second'), 'sess-1');
+    assert.equal(store.sessionIdForChat('first'), undefined, 'the first claim is released');
+    assert.equal(store.get('first')?.chatId, 'first', 'but the chat itself survives');
+  });
+
+  it('keeps the binding when a title or cwd is written', () => {
+    const store = new ChatStore();
+    store.create('chat-2');
+    store.bindSession('chat-2', 'sess-2');
+    store.setTitle('chat-2', 'renamed');
+    store.setCwd('chat-2', '/tmp');
+
+    const row = store.get('chat-2');
+    assert.equal(row?.sessionId, 'sess-2');
+    assert.equal(row?.title, 'renamed');
+    assert.equal(row?.cwd, '/tmp');
   });
 });
 
@@ -795,10 +811,10 @@ describe('process lifecycle', () => {
   it('adopts the id kiro assigns to a brand-new session', async () => {
     const mgr = managerWith(() => fakeKiroProcess({ sessionId: 'assigned-by-kiro' }));
     try {
-      const detail = await mgr.createSession({ cwd: sessionsCwd });
+      const detail = await mgr.createChat({ cwd: sessionsCwd });
       assert.equal(detail.summary.sessionId, 'assigned-by-kiro');
       // The temporary pending- id must not survive as a second entry.
-      const ids = (await mgr.listSessions()).map((s) => s.sessionId);
+      const ids = (await mgr.listChats()).map((s) => s.sessionId);
       assert.deepEqual(ids.filter((id) => id.startsWith('pending-')), []);
     } finally {
       mgr.disposeAll();
@@ -809,14 +825,14 @@ describe('process lifecycle', () => {
     const proc = fakeKiroProcess({ sessionId: 'reload-me' });
     const mgr = managerWith(() => proc);
     try {
-      const detail = await mgr.createSession({ cwd: sessionsCwd });
+      const detail = await mgr.createChat({ cwd: sessionsCwd });
       assert.deepEqual(proc.calls, ['newSession']);
 
       // Drop the process, then act again: the session has been live, so kiro is
       // asked to load it and replay rather than to create a new one.
-      const s = await mgr.ensureOpen(detail.summary.sessionId);
+      const s = await mgr.ensureOpen(detail.summary.chatId);
       s.proc = undefined;
-      await mgr.setModel(detail.summary.sessionId, 'model-2');
+      await mgr.setModel(detail.summary.chatId, 'model-2');
       assert.deepEqual(proc.calls, ['newSession', 'loadSession', 'setModel']);
     } finally {
       mgr.disposeAll();
@@ -833,10 +849,10 @@ describe('process lifecycle', () => {
     );
     try {
       await assert.rejects(
-        mgr.createSession({ cwd: sessionsCwd }),
+        mgr.createChat({ cwd: sessionsCwd }),
         /credentials have expired/,
       );
-      assert.deepEqual(await mgr.listSessions(), []);
+      assert.deepEqual(await mgr.listChats(), []);
       assert.equal(mgr.liveCount, 0);
     } finally {
       mgr.disposeAll();
@@ -853,8 +869,8 @@ describe('process lifecycle', () => {
       return p;
     });
     try {
-      await mgr.createSession({ cwd: sessionsCwd });
-      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'session-1' });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'session-2' });
       assert.equal(mgr.liveCount, 2);
 
       // Mark the first busy so it cannot be the victim, and make the second the
@@ -864,7 +880,7 @@ describe('process lifecycle', () => {
       const second = await mgr.ensureOpen('session-2');
       second.lastActivity = 0;
 
-      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'session-3' });
       assert.equal(spawned[1]?.disposed(), true, 'the idle process should be evicted');
       assert.equal(spawned[0]?.disposed(), false, 'a running turn must not be evicted');
     } finally {
@@ -873,17 +889,45 @@ describe('process lifecycle', () => {
     }
   });
 
+  // kiro's file still says the old directory - its shutdown write uses the cwd it was spawned
+  // with - so the override is the only record until a turn completes in the new one. Keyed by
+  // chat, which a chat id equal to its session id would not have caught.
+  it('remembers a re-pointed directory across a dormant reopen', async () => {
+    const mgr = managerWith(() => fakeKiroProcess({ sessionId: 'kiro-side-id' }));
+    const moved = path.join(sessionsCwd, 'moved-elsewhere');
+    fs.mkdirSync(moved, { recursive: true });
+    try {
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'chat-side-id' });
+      await mgr.setChatCwd('chat-side-id', moved);
+
+      // What kiro leaves behind: the directory it was spawned in, not the new one.
+      fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(config.kiroSessionsDir, 'kiro-side-id.json'),
+        JSON.stringify({ session_id: 'kiro-side-id', cwd: sessionsCwd }),
+      );
+      // Drop it from memory so the next open has to read the override back.
+      mgr.disposeAll();
+
+      const reopened = await mgr.ensureOpen('chat-side-id');
+      assert.equal(reopened.cwd, moved, 'the override must be found by chat id');
+    } finally {
+      mgr.disposeAll();
+      fs.rmSync(path.join(config.kiroSessionsDir, 'kiro-side-id.json'), { force: true });
+    }
+  });
+
   it('re-pointing the working directory drops the process spawned in the old one', async () => {
     const proc = fakeKiroProcess({ sessionId: 'repoint-me' });
     const mgr = managerWith(() => proc);
     const target = path.join(sessionsCwd, 'moved');
     try {
-      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'repoint-me' });
       assert.equal(mgr.liveCount, 1);
-      await mgr.setSessionCwd('repoint-me', target);
+      await mgr.setChatCwd('repoint-me', target);
       assert.equal(proc.disposed(), true);
       assert.equal(mgr.liveCount, 0, 'the next turn respawns in the new directory');
-      assert.equal(await mgr.getSessionCwd('repoint-me'), target);
+      assert.equal(await mgr.getChatCwd('repoint-me'), target);
     } finally {
       mgr.disposeAll();
     }
@@ -906,6 +950,9 @@ describe('reloading a session re-detects its setup', () => {
   // A reload is a load, and kiro can only load a session whose event log has
   // entries. Stand in for what a completed turn leaves behind.
   const persist = (sessionId: string) => {
+    const store = new ChatStore();
+    store.create(sessionId);
+    store.bindSession(sessionId, sessionId);
     fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
     fs.writeFileSync(
       path.join(config.kiroSessionsDir, `${sessionId}.json`),
@@ -931,11 +978,11 @@ describe('reloading a session re-detects its setup', () => {
     const spawned: FakeProcess[] = [];
     const mgr = managerWithSpawns(spawned);
     try {
-      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'reloadable' });
       assert.deepEqual(spawned[0]?.calls, ['newSession']);
       persist('reloadable');
 
-      await mgr.reloadSession('reloadable');
+      await mgr.reloadChat('reloadable');
       assert.equal(spawned.length, 2, 'a second process should have been spawned');
       // Awaited out, not just signalled: kiro flushes its session file on exit and
       // the replacement reads that file.
@@ -951,9 +998,9 @@ describe('reloading a session re-detects its setup', () => {
     const spawned: FakeProcess[] = [];
     const mgr = managerWithSpawns(spawned);
     try {
-      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'reloadable' });
       persist('reloadable');
-      await mgr.reloadSession('reloadable');
+      await mgr.reloadChat('reloadable');
       assert.equal(mgr.liveCount, 1);
     } finally {
       mgr.disposeAll();
@@ -964,10 +1011,10 @@ describe('reloading a session re-detects its setup', () => {
     const spawned: FakeProcess[] = [];
     const mgr = managerWithSpawns(spawned);
     try {
-      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'reloadable' });
       persist('reloadable');
       const before = mgr.getStore('reloadable')!.getSince(0).events.length;
-      await mgr.reloadSession('reloadable');
+      await mgr.reloadChat('reloadable');
       // The fake exits on demand; emit what a real child emits as it shuts down.
       spawned[0]!.bus.emit('exit', 0, null);
       const kinds = mgr
@@ -985,10 +1032,10 @@ describe('reloading a session re-detects its setup', () => {
     const spawned: FakeProcess[] = [];
     const mgr = managerWithSpawns(spawned);
     try {
-      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'reloadable' });
       persist('reloadable');
       (await mgr.ensureOpen('reloadable')).running = true;
-      await assert.rejects(mgr.reloadSession('reloadable'), /turn is running/);
+      await assert.rejects(mgr.reloadChat('reloadable'), /turn is running/);
       assert.equal(spawned.length, 1, 'the running turn keeps its process');
     } finally {
       mgr.disposeAll();
@@ -1002,7 +1049,7 @@ describe('reloading a session re-detects its setup', () => {
     const spawned: FakeProcess[] = [];
     const mgr = managerWithSpawns(spawned);
     try {
-      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'reloadable' });
       persist('reloadable');
       const s = await mgr.ensureOpen('reloadable');
       s.record({
@@ -1010,7 +1057,7 @@ describe('reloading a session re-detects its setup', () => {
         params: { sessionId: 'reloadable', status: { type: 'started' }, summary: null },
       });
 
-      await assert.rejects(mgr.reloadSession('reloadable'), /being compacted/);
+      await assert.rejects(mgr.reloadChat('reloadable'), /being compacted/);
       assert.equal(spawned.length, 1, 'the process doing the work is left alone');
       assert.equal(spawned[0]?.disposed(), false);
     } finally {
@@ -1022,7 +1069,7 @@ describe('reloading a session re-detects its setup', () => {
     const spawned: FakeProcess[] = [];
     const mgr = managerWithSpawns(spawned);
     try {
-      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'reloadable' });
       persist('reloadable');
       const s = await mgr.ensureOpen('reloadable');
       const compaction = (type: 'started' | 'completed') =>
@@ -1033,7 +1080,7 @@ describe('reloading a session re-detects its setup', () => {
       compaction('started');
       compaction('completed');
 
-      await mgr.reloadSession('reloadable');
+      await mgr.reloadChat('reloadable');
       assert.equal(spawned.length, 2, 'no longer blocked once it is done');
     } finally {
       mgr.disposeAll();
@@ -1047,7 +1094,7 @@ describe('reloading a session re-detects its setup', () => {
     const spawned: FakeProcess[] = [];
     const mgr = managerWithSpawns(spawned);
     try {
-      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'reloadable' });
       // The files exist, as kiro's do from creation; the event log is empty.
       fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
       fs.writeFileSync(
@@ -1056,7 +1103,7 @@ describe('reloading a session re-detects its setup', () => {
       );
       fs.writeFileSync(path.join(config.kiroSessionsDir, 'reloadable.jsonl'), '');
 
-      await assert.rejects(mgr.reloadSession('reloadable'), /has not saved this session/);
+      await assert.rejects(mgr.reloadChat('reloadable'), /has not saved this session/);
       assert.equal(spawned.length, 1);
       assert.equal(spawned[0]?.disposed(), false, 'the live process must survive');
       assert.equal(mgr.liveCount, 1);
@@ -1069,9 +1116,9 @@ describe('reloading a session re-detects its setup', () => {
     const spawned: FakeProcess[] = [];
     const mgr = managerWithSpawns(spawned);
     try {
-      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'reloadable' });
       persist('reloadable');
-      const detail = await mgr.reloadSession('reloadable');
+      const detail = await mgr.reloadChat('reloadable');
       assert.equal(detail.summary.sessionId, 'reloadable');
       assert.equal(detail.summary.liveness, 'live');
       // The modes are the fresh process's, not the disposed one's cached copy.
@@ -1118,10 +1165,10 @@ describe('reloading a session re-detects its setup', () => {
       const spawned: FakeProcess[] = [];
       const { mgr, release } = gatedManager(spawned);
       try {
-        await mgr.createSession({ cwd: sessionsCwd });
+        await mgr.createChat({ cwd: sessionsCwd, chatId: 'reloadable' });
         persist('reloadable');
 
-        const reload = mgr.reloadSession('reloadable');
+        const reload = mgr.reloadChat('reloadable');
         // Hold it at shutdown: this is the window the prompt used to slip into.
         await waitFor('the reload to reach shutdown', () =>
           spawned[0]!.calls.includes('disposeAndWait'),
@@ -1154,9 +1201,9 @@ describe('reloading a session re-detects its setup', () => {
       const spawned: FakeProcess[] = [];
       const { mgr, release } = gatedManager(spawned);
       try {
-        await mgr.createSession({ cwd: sessionsCwd });
+        await mgr.createChat({ cwd: sessionsCwd, chatId: 'reloadable' });
         persist('reloadable');
-        const reload = mgr.reloadSession('reloadable');
+        const reload = mgr.reloadChat('reloadable');
         await waitFor('shutdown', () => spawned[0]!.calls.includes('disposeAndWait'));
         const prompt = mgr.runPrompt('reloadable', [{ type: 'text', text: 'hi' }]);
         release();
@@ -1177,12 +1224,12 @@ describe('reloading a session re-detects its setup', () => {
       const spawned: FakeProcess[] = [];
       const { mgr, release } = gatedManager(spawned);
       try {
-        await mgr.createSession({ cwd: sessionsCwd });
+        await mgr.createChat({ cwd: sessionsCwd, chatId: 'reloadable' });
         persist('reloadable');
-        const first = mgr.reloadSession('reloadable');
+        const first = mgr.reloadChat('reloadable');
         await waitFor('shutdown', () => spawned[0]!.calls.includes('disposeAndWait'));
 
-        await assert.rejects(mgr.reloadSession('reloadable'), /already running/);
+        await assert.rejects(mgr.reloadChat('reloadable'), /already running/);
 
         release();
         await first;
@@ -1220,7 +1267,7 @@ describe('reloading a session re-detects its setup', () => {
         },
       });
       try {
-        await mgr.createSession({ cwd: sessionsCwd });
+        await mgr.createChat({ cwd: sessionsCwd, chatId: 'reloadable' });
         persist('reloadable');
         // Dormant, so the prompt has to spawn before it can send anything.
         (await mgr.ensureOpen('reloadable')).proc = undefined;
@@ -1232,7 +1279,7 @@ describe('reloading a session re-detects its setup', () => {
         // The timer is a hang detector, not a wait: before the fix the reload drained
         // s.spawning and never returned while initialize was held.
         const outcome = await Promise.race([
-          mgr.reloadSession('reloadable').then(
+          mgr.reloadChat('reloadable').then(
             () => 'reloaded',
             (e: Error) => e.message,
           ),
@@ -1252,6 +1299,13 @@ describe('reloading a session re-detects its setup', () => {
 });
 
 describe('session summary: one projection over kiro’s file and live state', () => {
+  /** A chat row pointing at a session file: what makes it one of Casper's, and listed. */
+  const linkChat = (sessionId: string): void => {
+    const store = new ChatStore();
+    store.create(sessionId);
+    store.bindSession(sessionId, sessionId);
+  };
+
   const writeSessionFile = (
     sessionId: string,
     over: Record<string, unknown> = {},
@@ -1285,9 +1339,10 @@ describe('session summary: one projection over kiro’s file and live state', ()
 
   it('a dormant session reports what kiro’s file says', async () => {
     writeSessionFile('dormant-1');
+    linkChat('dormant-1');
     const mgr = new SessionManager(noopLogger());
     try {
-      const [summary] = await mgr.listSessions();
+      const [summary] = await mgr.listChats();
       assert.equal(summary?.sessionId, 'dormant-1');
       assert.equal(summary?.title, 'kiro title');
       assert.equal(summary?.liveness, 'dormant');
@@ -1309,8 +1364,8 @@ describe('session summary: one projection over kiro’s file and live state', ()
       spawn: () => fakeKiroProcess({ sessionId: 'agreeing-1' }),
     });
     try {
-      await mgr.createSession({ cwd: sessionsCwd });
-      const fromList = (await mgr.listSessions()).find((s) => s.sessionId === 'agreeing-1');
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'agreeing-1' });
+      const fromList = (await mgr.listChats()).find((s) => s.chatId === 'agreeing-1');
       const fromDetail = (await mgr.getDetail('agreeing-1')).summary;
 
       assert.deepEqual(fromDetail, fromList, 'the two read paths must project identically');
@@ -1325,16 +1380,35 @@ describe('session summary: one projection over kiro’s file and live state', ()
     }
   });
 
+  // The panel is a list of chats, so a session in kiro's directory that Casper did not start -
+  // a subagent, or a kiro-cli session - has no row and must not appear.
+  it('lists only sessions Casper started', async () => {
+    writeSessionFile('mine-1');
+    linkChat('mine-1');
+    writeSessionFile('a-subagent');
+    writeSessionFile('someone-elses-kiro-cli-session');
+
+    const mgr = new SessionManager(noopLogger());
+    try {
+      const listed = (await mgr.listChats()).map((c) => c.chatId);
+      assert.deepEqual(listed, ['mine-1']);
+    } finally {
+      mgr.disposeAll();
+      for (const id of ['mine-1', 'a-subagent', 'someone-elses-kiro-cli-session']) cleanup(id);
+    }
+  });
+
   it('a Casper override wins over the file, on both read paths', async () => {
     writeSessionFile('override-1');
+    linkChat('override-1');
     const mgr = new SessionManager(noopLogger());
     const moved = path.join(sessionsCwd, 'elsewhere');
     fs.mkdirSync(moved, { recursive: true });
     try {
-      mgr.renameSession('override-1', 'my name');
-      await mgr.setSessionCwd('override-1', moved);
+      mgr.renameChat('override-1', 'my name');
+      await mgr.setChatCwd('override-1', moved);
 
-      const fromList = (await mgr.listSessions()).find((s) => s.sessionId === 'override-1');
+      const fromList = (await mgr.listChats()).find((s) => s.chatId === 'override-1');
       const fromDetail = (await mgr.getDetail('override-1')).summary;
       assert.equal(fromList?.title, 'my name');
       assert.equal(fromList?.cwd, moved);
@@ -1354,10 +1428,10 @@ describe('session summary: one projection over kiro’s file and live state', ()
       spawn: () => fakeKiroProcess({ sessionId: 'newer-1' }),
     });
     try {
-      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'newer-1' });
       const s = await mgr.ensureOpen('newer-1');
       s.record({ kind: 'turn_ended', stopReason: 'end_turn' });
-      const summary = (await mgr.listSessions()).find((x) => x.sessionId === 'newer-1');
+      const summary = (await mgr.listChats()).find((x) => x.chatId === 'newer-1');
       assert.ok(
         (summary?.updatedAt ?? '') > '2026-01-02T00:00:00.000Z',
         `expected live activity to win, got ${summary?.updatedAt}`,
@@ -1373,13 +1447,13 @@ describe('session summary: one projection over kiro’s file and live state', ()
       spawn: () => fakeKiroProcess({ sessionId: 'ghost-1' }),
     });
     try {
-      await mgr.createSession({ cwd: sessionsCwd });
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'ghost-1' });
       const s = await mgr.ensureOpen('ghost-1');
       // Live, no file: legitimate for a brand-new session, so it still lists.
-      assert.equal((await mgr.listSessions()).length, 1);
+      assert.equal((await mgr.listChats()).length, 1);
       // Once its process is gone and it has no file, it is a ghost.
       s.proc = undefined;
-      assert.deepEqual(await mgr.listSessions(), []);
+      assert.deepEqual(await mgr.listChats(), []);
     } finally {
       mgr.disposeAll();
     }

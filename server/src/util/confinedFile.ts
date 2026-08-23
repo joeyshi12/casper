@@ -97,11 +97,11 @@ export function replyWith(
 }
 
 /** The one method this module needs from SessionManager. */
-export interface SessionCwdSource {
-  getSessionCwd(sessionId: string): Promise<string>;
+export interface ChatCwdSource {
+  getChatCwd(chatId: string): Promise<string>;
 }
 
-export type SessionPathResult =
+export type ChatPathResult =
   | ({ ok: true; cwd: string; relative: string } & ConfinedFile)
   | ({ ok: false } & ConfineFailure);
 
@@ -110,17 +110,17 @@ export type SessionPathResult =
  * the path mandatory, matching download and preview; the tree asks for a
  * directory and lists the cwd itself when the path is empty.
  */
-export async function resolveSessionPath(
-  sessions: SessionCwdSource,
+export async function resolveChatPath(
+  sessions: ChatCwdSource,
   sessionId: string,
   requestedPath: string | undefined,
   require: 'file' | 'directory',
-): Promise<SessionPathResult> {
+): Promise<ChatPathResult> {
   let cwd: string;
   try {
-    cwd = await sessions.getSessionCwd(sessionId);
+    cwd = await sessions.getChatCwd(sessionId);
   } catch {
-    return { ok: false, status: 404, error: 'Session not found' };
+    return { ok: false, status: 404, error: 'Chat not found' };
   }
 
   const relative = (requestedPath ?? '').replace(/^\/+/, '');

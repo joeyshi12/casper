@@ -10,13 +10,13 @@ import {
   type KiroCompactionStatusParams,
   type KiroMetadataParams,
   type PromptContentBlock,
-  type SessionDetail,
+  type ChatDetail,
   type SessionLoadParams,
   type SessionNewParams,
   type SessionNewResult,
   type SessionPromptParams,
   type SessionPromptResult,
-  type SessionSummary,
+  type ChatSummary,
   type SessionUpdateParams,
   type TranscriptItem,
   resolveSessionTitle,
@@ -38,10 +38,10 @@ import {
   hasRecordedTurns,
   hydrateTranscript,
   promptCount,
-  listPersistedSessions,
   readPersistedSession,
+  type PersistedSession,
 } from './kiroFiles.js';
-import { SessionStore } from './sessionStore.js';
+import { ChatStore, type ChatRow } from './chatStore.js';
 
 // Resolve a working directory for a new session as an absolute path (relative input against
 // DEFAULT_CWD), created if missing, rejected if it exists as a file. Confined to
@@ -110,8 +110,6 @@ export class Session {
   readonly store: EventStore;
   readonly turnState = new TurnState();
   cwd: string;
-  /** The chat that owns this session's uploads. See chats.ts. */
-  chatId?: string;
   agentId?: string;
   modelId?: string;
   currentModeId?: string;
@@ -210,7 +208,7 @@ function isGhost(s: Session, hasFile: boolean): boolean {
 export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly log: Logger;
-  private readonly store = new SessionStore();
+  private readonly store = new ChatStore();
   private readonly spawnProcess: SpawnProcess;
 
   constructor(log: Logger, opts: SessionManagerOptions = {}) {
@@ -223,22 +221,21 @@ export class SessionManager {
    * ours, whose name is a uuid.
    */
   private titleOf(
-    sessionId: string,
+    chat: ChatRow,
     parts: { kiroTitle?: string; firstPrompt?: string; cwd: string },
   ): string {
     return resolveSessionTitle({
-      override: this.store.getTitle(sessionId),
+      override: chat.title ?? undefined,
       kiroTitle: parts.kiroTitle,
       firstPrompt: parts.firstPrompt,
       folder: isManagedWorkspace(parts.cwd) ? undefined : path.basename(parts.cwd),
     });
   }
 
-  /** Set a user title override for a session. */
-  renameSession(sessionId: string, title: string): void {
+  renameChat(chatId: string, title: string): void {
     const clean = sanitizeTitle(title);
-    this.store.setTitle(sessionId, clean);
-    const s = this.sessions.get(sessionId);
+    this.store.setTitle(chatId, clean);
+    const s = this.sessions.get(this.store.sessionIdForChat(chatId) ?? '');
     if (s) s.title = clean || s.title;
   }
 
@@ -246,20 +243,20 @@ export class SessionManager {
    * Re-point a session at a different working directory. Any live process was spawned with the
    * old cwd, so it is disposed and the next turn respawns in the new one, transcript intact.
    */
-  async setSessionCwd(sessionId: string, input: string): Promise<string> {
+  async setChatCwd(chatId: string, input: string): Promise<string> {
     const resolved = resolveCwd(input);
 
-    // Confirm the session exists before recording an override for it.
-    const s = await this.ensureOpen(sessionId);
+    // Confirm the chat exists before recording an override for it.
+    const s = await this.ensureOpen(chatId);
 
-    this.store.setCwd(sessionId, resolved);
+    this.store.setCwd(chatId, resolved);
     if (s.cwd !== resolved) {
       s.cwd = resolved;
       // The child was started in the old directory; drop it so the next prompt
       // spawns a fresh process in the new one.
       s.proc?.dispose();
       s.proc = undefined;
-      this.log.info({ sessionId, cwd: resolved }, 'session working directory changed');
+      this.log.info({ chatId, cwd: resolved }, 'chat working directory changed');
     }
     return resolved;
   }
@@ -273,8 +270,8 @@ export class SessionManager {
    * The old child must be awaited out first: kiro flushes its session file on shutdown and
    * the replacement reads that file to reload the conversation.
    */
-  async reloadSession(sessionId: string): Promise<SessionDetail> {
-    const s = await this.ensureOpen(sessionId);
+  async reloadChat(chatId: string): Promise<ChatDetail> {
+    const s = await this.ensureOpen(chatId);
     // Guard and claim in one tick: every await below yields, and a prompt arriving in one of
     // those gaps would start a turn on the process this is about to dispose.
     if (s.running) {
@@ -294,7 +291,7 @@ export class SessionManager {
     });
 
     try {
-      return await this.replaceProcess(s);
+      return await this.replaceProcess(chatId, s);
     } finally {
       // Cleared before waking anyone, so a waiter never sees a stale claim.
       s.reloading = undefined;
@@ -303,7 +300,7 @@ export class SessionManager {
   }
 
   /** The reload itself. Only ever called with the session's reload claim held. */
-  private async replaceProcess(s: Session): Promise<SessionDetail> {
+  private async replaceProcess(chatId: string, s: Session): Promise<ChatDetail> {
     if (!(await hasRecordedTurns(s.sessionId))) {
       throw new Error(
         'kiro has not saved this session yet. Send a message first, then reload.',
@@ -328,7 +325,7 @@ export class SessionManager {
     // exactly when a newly created agent should show up.
     invalidateAgents();
     this.log.info({ sessionId: s.sessionId, cwd: s.cwd }, 'session reloaded');
-    return this.getDetail(s.sessionId);
+    return this.getDetail(chatId);
   }
 
   /**
@@ -349,35 +346,34 @@ export class SessionManager {
   // Event subscription - works for any opened session, spawned or not.
   // -------------------------------------------------------------------------
 
-  onEvent(sessionId: string, cb: (e: CasperEvent) => void): (() => void) | null {
-    const s = this.sessions.get(sessionId);
+  onEvent(chatId: string, cb: (e: CasperEvent) => void): (() => void) | null {
+    const s = this.sessions.get(this.store.sessionIdForChat(chatId) ?? '');
     if (!s) return null;
     s.store.on('event', cb);
     return () => s.store.off('event', cb);
   }
 
-  getStore(sessionId: string): EventStore | undefined {
-    return this.sessions.get(sessionId)?.store;
+  getStore(chatId: string): EventStore | undefined {
+    return this.sessions.get(this.store.sessionIdForChat(chatId) ?? '')?.store;
   }
 
-  /** Get a session's working directory. Opens the session in memory if needed. */
-  async getSessionCwd(sessionId: string): Promise<string> {
-    const s = await this.ensureOpen(sessionId);
+  /** A chat's working directory. Opens it in memory if needed. */
+  async getChatCwd(chatId: string): Promise<string> {
+    const s = await this.ensureOpen(chatId);
     return s.cwd;
   }
 
-  /** Open a session in memory (store + metadata) WITHOUT spawning a process. */
-  async ensureOpen(sessionId: string): Promise<Session> {
+  /** Open a chat's session in memory (store + metadata) WITHOUT spawning a process. */
+  async ensureOpen(chatId: string): Promise<Session> {
+    const sessionId = this.sessionIdOf(chatId);
     const existing = this.sessions.get(sessionId);
     if (existing) return existing;
 
     const persisted = await readPersistedSession(sessionId);
     if (!persisted) throw new Error(`Unknown session: ${sessionId}`);
 
-    // A session's cwd is persisted by kiro at creation. If the user re-pointed
-    // the session (original folder moved or deleted), the Casper-side override
-    // wins.
-    const effectiveCwd = this.store.getCwd(sessionId) ?? persisted.cwd;
+    // kiro persists the cwd at creation; a re-pointed chat overrides it.
+    const effectiveCwd = this.store.getCwd(chatId) ?? persisted.cwd;
 
     // Confine the persisted cwd to fileRoot. A session created before this
     // boundary existed - or one created directly by kiro-cli - could carry an
@@ -389,7 +385,7 @@ export class SessionManager {
       );
     }
 
-    const store = new EventStore(sessionId);
+    const store = new EventStore(chatId);
     const s = new Session(sessionId, store, effectiveCwd);
     s.title = persisted.title;
     s.agentId = persisted.agentId;
@@ -505,14 +501,14 @@ export class SessionManager {
   // -------------------------------------------------------------------------
 
   /** Create a new session. Spawns immediately so we get a real kiro sessionId. */
-  async createSession(opts: {
+  async createChat(opts: {
     cwd?: string;
     agentId?: string;
     modelId?: string;
     freshWorkspace?: boolean;
     title?: string;
     chatId?: string;
-  }): Promise<SessionDetail> {
+  }): Promise<ChatDetail> {
     // The client's chat id, which already owns any files uploaded to this chat before it
     // sent. Absent only if something other than the web app created the session.
     const chatId = isValidChatId(opts.chatId) ? opts.chatId : crypto.randomUUID();
@@ -520,7 +516,7 @@ export class SessionManager {
     const cwd = opts.freshWorkspace ? createChatWorkspace(chatId) : resolveCwd(opts.cwd);
     // Temporary local id until kiro assigns the real one during ensureProc.
     const tempId = `pending-${Date.now()}-${Math.floor(this.sessions.size)}`;
-    const store = new EventStore(tempId);
+    const store = new EventStore(chatId);
     const s = new Session(tempId, store, cwd);
     s.agentId = opts.agentId ?? config.defaultAgent;
     s.currentModeId = s.agentId;
@@ -540,18 +536,16 @@ export class SessionManager {
     // Name the session before it is returned, so it is never listed as untitled: the
     // caller's title if it has one - a draft knows its first prompt - otherwise the folder
     // the user chose. Stored as a Casper title override; the user can rename.
-    // Bind the chat to kiro's session id now that it has one, so later uploads land in the
-    // same directory as any the draft already made.
-    this.store.setChatId(s.sessionId, chatId);
-    s.chatId = chatId;
+    this.store.create(chatId);
+    this.store.bindSession(chatId, s.sessionId);
 
     const name = sanitizeTitle(opts.title ?? '') || (opts.freshWorkspace ? '' : path.basename(s.cwd));
     if (name) {
-      this.store.setTitle(s.sessionId, name);
+      this.store.setTitle(chatId, name);
       s.title = name;
     }
 
-    return this.buildDetail(s, []);
+    return this.buildDetail(this.store.get(chatId)!, s, []);
   }
 
   // -------------------------------------------------------------------------
@@ -559,11 +553,11 @@ export class SessionManager {
   // -------------------------------------------------------------------------
 
   async runPrompt(
-    sessionId: string,
+    chatId: string,
     content: PromptContentBlock[],
     attachments?: MessageAttachment[],
   ): Promise<void> {
-    const s = await this.ensureOpen(sessionId);
+    const s = await this.ensureOpen(chatId);
     // Held rather than rejected: a message typed while the process is being replaced
     // should land on the new one, not bounce back at the user.
     await this.settleReload(s);
@@ -586,10 +580,10 @@ export class SessionManager {
     // Named before the turn is announced, so a client reacting to turn_started already
     // sees it. Only when nothing has named it yet: a title the user set, or one taken
     // from a chosen working directory, is theirs to keep.
-    if (!this.store.getTitle(s.sessionId)) {
+    if (!this.store.getTitle(chatId)) {
       const title = titleFromPrompt(content);
       if (title) {
-        this.store.setTitle(s.sessionId, title);
+        this.store.setTitle(chatId, title);
         s.title = title;
       }
     }
@@ -597,8 +591,9 @@ export class SessionManager {
     // Only counted when there is something to record, so an ordinary prompt pays nothing.
     let recorded: MessageAttachment[] | undefined;
     if (attachments?.length) {
+      // Counted over kiro's file, recorded against the chat that owns it.
       const ordinal = await promptCount(s.sessionId);
-      this.store.setAttachments(s.sessionId, ordinal, attachments);
+      this.store.setAttachments(chatId, ordinal, attachments);
       recorded = attachments;
     }
 
@@ -625,13 +620,13 @@ export class SessionManager {
       });
   }
 
-  cancel(sessionId: string): void {
-    const s = this.sessions.get(sessionId);
+  cancel(chatId: string): void {
+    const s = this.sessions.get(this.store.sessionIdForChat(chatId) ?? '');
     s?.proc?.cancel(s.sessionId);
   }
 
-  async setMode(sessionId: string, modeId: string): Promise<void> {
-    const s = await this.ensureOpen(sessionId);
+  async setMode(chatId: string, modeId: string): Promise<void> {
+    const s = await this.ensureOpen(chatId);
     await this.settleReload(s);
     const proc = await this.ensureProc(s);
     await proc.setMode(s.sessionId, modeId);
@@ -640,8 +635,8 @@ export class SessionManager {
     s.lastActivity = Date.now();
   }
 
-  async setModel(sessionId: string, modelId: string): Promise<void> {
-    const s = await this.ensureOpen(sessionId);
+  async setModel(chatId: string, modelId: string): Promise<void> {
+    const s = await this.ensureOpen(chatId);
     await this.settleReload(s);
     const proc = await this.ensureProc(s);
     await proc.setModel(s.sessionId, modelId);
@@ -649,8 +644,8 @@ export class SessionManager {
     s.lastActivity = Date.now();
   }
 
-  async execCommand(sessionId: string, command: string): Promise<void> {
-    const s = await this.ensureOpen(sessionId);
+  async execCommand(chatId: string, command: string): Promise<void> {
+    const s = await this.ensureOpen(chatId);
     await this.settleReload(s);
     const proc = await this.ensureProc(s);
     await proc.execCommand(s.sessionId, command);
@@ -662,33 +657,35 @@ export class SessionManager {
   // -------------------------------------------------------------------------
 
   /**
-   * The one place a SessionSummary is assembled: kiro's file and Casper's live state each hold
+   * The one place a ChatSummary is assembled: kiro's file and Casper's live state each hold
    * part of the truth, so every read path projects them through here. `persisted` is absent for
    * a session with no file yet, `live` for a dormant one, and callers guarantee one of them.
    */
   private summaryOf(
+    chat: ChatRow,
     live: Session | undefined,
-    persisted: SessionSummary | undefined,
+    persisted: PersistedSession | undefined,
     transcript?: TranscriptItem[],
-  ): SessionSummary {
-    const sessionId = live?.sessionId ?? persisted!.sessionId;
+  ): ChatSummary {
     const snap = live?.turnState.get();
     // A live session's cwd already carries the override, applied in ensureOpen.
-    const cwd = live?.cwd ?? this.store.getCwd(sessionId) ?? persisted!.cwd;
+    const cwd = live?.cwd ?? chat.cwd ?? persisted?.cwd ?? config.defaultCwd;
 
     return {
-      sessionId,
-      chatId: live?.chatId ?? this.store.getChatId(sessionId),
-      title: this.titleOf(sessionId, {
+      chatId: chat.chatId,
+      sessionId: live?.sessionId ?? chat.sessionId ?? undefined,
+      title: this.titleOf(chat, {
         // kiro's file is what kiro called it; the live copy is only a cache of it.
         kiroTitle: persisted?.title || live?.title,
         firstPrompt: transcript && firstPromptText(transcript),
         cwd,
       }),
       cwd,
-      createdAt: persisted?.createdAt ?? live!.createdAt,
+      createdAt: persisted?.createdAt ?? live?.createdAt ?? new Date().toISOString(),
       // kiro's file and our own activity move separately.
-      updatedAt: live ? newerOf(persisted?.updatedAt, live.updatedAt) : persisted!.updatedAt,
+      updatedAt: live
+        ? newerOf(persisted?.updatedAt, live.updatedAt)
+        : (persisted?.updatedAt ?? new Date().toISOString()),
       liveness: live?.proc ? 'live' : 'dormant',
       agentId: live?.agentId ?? persisted?.agentId,
       modelId: live?.modelId ?? persisted?.modelId,
@@ -700,34 +697,53 @@ export class SessionManager {
     };
   }
 
-  async listSessions(): Promise<SessionSummary[]> {
-    const persisted = await listPersistedSessions(this.log);
-    const files = new Map(persisted.map((p) => [p.sessionId, p]));
-    const byId = new Map<string, SessionSummary>();
-    for (const p of persisted) {
-      byId.set(p.sessionId, this.summaryOf(undefined, p));
-    }
-    for (const s of this.sessions.values()) {
-      if (isGhost(s, files.has(s.sessionId))) {
-        this.evict(s.sessionId);
-        continue;
+  async listChats(): Promise<ChatSummary[]> {
+    const rows = this.store.all();
+    const files = await Promise.all(
+      rows.map((r) => (r.sessionId ? readPersistedSession(r.sessionId) : null)),
+    );
+
+    const out: ChatSummary[] = [];
+    rows.forEach((row, i) => {
+      const live = row.sessionId ? this.sessions.get(row.sessionId) : undefined;
+      const persisted = files[i] ?? undefined;
+      if (live && isGhost(live, !!persisted)) {
+        this.evict(live.sessionId);
+        return;
       }
-      byId.set(s.sessionId, this.summaryOf(s, files.get(s.sessionId)));
-    }
-    return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      // A chat whose session file is gone has nothing to open.
+      if (!persisted && !live) return;
+      out.push(this.summaryOf(row, live, persisted));
+    });
+    return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  async getDetail(sessionId: string): Promise<SessionDetail> {
-    // Both reads in parallel: a live session needs the file too, so its summary
-    // gets the same fallbacks the list gives it and the two cannot disagree.
+  /** kiro's session id for a chat, or a throw if the chat is unknown. */
+  private sessionIdOf(chatId: string): string {
+    const sessionId = this.store.sessionIdForChat(chatId);
+    if (!sessionId) throw new Error(`Unknown chat: ${chatId}`);
+    return sessionId;
+  }
+
+  async getDetail(chatId: string): Promise<ChatDetail> {
+    const chat = this.store.get(chatId);
+    if (!chat) throw new Error(`Unknown chat: ${chatId}`);
+    const sessionId = chat.sessionId;
+
+    // Both reads in parallel: a live session needs the file too, so its summary gets the same
+    // fallbacks the list gives it and the two cannot disagree.
     const [transcript, persisted] = await Promise.all([
-      hydrateTranscript(sessionId, this.store.attachmentsBySession(sessionId)),
-      readPersistedSession(sessionId),
+      sessionId
+        ? hydrateTranscript(sessionId, this.store.attachmentsByChat(chatId))
+        : Promise.resolve([]),
+      sessionId ? readPersistedSession(sessionId) : Promise.resolve(null),
     ]);
 
-    const s = this.sessions.get(sessionId);
-    if (!s && !persisted) throw new Error(`Unknown session: ${sessionId}`);
-    return this.buildDetail(s, transcript, persisted ?? undefined);
+    const s = sessionId ? this.sessions.get(sessionId) : undefined;
+    // listChats drops a chat with neither, so the two read paths agree rather than one of them
+    // fabricating a summary with a different timestamp on every call.
+    if (!s && !persisted) throw new Error(`Unknown chat: ${chatId}`);
+    return this.buildDetail(chat, s, transcript, persisted ?? undefined);
   }
 
   /**
@@ -736,13 +752,13 @@ export class SessionManager {
    * requested window. offset/limit are clamped to the transcript bounds.
    */
   async getTranscriptPage(
-    sessionId: string,
+    chatId: string,
     offset: number,
     limit: number,
   ): Promise<TranscriptItem[]> {
     const transcript = await hydrateTranscript(
-      sessionId,
-      this.store.attachmentsBySession(sessionId),
+      this.sessionIdOf(chatId),
+      this.store.attachmentsByChat(chatId),
     );
     const start = Math.max(0, Math.min(offset, transcript.length));
     const end = Math.max(start, Math.min(start + limit, transcript.length));
@@ -751,12 +767,13 @@ export class SessionManager {
 
   /** One projection, so a dormant session and a live one cannot disagree. */
   private buildDetail(
+    chat: ChatRow,
     s: Session | undefined,
-    transcript: SessionDetail['transcript'],
-    persisted?: SessionSummary,
-  ): SessionDetail {
+    transcript: ChatDetail['transcript'],
+    persisted?: PersistedSession,
+  ): ChatDetail {
     return {
-      summary: this.summaryOf(s, persisted, transcript),
+      summary: this.summaryOf(chat, s, persisted, transcript),
       modes: s?.availableModes ?? [],
       currentModeId: s?.currentModeId ?? persisted?.agentId,
       // Only the tail is sent on load; replayHead/title use the full transcript.
@@ -775,7 +792,7 @@ export class SessionManager {
    * to its jsonl only once it completes, so a hydrated transcript is missing one in flight:
    * rewind to just before its turn_started and let the socket replay the whole turn.
    */
-  private replayHead(s: Session, transcript: SessionDetail['transcript']): number {
+  private replayHead(s: Session, transcript: ChatDetail['transcript']): number {
     const head = s.store.head();
     if (!s.running) return head;
     const { events } = s.store.getSince(0);
@@ -819,8 +836,9 @@ export class SessionManager {
 
   // Permanently delete a session: evict it from memory, remove its on-disk
   // files, and drop any title override.
-  async deleteSession(sessionId: string): Promise<void> {
-    const s = this.sessions.get(sessionId);
+  async deleteChat(chatId: string): Promise<void> {
+    const sessionId = this.store.sessionIdForChat(chatId);
+    const s = sessionId ? this.sessions.get(sessionId) : undefined;
     // kiro flushes its session file on shutdown, so wait for the process to
     // exit before deleting - otherwise its write recreates the files.
     if (s?.proc) {
@@ -828,8 +846,9 @@ export class SessionManager {
       s.proc = undefined;
       s.running = false;
     }
+    this.store.remove(chatId);
+    if (!sessionId) return;
     this.evict(sessionId);
-    this.store.remove(sessionId);
     await deletePersistedSession(sessionId);
     // kiro-cli spawns a wrapped kiro-cli-chat that flushes the session file on
     // its own shutdown, which can land just after our delete. Sweep once more

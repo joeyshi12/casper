@@ -6,7 +6,7 @@
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import type { SessionSummary } from '@casper/shared';
+import type { ChatSummary } from '@casper/shared';
 
 type Any = any;
 
@@ -20,9 +20,9 @@ let host: HTMLElement;
 let w: Any;
 
 const sessions = [
-  { sessionId: 's1', title: 'first', cwd: '/tmp', createdAt: '', updatedAt: '', liveness: 'dormant', running: false },
-  { sessionId: 's2', title: 'second', cwd: '/tmp', createdAt: '', updatedAt: '', liveness: 'dormant', running: false },
-] as unknown as SessionSummary[];
+  { chatId: 's1', title: 'first', cwd: '/tmp', createdAt: '', updatedAt: '', liveness: 'dormant', running: false },
+  { chatId: 's2', title: 'second', cwd: '/tmp', createdAt: '', updatedAt: '', liveness: 'dormant', running: false },
+] as unknown as ChatSummary[];
 
 const rows = () => [...host.querySelectorAll('.srow')] as HTMLElement[];
 const menuButtons = () =>

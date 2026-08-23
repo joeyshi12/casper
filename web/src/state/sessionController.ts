@@ -1,16 +1,16 @@
 import type {
   AgentsResponse,
-  CreateSessionRequest,
+  CreateChatRequest,
   ModelsResponse,
   MessageAttachment,
   PromptContentBlock,
-  SessionDetail,
-  SessionListResponse,
+  ChatDetail,
+  ChatListResponse,
 } from '@casper/shared';
 import { stripAttachmentsLine, titleFromPrompt } from '@casper/shared';
 import { api } from '../api/rest.js';
 import { SessionSocket, type SessionSocketHandlers } from '../api/SessionSocket.js';
-import { DRAFT_PATH, pathForSession } from '../util/route.js';
+import { DRAFT_PATH, pathForChat } from '../util/route.js';
 import { useStore } from './store.js';
 
 /**
@@ -22,16 +22,16 @@ import { useStore } from './store.js';
  * need a renderer, and inside a component none of this could be called at all.
  */
 
-export type CreateOpts = Omit<CreateSessionRequest, 'freshWorkspace'>;
+export type CreateOpts = Omit<CreateChatRequest, 'freshWorkspace'>;
 
 /** The REST calls a session's lifecycle needs. `api` satisfies it. */
 export interface SessionApi {
-  listSessions(): Promise<SessionListResponse>;
-  getSession(id: string): Promise<SessionDetail>;
-  createSession(req: CreateSessionRequest): Promise<SessionDetail>;
-  deleteSession(id: string): Promise<unknown>;
-  renameSession(id: string, title: string): Promise<unknown>;
-  reloadSession(id: string): Promise<SessionDetail>;
+  listChats(): Promise<ChatListResponse>;
+  getChat(id: string): Promise<ChatDetail>;
+  createChat(req: CreateChatRequest): Promise<ChatDetail>;
+  deleteChat(id: string): Promise<unknown>;
+  renameChat(id: string, title: string): Promise<unknown>;
+  reloadChat(id: string): Promise<ChatDetail>;
   models(): Promise<ModelsResponse>;
   agents(): Promise<AgentsResponse>;
 }
@@ -50,7 +50,7 @@ export interface ControlledSocket {
 }
 
 export type CreateSocket = (
-  sessionId: string,
+  chatId: string,
   handlers: SessionSocketHandlers,
   startCursor: number,
 ) => ControlledSocket;
@@ -143,9 +143,9 @@ export class SessionController {
       this.listTimer = null;
       const seq = ++this.listSeq;
       this.api
-        .listSessions()
+        .listChats()
         .then((r) => {
-          if (seq === this.listSeq) this.state.setSessions(r.sessions);
+          if (seq === this.listSeq) this.state.setChats(r.chats);
         })
         .catch(() => {});
     }, this.listCoalesceMs);
@@ -180,7 +180,7 @@ export class SessionController {
     if (this.handledRoute === routeSessionId) return;
     this.handledRoute = routeSessionId;
     if (routeSessionId) {
-      void this.openSession(routeSessionId);
+      void this.openChat(routeSessionId);
     } else {
       this.openTarget = null;
       this.closeSocket();
@@ -205,25 +205,25 @@ export class SessionController {
    * to fetch, and no "Opening session" state to show, which is what made the draft
    * look like it reloaded the page.
    */
-  async openSession(id: string, adopted?: SessionDetail): Promise<void> {
+  async openChat(id: string, adopted?: ChatDetail): Promise<void> {
     if (this.state.activeId === id) return;
     this.openTarget = id;
     this.closeSocket();
     this.state.setConnStatus('connecting');
-    if (!adopted) this.state.setLoadingSession(id);
+    if (!adopted) this.state.setLoadingChat(id);
 
-    let detail: SessionDetail;
+    let detail: ChatDetail;
     if (adopted) {
       detail = adopted;
     } else {
       try {
-        detail = await this.api.getSession(id);
+        detail = await this.api.getChat(id);
       } catch (err) {
         if (this.openTarget !== id) return;
         // Fetch failed (network, or the session was deleted): don't strand the
         // UI in "connecting" - reset and surface the error.
         this.state.setConnStatus('closed');
-        this.state.setLoadingSession(null);
+        this.state.setLoadingChat(null);
         console.error('open session failed:', err);
         // Replaced, so a refresh doesn't retry it and back doesn't return to it.
         this.host?.navigate('/', { replace: true });
@@ -261,7 +261,7 @@ export class SessionController {
         }
       },
       onResync: async () => {
-        const fresh = await this.api.getSession(id);
+        const fresh = await this.api.getChat(id);
         if (this.openTarget !== id) return;
         this.state.loadDetail(fresh);
         this.socket?.reset(fresh.head);
@@ -298,14 +298,14 @@ export class SessionController {
   // Creating
   // -------------------------------------------------------------------------
 
-  async createSession(opts: CreateOpts): Promise<boolean> {
+  async createChat(opts: CreateOpts): Promise<boolean> {
     // Enter the session view right away; it shows "Connecting" until ready.
     this.closeSocket();
     this.state.setConnStatus('connecting');
     this.state.setCreateError(null);
     this.lastCreateOpts = opts;
     try {
-      const detail = await this.api.createSession({
+      const detail = await this.api.createChat({
         // The chat already exists client-side, and may already own uploaded files.
         chatId: this.state.chatId ?? undefined,
         cwd: opts.cwd || undefined,
@@ -315,13 +315,13 @@ export class SessionController {
         freshWorkspace: !opts.cwd,
       });
       this.refreshSessions();
-      const id = detail.summary.sessionId;
+      const id = detail.summary.chatId;
       // Claim the route before navigating, so syncRoute leaves this one alone:
       // it is already open, with the prompt that created it on screen.
       this.handledRoute = id;
       this.isDraft = false;
-      this.host?.navigate(pathForSession(id));
-      void this.openSession(id, detail);
+      this.host?.navigate(pathForChat(id));
+      void this.openChat(id, detail);
       return true;
     } catch (err) {
       // Keep the user on the chat pane and show what went wrong.
@@ -334,7 +334,7 @@ export class SessionController {
   }
 
   retryCreate(): void {
-    if (this.lastCreateOpts) void this.createSession(this.lastCreateOpts);
+    if (this.lastCreateOpts) void this.createChat(this.lastCreateOpts);
   }
 
   dismissCreateError(): void {
@@ -383,7 +383,7 @@ export class SessionController {
       // new session, so the prompt waits for it rather than being dropped.
       // The pickers are live in a draft, so it is created with whatever they show.
       const { currentModeId, currentModelId } = this.state;
-      void this.createSession({
+      void this.createChat({
         agentId: currentModeId,
         modelId: currentModelId,
         // Named on creation, so the row never appears as "Untitled session" for the
@@ -468,13 +468,13 @@ export class SessionController {
    * resync applies one; the pickers are refetched because a new agent only appears
    * once the server has re-read kiro's list.
    */
-  async reloadSession(): Promise<void> {
+  async reloadChat(): Promise<void> {
     const id = this.state.activeId;
     // Scoped to this session: another one restarting is no reason to refuse this.
     if (!id || this.state.reloadingId === id) return;
     this.state.setReloadingId(id);
     try {
-      const detail = await this.api.reloadSession(id);
+      const detail = await this.api.reloadChat(id);
       // Moved on while the process restarted: leave the new session alone.
       if (this.state.activeId !== id) return;
       this.state.loadDetail(detail);
@@ -484,7 +484,7 @@ export class SessionController {
       // Guarded like the success path: don't blame the session the user moved to.
       if (this.state.activeId !== id) return;
       const detail = err instanceof Error ? err.message : 'The server rejected the reload.';
-      this.state.setSessionNotice({
+      this.state.setChatNotice({
         title: "Couldn't reload the session",
         fix: detail,
         detail,
@@ -508,9 +508,9 @@ export class SessionController {
   // Sessions in the list
   // -------------------------------------------------------------------------
 
-  async deleteSession(id: string): Promise<void> {
+  async deleteChat(id: string): Promise<void> {
     try {
-      await this.api.deleteSession(id);
+      await this.api.deleteChat(id);
     } catch {
       console.error('delete session failed');
       this.refreshSessions();
@@ -520,10 +520,10 @@ export class SessionController {
     else this.refreshSessions();
   }
 
-  async renameSession(id: string, title: string): Promise<void> {
+  async renameChat(id: string, title: string): Promise<void> {
     // Optimistic: update the list immediately, then persist.
-    this.state.renameSessionRow(id, title);
-    await this.api.renameSession(id, title).catch(() => {
+    this.state.renameChatRow(id, title);
+    await this.api.renameChat(id, title).catch(() => {
       console.error('rename session failed');
     });
     this.refreshSessions();
@@ -532,7 +532,7 @@ export class SessionController {
   /** Marked before the route changes, or the pane flashes back to the list. */
   markLoading(id: string): void {
     if (id === this.state.activeId) return;
-    this.state.setLoadingSession(id);
+    this.state.setLoadingChat(id);
   }
 
   /**

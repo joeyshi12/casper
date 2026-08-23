@@ -1,26 +1,26 @@
 import type { FastifyInstance } from 'fastify';
 import type {
-  CreateSessionRequest,
+  CreateChatRequest,
   PromptRequest,
-  RenameSessionRequest,
+  RenameChatRequest,
   SetCwdRequest,
   SetModeRequest,
   SetModelRequest,
 } from '@casper/shared';
 import type { SessionManager } from '../session/SessionManager.js';
 
-export function registerSessionRoutes(
+export function registerChatRoutes(
   app: FastifyInstance,
   manager: SessionManager,
 ): void {
-  app.get('/api/sessions', async () => {
-    return { sessions: await manager.listSessions() };
+  app.get('/api/chats', async () => {
+    return { chats: await manager.listChats() };
   });
 
-  app.post('/api/sessions', async (req, reply) => {
-    const body = (req.body ?? {}) as CreateSessionRequest;
+  app.post('/api/chats', async (req, reply) => {
+    const body = (req.body ?? {}) as CreateChatRequest;
     try {
-      return await manager.createSession({
+      return await manager.createChat({
         cwd: body.cwd,
         agentId: body.agentId,
         modelId: body.modelId,
@@ -38,7 +38,7 @@ export function registerSessionRoutes(
   });
 
   // Get session detail (hydrated transcript + observability + replay head).
-  app.get<{ Params: { id: string } }>('/api/sessions/:id', async (req, reply) => {
+  app.get<{ Params: { id: string } }>('/api/chats/:id', async (req, reply) => {
     try {
       return await manager.getDetail(req.params.id);
     } catch (err) {
@@ -50,7 +50,7 @@ export function registerSessionRoutes(
   // Older transcript items for lazy load-on-scroll-up: returns items in
   // [offset, offset+limit) of the full transcript.
   app.get<{ Params: { id: string }; Querystring: { offset?: string; limit?: string } }>(
-    '/api/sessions/:id/transcript',
+    '/api/chats/:id/transcript',
     async (req, reply) => {
       const offset = Number.parseInt(req.query.offset ?? '', 10);
       const limit = Number.parseInt(req.query.limit ?? '', 10);
@@ -70,7 +70,7 @@ export function registerSessionRoutes(
   // Fire-and-forget prompt over REST (also available over WS). runPrompt spawns
   // the kiro process lazily if the session isn't live yet.
   app.post<{ Params: { id: string }; Body: PromptRequest }>(
-    '/api/sessions/:id/prompt',
+    '/api/chats/:id/prompt',
     async (req, reply) => {
       try {
         await manager.runPrompt(req.params.id, req.body.prompt, req.body.attachments);
@@ -82,13 +82,13 @@ export function registerSessionRoutes(
     },
   );
 
-  app.post<{ Params: { id: string } }>('/api/sessions/:id/cancel', async (req) => {
+  app.post<{ Params: { id: string } }>('/api/chats/:id/cancel', async (req) => {
     manager.cancel(req.params.id);
     return { ok: true };
   });
 
   app.post<{ Params: { id: string }; Body: SetModelRequest }>(
-    '/api/sessions/:id/model',
+    '/api/chats/:id/model',
     async (req) => {
       await manager.setModel(req.params.id, req.body.modelId);
       return { ok: true };
@@ -96,7 +96,7 @@ export function registerSessionRoutes(
   );
 
   app.post<{ Params: { id: string }; Body: SetModeRequest }>(
-    '/api/sessions/:id/mode',
+    '/api/chats/:id/mode',
     async (req) => {
       await manager.setMode(req.params.id, req.body.modeId);
       return { ok: true };
@@ -104,10 +104,10 @@ export function registerSessionRoutes(
   );
 
   // Rename a session (Casper-side title override).
-  app.post<{ Params: { id: string }; Body: RenameSessionRequest }>(
-    '/api/sessions/:id/rename',
+  app.post<{ Params: { id: string }; Body: RenameChatRequest }>(
+    '/api/chats/:id/rename',
     async (req) => {
-      manager.renameSession(req.params.id, req.body.title);
+      manager.renameChat(req.params.id, req.body.title);
       return { ok: true };
     },
   );
@@ -115,7 +115,7 @@ export function registerSessionRoutes(
   // Re-point a session at a different working directory (Casper-side override,
   // for when the original folder was moved or deleted).
   app.post<{ Params: { id: string }; Body: SetCwdRequest }>(
-    '/api/sessions/:id/cwd',
+    '/api/chats/:id/cwd',
     async (req, reply) => {
       const cwd = (req.body?.cwd ?? '').trim();
       if (!cwd) {
@@ -123,7 +123,7 @@ export function registerSessionRoutes(
         return { error: 'cwd is required' };
       }
       try {
-        return { ok: true, cwd: await manager.setSessionCwd(req.params.id, cwd) };
+        return { ok: true, cwd: await manager.setChatCwd(req.params.id, cwd) };
       } catch (err) {
         reply.code(400);
         return { error: (err as Error).message };
@@ -134,9 +134,9 @@ export function registerSessionRoutes(
   // Restart the session's kiro child so a `.kiro` directory, agent definition or
   // MCP server that changed since it started is picked up. Returns the refreshed
   // detail, so the client applies it exactly as it applies a resync.
-  app.post<{ Params: { id: string } }>('/api/sessions/:id/reload', async (req, reply) => {
+  app.post<{ Params: { id: string } }>('/api/chats/:id/reload', async (req, reply) => {
     try {
-      return await manager.reloadSession(req.params.id);
+      return await manager.reloadChat(req.params.id);
     } catch (err) {
       reply.code(400);
       return { error: (err as Error).message };
@@ -144,8 +144,8 @@ export function registerSessionRoutes(
   });
 
   // Permanently delete a session (memory + on-disk files).
-  app.delete<{ Params: { id: string } }>('/api/sessions/:id', async (req) => {
-    await manager.deleteSession(req.params.id);
+  app.delete<{ Params: { id: string } }>('/api/chats/:id', async (req) => {
+    await manager.deleteChat(req.params.id);
     return { ok: true };
   });
 }
