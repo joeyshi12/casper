@@ -173,6 +173,10 @@ export class SessionController {
    */
   syncRoute(routeSessionId: string | null, isDraft: boolean): void {
     this.isDraft = isDraft;
+    // A draft needs an identity before it sends, so an upload has somewhere to go. Minted
+    // above the route-change check below, because loading straight into the draft route is
+    // not a change - and the chat still needs an id.
+    if (isDraft && !this.state.chatId) this.state.newChatId();
     if (this.handledRoute === routeSessionId) return;
     this.handledRoute = routeSessionId;
     if (routeSessionId) {
@@ -180,7 +184,13 @@ export class SessionController {
     } else {
       this.openTarget = null;
       this.closeSocket();
+      // Whether this is a draft that already has an identity, as opposed to arriving from a
+      // real session: keep the id in that case, so a file uploaded a moment ago is still
+      // in the chat that is about to be created. Coming from a session, mint a new one, or
+      // the draft would upload into that session's directory and then bind to it.
+      const continuingDraft = this.state.activeId === null && this.state.chatId !== null;
       this.state.clearActive();
+      if (!continuingDraft) this.state.newChatId();
       this.refreshSessions();
     }
   }
@@ -296,6 +306,8 @@ export class SessionController {
     this.lastCreateOpts = opts;
     try {
       const detail = await this.api.createSession({
+        // The chat already exists client-side, and may already own uploaded files.
+        chatId: this.state.chatId ?? undefined,
         cwd: opts.cwd || undefined,
         agentId: opts.agentId,
         modelId: opts.modelId,
@@ -338,6 +350,9 @@ export class SessionController {
     this.openTarget = null;
     this.closeSocket();
     this.state.clearActive();
+    // An explicit new chat is always a new identity, so its uploads can't land in the
+    // directory of the chat that was open a moment ago.
+    this.state.newChatId();
     this.state.setCreateError(null);
     this.host?.navigate(DRAFT_PATH);
   }

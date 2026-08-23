@@ -56,7 +56,7 @@ export async function buildApp(): Promise<CasperApp> {
   registerFsRoutes(app);
   registerSessionRoutes(app, manager);
   registerWorkspaceRoutes(app, manager);
-  registerUploadRoutes(app, manager);
+  registerUploadRoutes(app);
   registerWsGateway(app, manager);
 
   // Serve the built web app in production (single origin, no CORS needed).

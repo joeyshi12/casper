@@ -3,6 +3,7 @@
 
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -15,14 +16,17 @@ import type {
   SessionDetail,
   SessionSummary,
   TreeResponse,
+  UploadResponse,
 } from '@casper/shared';
 import Fastify from 'fastify';
+import multipart from '@fastify/multipart';
 import { useStore } from '../web/src/state/store.js';
 import { config, parseConfigDoc, pickInt, pickString } from '../server/src/config.js';
 import { AttemptLimiter } from '../server/src/util/rateLimit.js';
 import { SessionManager, Session } from '../server/src/session/SessionManager.js';
 import { describeError } from '../server/src/acp/errors.js';
 import { registerFsRoutes } from '../server/src/routes/fs.js';
+import { registerUploadRoutes } from '../server/src/routes/uploads.js';
 import { registerWorkspaceRoutes } from '../server/src/routes/workspace.js';
 import { KiroProcess } from '../server/src/session/KiroProcess.js';
 import { listAgents, invalidateAgents } from '../server/src/session/agents.js';
@@ -1030,6 +1034,79 @@ describe('ws gateway connection', () => {
     await settle();
     socket.hangUp();
     assert.deepEqual(sessions.calls, ['unsubscribed']);
+  });
+});
+
+// The reason uploads are keyed by chat: a new chat has no kiro session id until it sends,
+// so keying them on one meant a first message could not carry a file.
+const isUuid = (s: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+
+describe('POST /api/chats/:chatId/uploads', () => {
+  let dataDir: string;
+  let app: Awaited<ReturnType<typeof Fastify>>;
+  const origData = config.casperDataDir;
+
+  const post = (chatId: string, filename: string, body: string) => {
+    const boundary = '----casperTest';
+    const payload =
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="files"; filename="${filename}"\r\n` +
+      `Content-Type: text/plain\r\n\r\n${body}\r\n--${boundary}--\r\n`;
+    return app.inject({
+      method: 'POST',
+      url: `/api/chats/${chatId}/uploads`,
+      headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload,
+    });
+  };
+
+  before(async () => {
+    dataDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-chat-uploads-')));
+    (config as { casperDataDir: string }).casperDataDir = dataDir;
+    app = Fastify();
+    await app.register(multipart);
+    registerUploadRoutes(app);
+    await app.ready();
+  });
+
+  after(async () => {
+    await app.close();
+    (config as { casperDataDir: string }).casperDataDir = origData;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('accepts a file for a chat that has no session yet', async () => {
+    const chatId = crypto.randomUUID();
+    const res = await post(chatId, 'notes.txt', 'hello from a draft');
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as UploadResponse;
+    assert.equal(body.files.length, 1);
+    assert.equal(body.files[0]!.name, 'notes.txt');
+    // Under the chat's own directory, which is the whole point.
+    assert.equal(
+      path.dirname(body.files[0]!.path),
+      path.join(dataDir, 'chats', chatId, 'uploads'),
+    );
+    assert.equal(fs.readFileSync(body.files[0]!.path, 'utf8'), 'hello from a draft');
+  });
+
+  it('keeps the uploads directory private to the user', async () => {
+    const chatId = crypto.randomUUID();
+    await post(chatId, 'a.txt', 'x');
+    const dir = path.join(dataDir, 'chats', chatId, 'uploads');
+    assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
+  });
+
+  // The id names a directory and comes from the client, so its shape is the guard.
+  it('refuses an id that is not a uuid', async () => {
+    for (const bad of ['not-a-uuid', 'a/../../escape', '']) {
+      const res = await post(bad, 'a.txt', 'x');
+      // 400 from the handler, or 404 when the router rejects the shape before it - either
+      // way it does not land.
+      assert.notEqual(res.statusCode, 200, bad);
+    }
+    assert.deepEqual(fs.readdirSync(path.join(dataDir, 'chats')).filter((d) => !isUuid(d)), []);
   });
 });
 

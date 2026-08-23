@@ -1,6 +1,8 @@
 import type { MessageAttachment } from '@casper/shared';
 import { db } from './db.js';
 
+type SessionColumn = 'title' | 'cwd' | 'chat_id';
+
 /**
  * Per-session overrides Casper layers over kiro's own session files: a renamed
  * title and a re-pointed working directory, one row each.
@@ -23,6 +25,18 @@ export class SessionStore {
 
   setCwd(sessionId: string, cwd: string): void {
     this.write(sessionId, 'cwd', cwd);
+  }
+
+  /**
+   * The chat that owns this session's uploads. Sessions created before the chats layout
+   * have no row, and fall back to the session id so they still get one stable directory.
+   */
+  getChatId(sessionId: string): string {
+    return this.read(sessionId, 'chat_id') ?? sessionId;
+  }
+
+  setChatId(sessionId: string, chatId: string): void {
+    this.write(sessionId, 'chat_id', chatId);
   }
 
   /** Record what was attached to one prompt. See db.ts for why the key is an ordinal. */
@@ -83,14 +97,14 @@ export class SessionStore {
     db().prepare('DELETE FROM message_attachments WHERE session_id = ?').run(sessionId);
   }
 
-  private read(sessionId: string, column: 'title' | 'cwd'): string | undefined {
+  private read(sessionId: string, column: SessionColumn): string | undefined {
     const row = db()
       .prepare(`SELECT ${column} AS value FROM sessions WHERE session_id = ?`)
       .get(sessionId) as { value: string | null } | undefined;
     return row?.value ?? undefined;
   }
 
-  private write(sessionId: string, column: 'title' | 'cwd', value: string): void {
+  private write(sessionId: string, column: SessionColumn, value: string): void {
     db()
       .prepare(
         `INSERT INTO sessions (session_id, ${column}) VALUES (?, ?)

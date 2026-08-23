@@ -58,6 +58,7 @@ export function ChatPane({
   // message shows while the session is still being created.
   const composing = useStore((st) => isDraft && st.pending.length === 0 && st.items.length === 0);
   const activeId = useStore((s) => s.activeId);
+  const chatId = useStore((s) => s.chatId);
   const sessionNotice = useStore((s) => s.sessionNotice);
   // A derived boolean, so this re-renders only when the answer for this session flips.
   const reloading = useStore((s) => s.reloadingId !== null && s.reloadingId === s.activeId);
@@ -151,7 +152,7 @@ export function ChatPane({
         </div>
       )}
       <Composer
-        sessionId={activeId}
+        chatId={chatId}
         onSend={onSend}
         onCancel={onCancel}
         onCompact={onCompact}

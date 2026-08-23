@@ -54,6 +54,12 @@ interface CasperState {
 
   // Active session
   activeId: string | null;
+  /**
+   * The chat that owns the uploads directory. Minted for a draft so it can attach a file
+   * before the session exists, then adopted from the created session. See the server's
+   * chats.ts.
+   */
+  chatId: string | null;
   /** Session whose detail is currently being fetched (opening/switching), so
    *  the pane can show a loading state instead of the previous session's stale
    *  content while a slow transcript hydrates. Null once loadDetail lands. */
@@ -97,6 +103,8 @@ interface CasperState {
   loadDetail: (d: SessionDetail, opts?: { keepPending?: boolean }) => void;
   prependItems: (older: TranscriptItem[]) => void;
   clearActive: () => void;
+  /** Start a new chat's identity, before it has a session. */
+  newChatId: () => string;
   applyEvent: (e: CasperEvent) => void;
   addPending: (pending: Omit<PendingMessage, 'status'>) => void;
   markPendingFailed: (id: string, error?: string) => void;
@@ -125,6 +133,7 @@ export const useStore = create<CasperState>((set, get) => ({
   agents: [],
   defaultAgentId: 'kiro_default',
   activeId: null,
+  chatId: null,
   loadingSessionId: null,
   modes: [],
   items: [],
@@ -207,6 +216,7 @@ export const useStore = create<CasperState>((set, get) => ({
   loadDetail: (d, opts) =>
     set((s) => ({
       activeId: d.summary.sessionId,
+      chatId: d.summary.chatId,
       loadingSessionId: null,
       // The detail knows this session's title before the next list fetch does.
       sessions: upsertSession(s.sessions, d.summary),
@@ -234,6 +244,12 @@ export const useStore = create<CasperState>((set, get) => ({
       items: [...older, ...s.items],
       remainingOlder: Math.max(0, s.remainingOlder - older.length),
     })),
+
+  newChatId: () => {
+    const chatId = crypto.randomUUID();
+    set({ chatId });
+    return chatId;
+  },
 
   clearActive: () =>
     set({

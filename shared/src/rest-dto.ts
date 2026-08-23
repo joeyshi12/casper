@@ -40,6 +40,8 @@ export type SessionLiveness = 'live' | 'dormant';
 
 export interface SessionSummary {
   sessionId: string;
+  /** The chat that owns this session's uploads. See the server's chats.ts. */
+  chatId: string;
   title: string;
   cwd: string;
   createdAt: string;
@@ -66,9 +68,14 @@ export interface CreateSessionRequest {
   modelId?: string;
   /**
    * Give the session a workspace of its own instead of a working directory the user
-   * picked: <data dir>/workspaces/<workspace id>.
+   * picked: <data dir>/chats/<chat id>/workspace.
    */
   freshWorkspace?: boolean;
+  /**
+   * The chat this session belongs to, minted by the client so it can attach files before
+   * the session exists. The server generates one if it is absent or malformed.
+   */
+  chatId?: string;
   /**
    * Name the session as it is created. The client knows the first prompt before the
    * session exists, so passing it here means the row is never listed as untitled.

@@ -3,6 +3,7 @@
 
 import { describe, it, before, beforeEach, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,10 +27,13 @@ import { hydrateTranscript, promptCount } from '../server/src/session/kiroFiles.
 import { bumpSessionToTop } from '../web/src/state/sessions.js';
 import { noopLogger, fakeKiroProcess, type FakeProcess } from './helpers.js';
 import {
-  createWorkspace,
-  workspaceDir,
-  workspacesRoot,
-} from '../server/src/session/workspaces.js';
+  chatDir,
+  chatsRoot,
+  chatUploadsDir,
+  chatWorkspaceDir,
+  createChatWorkspace,
+  isManagedWorkspace,
+} from '../server/src/session/chats.js';
 import { titleFromPrompt, sanitizeTitle } from '@casper/shared';
 
 // Fixtures go in temp directories, never the developer's real ~/.kiro. Set
@@ -779,30 +783,84 @@ describe('default agent', () => {
   });
 });
 
-describe('workspaces', () => {
-  // Kept apart from the session id on purpose: kiro only names a session once it has
-  // started, and a working directory has to exist before it can start in one.
-  it('mints an id of its own, not the session id', () => {
-    const a = createWorkspace();
-    const b = createWorkspace();
-    try {
-      assert.notEqual(a.id, b.id);
-      assert.equal(a.dir, workspaceDir(a.id));
-      assert.ok(a.dir.startsWith(workspacesRoot()), `${a.dir} not under ${workspacesRoot()}`);
-    } finally {
-      fs.rmSync(a.dir, { recursive: true, force: true });
-      fs.rmSync(b.dir, { recursive: true, force: true });
-    }
+describe('the chat a session belongs to', () => {
+  let dir: string;
+  const origDir = config.casperDataDir;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-chatid-'));
+    (config as { casperDataDir: string }).casperDataDir = dir;
+    closeDb();
+  });
+  after(() => {
+    closeDb();
+    (config as { casperDataDir: string }).casperDataDir = origDir;
   });
 
-  it('creates the directory, private to the user', () => {
-    const { dir } = createWorkspace();
+  it('remembers the chat id the client minted', () => {
+    const store = new SessionStore();
+    const chatId = crypto.randomUUID();
+    store.setChatId('sess-1', chatId);
+    assert.equal(store.getChatId('sess-1'), chatId);
+  });
+
+  // Sessions that predate the chats layout have no row. Falling back to the session id gives
+  // them one stable directory rather than a new one per call.
+  it('falls back to the session id for a session that has none', () => {
+    const store = new SessionStore();
+    assert.equal(store.getChatId('legacy-session'), 'legacy-session');
+    assert.equal(store.getChatId('legacy-session'), 'legacy-session');
+  });
+
+  it('keeps the chat id when another override is written', () => {
+    const store = new SessionStore();
+    const chatId = crypto.randomUUID();
+    store.setChatId('sess-2', chatId);
+    store.setTitle('sess-2', 'renamed');
+    store.setCwd('sess-2', '/tmp');
+    assert.equal(store.getChatId('sess-2'), chatId);
+    assert.equal(store.getTitle('sess-2'), 'renamed');
+  });
+});
+
+describe('the chat directory layout', () => {
+  // The whole point of a chat id: it exists before kiro has named a session, so a brand-new
+  // chat has somewhere to put an upload. Keying this on the session id is what made a first
+  // message unable to carry a file.
+  it('puts uploads and the workspace under one directory the chat owns', () => {
+    const chatId = crypto.randomUUID();
+    assert.equal(chatDir(chatId), path.join(chatsRoot(), chatId));
+    assert.equal(chatUploadsDir(chatId), path.join(chatsRoot(), chatId, 'uploads'));
+    assert.equal(chatWorkspaceDir(chatId), path.join(chatsRoot(), chatId, 'workspace'));
+  });
+
+  it('creates the workspace on demand, private to the user', () => {
+    const dir = createChatWorkspace(crypto.randomUUID());
     try {
       assert.equal(fs.existsSync(dir), true);
       assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // A chat pointed at a directory the user picked never gets one, so the uploads directory
+  // has to stand on its own rather than being a sibling of a workspace that must exist.
+  it('does not require a workspace to have an uploads directory', () => {
+    const chatId = crypto.randomUUID();
+    assert.equal(fs.existsSync(chatWorkspaceDir(chatId)), false);
+    assert.ok(chatUploadsDir(chatId).startsWith(chatDir(chatId)));
+  });
+
+  // Workspaces made before this layout stay where they are: their path is recorded in
+  // casper.db and in kiro's own session file.
+  it('still recognises a workspace in the old location as one of ours', () => {
+    assert.equal(isManagedWorkspace(chatWorkspaceDir(crypto.randomUUID())), true);
+    assert.equal(
+      isManagedWorkspace(path.join(config.casperDataDir, 'workspaces', crypto.randomUUID())),
+      true,
+    );
+    assert.equal(isManagedWorkspace('/home/someone/projects/thing'), false);
   });
 });
 

@@ -1505,6 +1505,39 @@ describe('session controller', () => {
     assert.deepEqual(socket.sent[0]!.attachments, [zip], 'and the same files');
   });
 
+  // A draft has no session id, so without an identity of its own it had nowhere to upload:
+  // the composer refused with "No active session to upload to".
+  it('a draft has a chat id before it sends, and creates the session with it', async () => {
+    let sentChatId: string | undefined;
+    const { controller } = build({
+      api: {
+        createSession: async (req) => {
+          sentChatId = req.chatId;
+          return detailFor('created-1');
+        },
+      },
+    });
+
+    // The draft route, which is how the app enters one.
+    controller.syncRoute(null, true);
+    const draftChatId = useStore.getState().chatId;
+    assert.ok(draftChatId, 'a draft can upload before it has a session');
+
+    controller.send([{ type: 'text', text: 'hi' }]);
+    await settle();
+    assert.equal(sentChatId, draftChatId, 'the session adopts the chat that owns the uploads');
+  });
+
+  it('a new draft after an open session does not reuse its chat', async () => {
+    const { controller } = build();
+    await controller.openSession('s1');
+    const openChatId = useStore.getState().chatId;
+
+    controller.startDraft();
+    assert.notEqual(useStore.getState().chatId, openChatId);
+    assert.ok(useStore.getState().chatId);
+  });
+
   it('an expired cookie tears the session down and shows the gate', async () => {
     const { controller, socket, nav } = build();
     await controller.openSession('s1');
