@@ -27,6 +27,7 @@ import { SessionManager, Session } from '../server/src/session/SessionManager.js
 import { describeError } from '../server/src/acp/errors.js';
 import { registerFsRoutes } from '../server/src/routes/fs.js';
 import { registerUploadRoutes } from '../server/src/routes/uploads.js';
+import { registerSessionRoutes } from '../server/src/routes/sessions.js';
 import { registerWorkspaceRoutes } from '../server/src/routes/workspace.js';
 import { KiroProcess } from '../server/src/session/KiroProcess.js';
 import { listAgents, invalidateAgents } from '../server/src/session/agents.js';
@@ -1051,6 +1052,39 @@ describe('ws gateway connection', () => {
 
 // The reason uploads are keyed by chat: a new chat has no kiro session id until it sends,
 // so keying them on one meant a first message could not carry a file.
+// The create route copies the body field by field, so a field added to CreateSessionRequest
+// and not added here is dropped silently. chatId was, and it stranded every file attached to
+// a first prompt: the upload went to the chat the client minted, then the server minted a
+// different one for the session, so nothing referred to that directory again.
+describe('POST /api/sessions forwards the whole request', () => {
+  it('passes every field through to the manager', async () => {
+    let got: Record<string, unknown> | undefined;
+    const app = Fastify();
+    registerSessionRoutes(app, {
+      createSession: async (opts: Record<string, unknown>) => {
+        got = opts;
+        return { summary: { sessionId: 's1' } } as unknown as SessionDetail;
+      },
+    } as unknown as SessionManager);
+    await app.ready();
+
+    const body = {
+      cwd: '/tmp/somewhere',
+      agentId: 'casper',
+      modelId: 'claude-4',
+      freshWorkspace: true,
+      title: 'a title',
+      chatId: 'c0ffee00-0000-4000-8000-000000000000',
+    };
+    const res = await app.inject({ method: 'POST', url: '/api/sessions', payload: body });
+    assert.equal(res.statusCode, 200);
+    for (const [k, v] of Object.entries(body)) {
+      assert.equal(got?.[k], v, `${k} did not reach the manager`);
+    }
+    await app.close();
+  });
+});
+
 const isUuid = (s: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
