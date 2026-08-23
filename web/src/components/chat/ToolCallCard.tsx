@@ -15,6 +15,7 @@ import {
   toolBlocks,
   toolLabel,
 } from '../../util/toolRender.js';
+import { ChevronIcon } from '../common/icons.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { prettyWidgetTitle, widgetCallOf } from '../../util/widgetCall.js';
 import { choiceCallOf } from '../../util/choiceCall.js';
@@ -156,7 +157,9 @@ function GenericToolCall({ tool, arriving = false }: ToolCallCardProps) {
           </span>
         )}
         <span className="toolcall-status">{STATUS_LABEL[status] ?? status}</span>
-        <span className={`toolcall-chevron ${open ? 'is-open' : ''}`}>&#9656;</span>
+        <span className={`toolcall-chevron ${open ? 'is-open' : ''}`}>
+          <ChevronIcon size={14} />
+        </span>
       </button>
 
       {imagePaths.length > 0 && (
