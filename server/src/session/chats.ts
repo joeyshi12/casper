@@ -1,6 +1,8 @@
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../config.js';
+import { isValidChatId } from '../util/paths.js';
 
 /**
  * Everything a chat owns on disk, under one directory named by its chat id:
@@ -32,6 +34,16 @@ export function createChatWorkspace(chatId: string): string {
   const dir = chatWorkspaceDir(chatId);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
+}
+
+/**
+ * Everything a chat owns on disk, gone: uploads, and the workspace if Casper made one. A chat
+ * that never got a directory is not an error. The id is validated first because it comes from
+ * the client and this deletes a tree - an id that could traverse would take the wrong one.
+ */
+export async function removeChatDir(chatId: string): Promise<void> {
+  if (!isValidChatId(chatId)) return;
+  await fsp.rm(chatDir(chatId), { recursive: true, force: true });
 }
 
 /**

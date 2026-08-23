@@ -32,6 +32,7 @@ import {
   chatWorkspaceDir,
   createChatWorkspace,
   isManagedWorkspace,
+  removeChatDir,
 } from '../server/src/session/chats.js';
 import { titleFromPrompt, sanitizeTitle } from '@casper/shared';
 
@@ -758,6 +759,33 @@ describe('the chat directory layout', () => {
     assert.equal(isManagedWorkspace(chatWorkspaceDir(crypto.randomUUID())), true);
     assert.equal(isManagedWorkspace('/home/someone/projects/thing'), false);
   });
+
+  // A deleted chat left its uploads and workspace on disk, so the data directory only ever grew.
+  it('takes uploads and the workspace with it when the chat goes', async () => {
+    const chatId = crypto.randomUUID();
+    createChatWorkspace(chatId);
+    fs.mkdirSync(chatUploadsDir(chatId), { recursive: true });
+    fs.writeFileSync(path.join(chatUploadsDir(chatId), 'report.pdf'), 'x');
+
+    await removeChatDir(chatId);
+    assert.equal(fs.existsSync(chatDir(chatId)), false);
+  });
+
+  it('deleting a chat that never got a directory is not an error', async () => {
+    await removeChatDir(crypto.randomUUID());
+  });
+
+  // The id comes from the client and this removes a tree, so one that could traverse must not
+  // be resolved at all - '..' would name the chats root, and every other chat with it.
+  it('refuses an id that could name anything but its own directory', async () => {
+    const keep = crypto.randomUUID();
+    createChatWorkspace(keep);
+    for (const bad of ['..', '.', 'a/../..', '']) {
+      await removeChatDir(bad);
+    }
+    assert.equal(fs.existsSync(chatWorkspaceDir(keep)), true);
+    fs.rmSync(chatDir(keep), { recursive: true, force: true });
+  });
 });
 
 describe('naming a session after its first prompt', () => {
@@ -816,6 +844,21 @@ describe('process lifecycle', () => {
       // The temporary pending- id must not survive as a second entry.
       const ids = (await mgr.listChats()).map((s) => s.sessionId);
       assert.deepEqual(ids.filter((id) => id.startsWith('pending-')), []);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  // The rows went but the directory stayed, so a deleted chat's uploads outlived it.
+  it('deleting a chat removes the directory it owns', async () => {
+    const mgr = managerWith(() => fakeKiroProcess({ sessionId: 'delete-me' }));
+    try {
+      const chatId = (await mgr.createChat({ cwd: sessionsCwd })).summary.chatId;
+      fs.mkdirSync(chatUploadsDir(chatId), { recursive: true });
+      fs.writeFileSync(path.join(chatUploadsDir(chatId), 'note.txt'), 'x');
+
+      await mgr.deleteChat(chatId);
+      assert.equal(fs.existsSync(chatDir(chatId)), false);
     } finally {
       mgr.disposeAll();
     }

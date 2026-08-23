@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { invalidateAgents } from './agents.js';
-import { createChatWorkspace, isManagedWorkspace } from './chats.js';
+import { createChatWorkspace, isManagedWorkspace, removeChatDir } from './chats.js';
 import type { Logger } from '../util/logger.js';
 import { isWithinRoot, isValidChatId } from '../util/paths.js';
 import { KiroProcess } from './KiroProcess.js';
@@ -835,7 +835,7 @@ export class SessionManager {
   }
 
   // Permanently delete a session: evict it from memory, remove its on-disk
-  // files, and drop any title override.
+  // files and the directory the chat owns, and drop any title override.
   async deleteChat(chatId: string): Promise<void> {
     const sessionId = this.store.sessionIdForChat(chatId);
     const s = sessionId ? this.sessions.get(sessionId) : undefined;
@@ -847,6 +847,9 @@ export class SessionManager {
       s.running = false;
     }
     this.store.remove(chatId);
+    // The chat's uploads and workspace outlive its rows otherwise. After the process is
+    // gone, since the workspace may be its cwd.
+    await removeChatDir(chatId);
     if (!sessionId) return;
     this.evict(sessionId);
     await deletePersistedSession(sessionId);
