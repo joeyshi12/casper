@@ -21,7 +21,12 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sessions (
   session_id TEXT PRIMARY KEY,
   title      TEXT,
-  cwd        TEXT
+  cwd        TEXT,
+  -- The chat this session belongs to, which owns its uploads directory. Minted by the
+  -- client before the session exists, so a new chat can attach a file before it sends.
+  -- NULL for a session Casper did not create, such as one started with kiro-cli directly,
+  -- which has no row until Casper writes one; getChatId names those after the session.
+  chat_id    TEXT
 );
 CREATE TABLE IF NOT EXISTS logins (
   id           TEXT PRIMARY KEY,
@@ -31,10 +36,6 @@ CREATE TABLE IF NOT EXISTS logins (
   user_agent   TEXT
 );
 CREATE INDEX IF NOT EXISTS logins_hash ON logins (hash);
-CREATE TABLE IF NOT EXISTS meta (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
 CREATE TABLE IF NOT EXISTS message_attachments (
   session_id TEXT    NOT NULL,
   ordinal    INTEGER NOT NULL,
@@ -60,6 +61,16 @@ export function closeDb(): void {
   handle = undefined;
 }
 
+/**
+ * CREATE TABLE IF NOT EXISTS leaves an existing table alone, so a column added later has to
+ * be applied separately. Cheap enough to attempt on every open.
+ */
+function addColumnIfMissing(d: DatabaseSync, table: string, column: string, type: string): void {
+  const cols = d.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (cols.some((c) => c.name === column)) return;
+  d.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+}
+
 function open(): DatabaseSync {
   fs.mkdirSync(config.casperDataDir, { recursive: true, mode: 0o700 });
   const file = path.join(config.casperDataDir, 'casper.db');
@@ -70,6 +81,7 @@ function open(): DatabaseSync {
   // casperDataDir at its own directory rather than sharing this one.
   d.exec('PRAGMA journal_mode = WAL');
   d.exec(SCHEMA);
+  addColumnIfMissing(d, 'sessions', 'chat_id', 'TEXT');
   // The logins table holds the hashes the auth cookie is checked against, so the
   // file has no business being world-readable. sqlite creates it with the process
   // umask, and mkdir's mode doesn't apply to an existing directory, so both are set

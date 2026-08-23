@@ -1429,6 +1429,31 @@ describe('session controller', () => {
     assert.equal(useStore.getState().pending[0]?.status, 'sending');
   });
 
+  // The whole point of the chat id: a file attached to a first prompt has to survive being
+  // held across session creation and arrive with the prompt it was attached to.
+  it("a draft's first prompt keeps its attachments across the wait", async () => {
+    const { controller, socket } = build();
+    controller.syncRoute(null, true);
+    await settle();
+
+    const zip = { path: '/up/first.zip', name: 'first.zip', size: 12, kind: 'binary' as const };
+    const content = [
+      { type: 'text' as const, text: 'Attached files: /up/first.zip\n' },
+      { type: 'text' as const, text: 'first words' },
+    ];
+    controller.send(content, [zip]);
+    await settle();
+
+    // Visible on the optimistic bubble before the session even exists.
+    assert.deepEqual(useStore.getState().pending[0]?.attachments, [zip]);
+    assert.ok(!socket.calls.includes('prompt'), 'nothing sent before the socket is up');
+
+    socket.handlers().onStatus('connected');
+    assert.equal(socket.sent.length, 1);
+    assert.deepEqual(socket.sent[0]!.content, content, 'the blocks it was sent with');
+    assert.deepEqual(socket.sent[0]!.attachments, [zip], 'and the file');
+  });
+
   it('a create that fails explains itself on the bubble and the pane', async () => {
     const { controller } = build({
       api: {
@@ -1503,6 +1528,39 @@ describe('session controller', () => {
     assert.equal(socket.sent.length, 1);
     assert.deepEqual(socket.sent[0]!.content, content, 'the same blocks, not just the text');
     assert.deepEqual(socket.sent[0]!.attachments, [zip], 'and the same files');
+  });
+
+  // A draft has no session id, so without an identity of its own it had nowhere to upload:
+  // the composer refused with "No active session to upload to".
+  it('a draft has a chat id before it sends, and creates the session with it', async () => {
+    let sentChatId: string | undefined;
+    const { controller } = build({
+      api: {
+        createSession: async (req) => {
+          sentChatId = req.chatId;
+          return detailFor('created-1');
+        },
+      },
+    });
+
+    // The draft route, which is how the app enters one.
+    controller.syncRoute(null, true);
+    const draftChatId = useStore.getState().chatId;
+    assert.ok(draftChatId, 'a draft can upload before it has a session');
+
+    controller.send([{ type: 'text', text: 'hi' }]);
+    await settle();
+    assert.equal(sentChatId, draftChatId, 'the session adopts the chat that owns the uploads');
+  });
+
+  it('a new draft after an open session does not reuse its chat', async () => {
+    const { controller } = build();
+    await controller.openSession('s1');
+    const openChatId = useStore.getState().chatId;
+
+    controller.startDraft();
+    assert.notEqual(useStore.getState().chatId, openChatId);
+    assert.ok(useStore.getState().chatId);
   });
 
   it('an expired cookie tears the session down and shows the gate', async () => {

@@ -30,7 +30,8 @@ interface Attachment {
 
 interface Props {
   /** Active session id - required to upload attachments. */
-  sessionId: string | null;
+  /** The chat that owns the uploads directory; present for a draft too. */
+  chatId: string | null;
   onSend: (content: PromptContentBlock[], attachments?: MessageAttachment[]) => void;
   onCancel: () => void;
   /** Trigger a /compact of the conversation to reduce context size. */
@@ -45,7 +46,7 @@ interface Props {
 
 /** ChatGPT-style input: + attach inside, paste, auto-grow, upload-on-send. */
 export function Composer({
-  sessionId,
+  chatId,
   onSend,
   onCancel,
   onCompact,
@@ -159,14 +160,14 @@ export function Composer({
     const atts = attachments;
 
     if (atts.length > 0) {
-      if (!sessionId) {
-        setError('No active session to upload to.');
+      if (!chatId) {
+        setError('No chat to upload to.');
         return;
       }
       setUploading(true);
       setError(null);
       try {
-        const res = await api.uploadFiles(sessionId, atts.map((a) => a.file));
+        const res = await api.uploadFiles(chatId, atts.map((a) => a.file));
         uploaded = res.files;
       } catch (err) {
         setError((err as Error).message);
@@ -298,9 +299,8 @@ export function Composer({
           <button
             className="composer-plus"
             onClick={() => fileInputRef.current?.click()}
-            // A draft has no session to upload to yet, so this waits for the first prompt.
-            disabled={draft || !live || uploading}
-            title={draft ? 'Send a message first to attach files' : 'Add photos & files'}
+            disabled={!live || uploading}
+            title="Add photos & files"
             aria-label="Add photos and files"
           >
             <PlusIcon size={18} />

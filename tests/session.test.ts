@@ -3,6 +3,7 @@
 
 import { describe, it, before, beforeEach, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,16 +21,18 @@ import { SessionManager, Session } from '../server/src/session/SessionManager.js
 import { EventStore } from '../server/src/session/EventStore.js';
 import { closeDb, db } from '../server/src/session/db.js';
 import { SessionStore } from '../server/src/session/sessionStore.js';
-import { backfillAttachments } from '../server/src/session/backfillAttachments.js';
 import { LoginStore } from '../server/src/session/logins.js';
 import { hydrateTranscript, promptCount } from '../server/src/session/kiroFiles.js';
 import { bumpSessionToTop } from '../web/src/state/sessions.js';
 import { noopLogger, fakeKiroProcess, type FakeProcess } from './helpers.js';
 import {
-  createWorkspace,
-  workspaceDir,
-  workspacesRoot,
-} from '../server/src/session/workspaces.js';
+  chatDir,
+  chatsRoot,
+  chatUploadsDir,
+  chatWorkspaceDir,
+  createChatWorkspace,
+  isManagedWorkspace,
+} from '../server/src/session/chats.js';
 import { titleFromPrompt, sanitizeTitle } from '@casper/shared';
 
 // Fixtures go in temp directories, never the developer's real ~/.kiro. Set
@@ -531,101 +534,6 @@ describe('hydrateTranscript: malformed entries do not crash hydration', () => {
   });
 });
 
-// Messages sent before attachments were recorded left only the "Attached files:" line.
-// Display no longer parses that line, so without this migration those files are invisible.
-describe('backfilling attachments from older messages', () => {
-  let dir: string;
-  let sessions: string;
-  const origData = config.casperDataDir;
-  const origSessions = config.kiroSessionsDir;
-  let uploads: string;
-
-  const promptWith = (text: string) => ({
-    kind: 'Prompt',
-    data: { content: [{ kind: 'text', data: { text } }] },
-  });
-
-  beforeEach(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-backfill-db-'));
-    sessions = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-backfill-sessions-'));
-    uploads = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-backfill-uploads-'));
-    (config as { casperDataDir: string }).casperDataDir = dir;
-    (config as { kiroSessionsDir: string }).kiroSessionsDir = sessions;
-    closeDb();
-  });
-  after(() => {
-    closeDb();
-    (config as { casperDataDir: string }).casperDataDir = origData;
-    (config as { kiroSessionsDir: string }).kiroSessionsDir = origSessions;
-  });
-
-  it('recovers a file that still exists, at the right ordinal', async () => {
-    const zip = path.join(uploads, 'old.zip');
-    fs.writeFileSync(zip, 'PK\u0003\u0004xx');
-    fs.writeFileSync(
-      path.join(sessions, 'old-1.jsonl'),
-      [
-        JSON.stringify(promptWith('first, nothing attached')),
-        JSON.stringify(promptWith(`Attached files: ${zip}\nlook at this`)),
-      ].join('\n'),
-    );
-
-    const store = new SessionStore();
-    await backfillAttachments(store, noopLogger());
-
-    const got = store.attachmentsBySession('old-1');
-    assert.deepEqual([...got.keys()], [1], 'the second prompt, counting from zero');
-    assert.equal(got.get(1)![0]!.name, 'old.zip');
-    assert.equal(got.get(1)![0]!.size, 6);
-    assert.equal(got.get(1)![0]!.kind, 'binary');
-  });
-
-  it('drops a file that is no longer on disk', async () => {
-    fs.writeFileSync(
-      path.join(sessions, 'old-2.jsonl'),
-      JSON.stringify(promptWith(`Attached files: ${path.join(uploads, 'gone.zip')}\nhi`)),
-    );
-    const store = new SessionStore();
-    await backfillAttachments(store, noopLogger());
-    assert.equal(store.attachmentsBySession('old-2').size, 0, 'nothing to preview');
-  });
-
-  it('runs once, and never overwrites what the live path recorded', async () => {
-    const zip = path.join(uploads, 'old.zip');
-    fs.writeFileSync(zip, 'PK');
-    fs.writeFileSync(
-      path.join(sessions, 'old-3.jsonl'),
-      JSON.stringify(promptWith(`Attached files: ${zip}\nhi`)),
-    );
-    const store = new SessionStore();
-    // Already recorded by the live path, with a different name.
-    store.setAttachments('old-3', 0, [
-      { path: zip, name: 'recorded-live.zip', size: 2, kind: 'binary' },
-    ]);
-
-    await backfillAttachments(store, noopLogger());
-    assert.equal(store.attachmentsBySession('old-3').get(0)![0]!.name, 'recorded-live.zip');
-
-    // Second run is a no-op even for sessions it skipped.
-    fs.writeFileSync(
-      path.join(sessions, 'old-4.jsonl'),
-      JSON.stringify(promptWith(`Attached files: ${zip}\nhi`)),
-    );
-    await backfillAttachments(store, noopLogger());
-    assert.equal(store.attachmentsBySession('old-4').size, 0, 'the marker stops a re-run');
-  });
-
-  it('ignores an attachments line that names no absolute path', async () => {
-    fs.writeFileSync(
-      path.join(sessions, 'old-5.jsonl'),
-      JSON.stringify(promptWith("Attached files: ';\nquoted source, not a real line")),
-    );
-    const store = new SessionStore();
-    await backfillAttachments(store, noopLogger());
-    assert.equal(store.attachmentsBySession('old-5').size, 0);
-  });
-});
-
 describe('SQLite stores', () => {
   let dir: string;
   const origDir = config.casperDataDir;
@@ -779,30 +687,103 @@ describe('default agent', () => {
   });
 });
 
-describe('workspaces', () => {
-  // Kept apart from the session id on purpose: kiro only names a session once it has
-  // started, and a working directory has to exist before it can start in one.
-  it('mints an id of its own, not the session id', () => {
-    const a = createWorkspace();
-    const b = createWorkspace();
-    try {
-      assert.notEqual(a.id, b.id);
-      assert.equal(a.dir, workspaceDir(a.id));
-      assert.ok(a.dir.startsWith(workspacesRoot()), `${a.dir} not under ${workspacesRoot()}`);
-    } finally {
-      fs.rmSync(a.dir, { recursive: true, force: true });
-      fs.rmSync(b.dir, { recursive: true, force: true });
-    }
+// AGENTS.md: never write into ~/.casper from a test. Importing a route module used to break
+// that - auth.ts built a LoginStore at module scope, which prunes on construction, so the
+// database opened as an import side effect before any test could redirect it. Schema changes
+// then landed in the developer's real casper.db.
+describe('importing a module does not touch the data directory', () => {
+  it('opens no database until something asks for one', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-import-'));
+    (config as { casperDataDir: string }).casperDataDir = dir;
+    closeDb();
+
+    // The module whose import used to do it, plus the manager whose constructor did later,
+    // when a one-off migration was called from there.
+    await import('../server/src/routes/auth.js');
+    await import('../server/src/session/SessionManager.js');
+
+    assert.equal(
+      fs.existsSync(path.join(dir, 'casper.db')),
+      false,
+      'importing opened a database; it must wait for a real request',
+    );
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('the chat a session belongs to', () => {
+  let dir: string;
+  const origDir = config.casperDataDir;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-chatid-'));
+    (config as { casperDataDir: string }).casperDataDir = dir;
+    closeDb();
+  });
+  after(() => {
+    closeDb();
+    (config as { casperDataDir: string }).casperDataDir = origDir;
   });
 
-  it('creates the directory, private to the user', () => {
-    const { dir } = createWorkspace();
+  it('remembers the chat id the client minted', () => {
+    const store = new SessionStore();
+    const chatId = crypto.randomUUID();
+    store.setChatId('sess-1', chatId);
+    assert.equal(store.getChatId('sess-1'), chatId);
+  });
+
+  // Sessions that predate the chats layout have no row. Falling back to the session id gives
+  // them one stable directory rather than a new one per call.
+  it('falls back to the session id for a session that has none', () => {
+    const store = new SessionStore();
+    assert.equal(store.getChatId('legacy-session'), 'legacy-session');
+    assert.equal(store.getChatId('legacy-session'), 'legacy-session');
+  });
+
+  it('keeps the chat id when another override is written', () => {
+    const store = new SessionStore();
+    const chatId = crypto.randomUUID();
+    store.setChatId('sess-2', chatId);
+    store.setTitle('sess-2', 'renamed');
+    store.setCwd('sess-2', '/tmp');
+    assert.equal(store.getChatId('sess-2'), chatId);
+    assert.equal(store.getTitle('sess-2'), 'renamed');
+  });
+});
+
+describe('the chat directory layout', () => {
+  // The whole point of a chat id: it exists before kiro has named a session, so a brand-new
+  // chat has somewhere to put an upload. Keying this on the session id is what made a first
+  // message unable to carry a file.
+  it('puts uploads and the workspace under one directory the chat owns', () => {
+    const chatId = crypto.randomUUID();
+    assert.equal(chatDir(chatId), path.join(chatsRoot(), chatId));
+    assert.equal(chatUploadsDir(chatId), path.join(chatsRoot(), chatId, 'uploads'));
+    assert.equal(chatWorkspaceDir(chatId), path.join(chatsRoot(), chatId, 'workspace'));
+  });
+
+  it('creates the workspace on demand, private to the user', () => {
+    const dir = createChatWorkspace(crypto.randomUUID());
     try {
       assert.equal(fs.existsSync(dir), true);
       assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // A chat pointed at a directory the user picked never gets one, so the uploads directory
+  // has to stand on its own rather than being a sibling of a workspace that must exist.
+  it('does not require a workspace to have an uploads directory', () => {
+    const chatId = crypto.randomUUID();
+    assert.equal(fs.existsSync(chatWorkspaceDir(chatId)), false);
+    assert.ok(chatUploadsDir(chatId).startsWith(chatDir(chatId)));
+  });
+
+  // Drives whether the session list shows a folder name: a directory Casper made gets none.
+  it('tells a workspace it made from a directory the user picked', () => {
+    assert.equal(isManagedWorkspace(chatWorkspaceDir(crypto.randomUUID())), true);
+    assert.equal(isManagedWorkspace('/home/someone/projects/thing'), false);
   });
 });
 

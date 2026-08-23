@@ -68,3 +68,11 @@ export async function realConfineToRoot(
 export function isValidSessionId(id: string): boolean {
   return /^[A-Za-z0-9._-]+$/.test(id) && id !== '.' && !id.includes('..');
 }
+
+/**
+ * A chat id names a directory too, but unlike a session id it comes from the client, so it
+ * is held to the shape the client is supposed to send: a uuid, nothing else.
+ */
+export function isValidChatId(id: string | undefined): id is string {
+  return !!id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}

@@ -31,9 +31,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { invalidateAgents } from './agents.js';
-import { createWorkspace, isWorkspacePath } from './workspaces.js';
+import { createChatWorkspace, isManagedWorkspace } from './chats.js';
 import type { Logger } from '../util/logger.js';
-import { isWithinRoot } from '../util/paths.js';
+import { isWithinRoot, isValidChatId } from '../util/paths.js';
 import { KiroProcess } from './KiroProcess.js';
 import { EventStore } from './EventStore.js';
 import { TurnState } from './TurnState.js';
@@ -46,7 +46,6 @@ import {
   readPersistedSession,
 } from './kiroFiles.js';
 import { SessionStore } from './sessionStore.js';
-import { backfillAttachments } from './backfillAttachments.js';
 
 // Resolve a working directory for a new session as an absolute path (relative input against
 // DEFAULT_CWD), created if missing, rejected if it exists as a file. Confined to
@@ -115,6 +114,8 @@ export class Session {
   readonly store: EventStore;
   readonly turnState = new TurnState();
   cwd: string;
+  /** The chat that owns this session's uploads. See chats.ts. */
+  chatId?: string;
   agentId?: string;
   modelId?: string;
   currentModeId?: string;
@@ -229,12 +230,6 @@ export class SessionManager {
   constructor(log: Logger, opts: SessionManagerOptions = {}) {
     this.log = log;
     this.spawnProcess = opts.spawn ?? ((o, l) => new KiroProcess(o, l));
-    // Messages sent before attachments were recorded left only the "Attached files:" line;
-    // convert them once so their files are still visible. Deliberately not awaited: it is a
-    // one-off over kiro's files and nothing depends on it having finished.
-    void backfillAttachments(this.store, log).catch((err) => {
-      log.warn({ err }, 'attachment backfill failed; older attachments stay hidden');
-    });
   }
 
   /**
@@ -249,7 +244,7 @@ export class SessionManager {
       override: this.store.getTitle(sessionId),
       kiroTitle: parts.kiroTitle,
       firstPrompt: parts.firstPrompt,
-      folder: isWorkspacePath(parts.cwd) ? undefined : path.basename(parts.cwd),
+      folder: isManagedWorkspace(parts.cwd) ? undefined : path.basename(parts.cwd),
     });
   }
 
@@ -546,9 +541,13 @@ export class SessionManager {
     modelId?: string;
     freshWorkspace?: boolean;
     title?: string;
+    chatId?: string;
   }): Promise<SessionDetail> {
+    // The client's chat id, which already owns any files uploaded to this chat before it
+    // sent. Absent only if something other than the web app created the session.
+    const chatId = isValidChatId(opts.chatId) ? opts.chatId : crypto.randomUUID();
     // A workspace of its own is created before the spawn, so kiro starts in it directly.
-    const cwd = opts.freshWorkspace ? createWorkspace().dir : resolveCwd(opts.cwd);
+    const cwd = opts.freshWorkspace ? createChatWorkspace(chatId) : resolveCwd(opts.cwd);
     // Temporary local id until kiro assigns the real one during ensureProc.
     const tempId = `pending-${Date.now()}-${Math.floor(this.sessions.size)}`;
     const store = new EventStore(tempId);
@@ -571,6 +570,11 @@ export class SessionManager {
     // Name the session before it is returned, so it is never listed as untitled: the
     // caller's title if it has one - a draft knows its first prompt - otherwise the folder
     // the user chose. Stored as a Casper title override; the user can rename.
+    // Bind the chat to kiro's session id now that it has one, so later uploads land in the
+    // same directory as any the draft already made.
+    this.store.setChatId(s.sessionId, chatId);
+    s.chatId = chatId;
+
     const name = sanitizeTitle(opts.title ?? '') || (opts.freshWorkspace ? '' : path.basename(s.cwd));
     if (name) {
       this.store.setTitle(s.sessionId, name);
@@ -720,6 +724,7 @@ export class SessionManager {
 
     return {
       sessionId,
+      chatId: live?.chatId ?? this.store.getChatId(sessionId),
       title: this.titleOf(sessionId, {
         // kiro's file is what kiro called it; the live copy is only a cache of it.
         kiroTitle: persisted?.title || live?.title,

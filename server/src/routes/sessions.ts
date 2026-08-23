@@ -26,6 +26,10 @@ export function registerSessionRoutes(
         modelId: body.modelId,
         freshWorkspace: body.freshWorkspace,
         title: body.title,
+        // Not optional in practice: the client's chat already owns any file uploaded before
+        // the session existed, so dropping it here strands those files under an id nothing
+        // refers to again.
+        chatId: body.chatId,
       });
     } catch (err) {
       reply.code(400);

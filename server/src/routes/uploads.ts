@@ -6,18 +6,15 @@ import { execFile } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
 import type { UploadResponse, UploadedFile } from '@casper/shared';
-import type { SessionManager } from '../session/SessionManager.js';
 import { config } from '../config.js';
 import { classifyKind, mimeForExt } from '../util/filekind.js';
-import { confineToRoot, isValidSessionId } from '../util/paths.js';
+import { confineToRoot, isValidChatId } from '../util/paths.js';
+import { chatUploadsDir } from '../session/chats.js';
 
 /**
- * Where uploads land. Deliberately not under the session's working directory, which
- * would leave a .casper/ folder in every project you chat about.
+ * Where uploads land: the chat's own directory, deliberately not under its working
+ * directory, which would leave a .casper/ folder in every project you chat about.
  */
-function uploadDirFor(sessionId: string): string {
-  return path.join(config.casperDataDir, 'sessions', sessionId, 'uploads');
-}
 
 /** Bytes of a binary to scan for a triage `strings` sample. */
 const STRINGS_SCAN_BYTES = 256 * 1024;
@@ -93,34 +90,30 @@ async function sampleStrings(absPath: string, limit = 40): Promise<string[]> {
   }
 }
 
-export function registerUploadRoutes(
-  app: FastifyInstance,
-  manager: SessionManager,
-): void {
+// Uploads are keyed by chat, so this no longer needs the session manager.
+export function registerUploadRoutes(app: FastifyInstance): void {
   /**
-   * POST /api/sessions/:id/uploads  (multipart/form-data)
+   * POST /api/chats/:chatId/uploads  (multipart/form-data)
    *
-     * Streams each file to <data dir>/sessions/<id>/uploads/ byte-for-byte, classifies
-     * it, and for binaries adds a triage summary (type, sha256, sample strings) so the
-     * agent starts with context.
+   * Streams each file to <data dir>/chats/<chat id>/uploads/ byte-for-byte, classifies it,
+   * and for binaries adds a triage summary (type, sha256, sample strings) so the agent
+   * starts with context.
+   *
+   * Keyed by chat rather than session because the point is to work before the session
+   * exists: a new chat has no kiro session id until it sends its first prompt, so keying
+   * this on one meant a first message could not carry a file. Nothing is checked against
+   * the session list for the same reason - the chat id is the client's, and the uuid shape
+   * is what keeps it inside the chats directory.
    */
-  app.post<{ Params: { id: string } }>(
-    '/api/sessions/:id/uploads',
+  app.post<{ Params: { chatId: string } }>(
+    '/api/chats/:chatId/uploads',
     async (req, reply) => {
-      // Resolved only so an unknown session 404s rather than creating a directory
-      // for it; uploads no longer live under the workspace.
-      try {
-        await manager.getSessionCwd(req.params.id);
-      } catch {
-        reply.code(404);
-        return { error: 'Session not found' };
-      }
-      if (!isValidSessionId(req.params.id)) {
+      if (!isValidChatId(req.params.chatId)) {
         reply.code(400);
-        return { error: 'Invalid session id' };
+        return { error: 'Invalid chat id' };
       }
 
-      const uploadDir = uploadDirFor(req.params.id);
+      const uploadDir = chatUploadsDir(req.params.chatId);
       // 0700 like the data directory: uploads are the user's files, and the default
       // umask would otherwise leave them readable to anyone on the machine.
       await fs.mkdir(uploadDir, { recursive: true, mode: 0o700 });

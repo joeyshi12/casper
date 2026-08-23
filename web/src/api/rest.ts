@@ -105,10 +105,11 @@ export const api = {
       ? `/api/fs/file?path=${encodeURIComponent(filePath)}`
       : `/api/sessions/${id}/preview?path=${encodeURIComponent(filePath)}`,
   /** Upload files for a session (stored under the data directory). */
-  uploadFiles: async (id: string, files: File[]): Promise<UploadResponse> => {
+  /** Keyed by chat, not session: a draft uploads before it has one. */
+  uploadFiles: async (chatId: string, files: File[]): Promise<UploadResponse> => {
     const form = new FormData();
     for (const f of files) form.append('files', f, f.name);
-    const res = await fetch(`/api/sessions/${id}/uploads`, {
+    const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/uploads`, {
       method: 'POST',
       credentials: 'same-origin',
       body: form,
