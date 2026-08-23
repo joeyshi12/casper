@@ -8,8 +8,14 @@ import { config } from '../config.js';
  *
  * `sessions` holds the per-session overrides layered on kiro's files (renamed title,
  * re-pointed working directory); `logins` holds the device sessions the auth cookie is
- * checked against. node:sqlite is built in, which is why the Node floor is 24 rather
- * than a native driver.
+ * checked against; `message_attachments` records what was attached to each prompt.
+ * node:sqlite is built in, which is why the Node floor is 24 rather than a native driver.
+ *
+ * Attachments are keyed by ordinal - the position of the user message within the session -
+ * because that is the only identity both halves of the app can compute. A live message is
+ * identified by Casper's event seq and a rebuilt one by kiro's message_id, and neither is
+ * available to the other; Casper doesn't persist its own transcript, so history is
+ * reconstructed from kiro's file, where position is all there is.
  */
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -25,6 +31,15 @@ CREATE TABLE IF NOT EXISTS logins (
   user_agent   TEXT
 );
 CREATE INDEX IF NOT EXISTS logins_hash ON logins (hash);
+CREATE TABLE IF NOT EXISTS message_attachments (
+  session_id TEXT    NOT NULL,
+  ordinal    INTEGER NOT NULL,
+  path       TEXT    NOT NULL,
+  name       TEXT    NOT NULL,
+  size       INTEGER NOT NULL,
+  kind       TEXT    NOT NULL,
+  PRIMARY KEY (session_id, ordinal, path)
+);
 `;
 
 let handle: DatabaseSync | undefined;

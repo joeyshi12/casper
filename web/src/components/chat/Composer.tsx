@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { MessageAttachment } from '@casper/shared';
 import type { PromptContentBlock, UploadedFile } from '@casper/shared';
 import { ATTACHMENTS_PREFIX } from '@casper/shared';
 import { useStore } from '../../state/store.js';
@@ -30,7 +31,7 @@ interface Attachment {
 interface Props {
   /** Active session id - required to upload attachments. */
   sessionId: string | null;
-  onSend: (content: PromptContentBlock[]) => void;
+  onSend: (content: PromptContentBlock[], attachments?: MessageAttachment[]) => void;
   onCancel: () => void;
   /** Trigger a /compact of the conversation to reduce context size. */
   onCompact: () => void;
@@ -109,21 +110,18 @@ export function Composer({
   ): Promise<PromptContentBlock[]> => {
     const content: PromptContentBlock[] = [];
 
-    // 1. One compact line telling the agent where the files landed. The client
-    // strips this from the displayed bubble and renders image thumbnails from
-    // these paths instead (see shared/attachments).
+    // 1. Where the files landed: the only way the agent can reach one it isn't handed.
     if (uploaded.length > 0) {
-      // Trailing newline keeps this a distinct line even when the prompt's text
-      // blocks are concatenated with no separator (the store's turn_started echo
-      // and hydrateTranscript join with ''); otherwise the line-based
-      // stripAttachmentsLine would swallow the typed message too.
+      // Trailing newline keeps this its own line even when the prompt's text blocks are
+      // concatenated with no separator, or the line-based strip swallows the typed message.
       content.push({
         type: 'text',
         text: ATTACHMENTS_PREFIX + uploaded.map((u) => u.path).join(', ') + '\n',
       });
     }
 
-    // 2. Inline images (base64) and text-file contents.
+    // 2. Images inline, because vision needs the bytes. Everything else stays a path:
+    // inlining contents put the whole file in the bubble as if the user had typed it.
     for (let i = 0; i < uploaded.length; i++) {
       const u = uploaded[i];
       const att = atts[i];
@@ -131,16 +129,11 @@ export function Composer({
       if (u.kind === 'image' && att) {
         try {
           const data = await readFileAsBase64(att.file);
-          content.push({ type: 'image', data, mimeType: att.file.type });
+          // u.mimeType, not att.file.type: the browser leaves File.type empty for plenty of
+          // drops, and an image block with an empty mimeType is malformed.
+          content.push({ type: 'image', data, mimeType: u.mimeType });
         } catch {
           /* skip unreadable image */
-        }
-      } else if (u.kind === 'text' && att) {
-        try {
-          const body = await att.file.text();
-          content.push({ type: 'text', text: `[File: ${u.path}]\n\`\`\`\n${body}\n\`\`\`` });
-        } catch {
-          /* skip unreadable text */
         }
       }
     }
@@ -186,7 +179,10 @@ export function Composer({
     const content = await buildContent(uploaded, atts, trimmed);
     if (content.length === 0) return;
 
-    onSend(content);
+    onSend(
+      content,
+      uploaded.map((u) => ({ path: u.path, name: u.name, size: u.size, kind: u.kind })),
+    );
     setText('');
     atts.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
     setAttachments([]);

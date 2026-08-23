@@ -144,7 +144,7 @@ function Shell({ onLock }: { onLock: () => void }) {
         createError={createError}
         onRetryCreate={() => sessionController.retryCreate()}
         onDismissError={() => sessionController.dismissCreateError()}
-        onSend={(content) => sessionController.send(content)}
+        onSend={(content, attachments) => sessionController.send(content, attachments)}
         onRetry={(id, text) => sessionController.retrySend(id, text)}
         onRetryTurn={(text) => sessionController.retryTurn(text)}
         onCancel={() => sessionController.cancel()}

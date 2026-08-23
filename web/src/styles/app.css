@@ -1186,13 +1186,42 @@
   word-break: break-word;
 }
 /* Attached-image thumbnails in a user message. */
-.msg-images {
+.msg-attachments {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
-.msg-images:not(:last-child) {
+.msg-attachments:not(:last-child) {
   margin-bottom: 8px;
+}
+/* Non-image attachments. */
+.msg-file {
+  display: inline-flex;
+  cursor: pointer;
+  font-family: inherit;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--n2);
+  border-radius: var(--r-sm);
+  background: var(--n1);
+  color: var(--n5);
+  font-size: 12px;
+}
+.msg-file:hover {
+  border-color: var(--frost);
+}
+.msg-file-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.msg-file-size {
+  flex: none;
+  color: var(--n3);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 .msg-image-link {
   display: block;

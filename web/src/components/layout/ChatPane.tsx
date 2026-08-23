@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { PromptContentBlock } from '@casper/shared';
+import type { MessageAttachment, PromptContentBlock } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 import type { ConnStatus } from '../../api/SessionSocket.js';
 import { Transcript } from '../chat/Transcript.js';
@@ -22,7 +22,7 @@ interface Props {
   onDismissError: () => void;
   navOpen: boolean;
   onToggleNav: () => void;
-  onSend: (content: PromptContentBlock[]) => void;
+  onSend: (content: PromptContentBlock[], attachments?: MessageAttachment[]) => void;
   onRetry: (id: string, text: string) => void;
   /** Re-send a prompt after a failed turn. */
   onRetryTurn: (text: string) => void;

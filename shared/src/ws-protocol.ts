@@ -18,6 +18,7 @@ import type {
   SessionUpdate,
   StopReason,
 } from './acp.js';
+import type { MessageAttachment } from './rest-dto.js';
 
 // ---------------------------------------------------------------------------
 // Buffered events - the payloads stored in the EventStore and replayed
@@ -66,6 +67,8 @@ export interface TurnStartedEvent {
   kind: 'turn_started';
   /** echo of the user's prompt so the transcript shows it immediately */
   prompt: PromptContentBlock[];
+  /** What was attached, so the bubble can show it without reading the prompt text. */
+  attachments?: MessageAttachment[];
 }
 
 export interface TurnEndedEvent {
@@ -111,6 +114,8 @@ export interface CasperEvent {
 
 export interface ClientPrompt {
   type: 'prompt';
+  /** See PromptRequest.attachments. */
+  attachments?: MessageAttachment[];
   content: PromptContentBlock[];
 }
 

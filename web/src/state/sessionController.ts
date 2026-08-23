@@ -2,6 +2,7 @@ import type {
   AgentsResponse,
   CreateSessionRequest,
   ModelsResponse,
+  MessageAttachment,
   PromptContentBlock,
   SessionDetail,
   SessionListResponse,
@@ -40,7 +41,7 @@ export interface ControlledSocket {
   connect(): void;
   close(): void;
   reset(head: number): void;
-  prompt(content: PromptContentBlock[]): boolean;
+  prompt(content: PromptContentBlock[], attachments?: MessageAttachment[]): boolean;
   cancel(): void;
   setMode(modeId: string): void;
   setModel(modelId: string): void;
@@ -98,7 +99,11 @@ export class SessionController {
   private lastSent: string | null = null;
   private msgSeq = 0;
   /** A draft's first prompt, held until the new session's socket is connected. */
-  private firstPrompt: { id: string; content: PromptContentBlock[] } | null = null;
+  private firstPrompt: {
+    id: string;
+    content: PromptContentBlock[];
+    attachments?: MessageAttachment[];
+  } | null = null;
   /** What the last create asked for, so the error screen's Retry can repeat it. */
   private lastCreateOpts: CreateOpts | null = null;
   private listSeq = 0;
@@ -242,7 +247,7 @@ export class SessionController {
         if (status === 'connected' && this.firstPrompt) {
           const held = this.firstPrompt;
           this.firstPrompt = null;
-          this.deliver(held.id, held.content);
+          this.deliver(held.id, held.content, held.attachments);
         }
       },
       onResync: async () => {
@@ -345,7 +350,7 @@ export class SessionController {
    * Send a prompt. The user bubble shows immediately as "sending"; the server's
    * turn_started echo clears it, and a delivery failure flags it for retry.
    */
-  send(content: PromptContentBlock[]): void {
+  send(content: PromptContentBlock[], attachments?: MessageAttachment[]): void {
     const id = `pending-${this.msgSeq++}`;
     // Text for the pending bubble, minus the machine-facing "Attached files:"
     // line (the transcript renders thumbnails instead).
@@ -355,8 +360,8 @@ export class SessionController {
         .map((b) => b.text)
         .join('\n'),
     );
-    const hasImages = content.some((b) => b.type === 'image');
-    this.state.addPending(id, text || (hasImages ? '[image]' : '[attachment]'));
+    // An attachment of its own is a message, so the bubble no longer needs a stand-in label.
+    this.state.addPending(id, text, attachments);
 
     if (this.isDraft) {
       // Create on demand, then deliver: the socket opens as part of going to the
@@ -370,17 +375,21 @@ export class SessionController {
         // moment between the session existing and its first turn starting.
         title: titleFromPrompt(content),
       }).then((created) => {
-        if (created) this.firstPrompt = { id, content };
+        if (created) this.firstPrompt = { id, content, attachments };
         else this.state.markPendingFailed(id, 'Could not start the session.');
       });
       return;
     }
-    this.deliver(id, content);
+    this.deliver(id, content, attachments);
   }
 
-  private deliver(id: string, content: PromptContentBlock[]): void {
+  private deliver(
+    id: string,
+    content: PromptContentBlock[],
+    attachments?: MessageAttachment[],
+  ): void {
     this.lastSent = id;
-    if (this.socket?.prompt(content)) return;
+    if (this.socket?.prompt(content, attachments)) return;
     // The socket wasn't open, so the server never saw this. Say so on the
     // bubble itself rather than leaving it unexplained.
     this.state.markPendingFailed(

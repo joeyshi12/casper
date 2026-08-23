@@ -1,3 +1,4 @@
+import type { MessageAttachment } from '@casper/shared';
 import { db } from './db.js';
 
 /**
@@ -24,9 +25,45 @@ export class SessionStore {
     this.write(sessionId, 'cwd', cwd);
   }
 
+  /** Record what was attached to one prompt. See db.ts for why the key is an ordinal. */
+  setAttachments(sessionId: string, ordinal: number, files: MessageAttachment[]): void {
+    if (files.length === 0) return;
+    const stmt = db().prepare(
+      `INSERT INTO message_attachments (session_id, ordinal, path, name, size, kind)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id, ordinal, path) DO NOTHING`,
+    );
+    for (const f of files) {
+      stmt.run(sessionId, ordinal, f.path, f.name, f.size, f.kind);
+    }
+  }
+
+  /** Every attachment in a session, grouped by the message it belongs to. */
+  attachmentsBySession(sessionId: string): Map<number, MessageAttachment[]> {
+    const rows = db()
+      .prepare(
+        `SELECT ordinal, path, name, size, kind FROM message_attachments
+         WHERE session_id = ? ORDER BY ordinal, path`,
+      )
+      .all(sessionId) as { ordinal: number; path: string; name: string; size: number; kind: string }[];
+    const out = new Map<number, MessageAttachment[]>();
+    for (const r of rows) {
+      const list = out.get(r.ordinal) ?? [];
+      list.push({
+        path: r.path,
+        name: r.name,
+        size: r.size,
+        kind: r.kind as MessageAttachment['kind'],
+      });
+      out.set(r.ordinal, list);
+    }
+    return out;
+  }
+
   /** Forget every override for a session, when it's permanently deleted. */
   remove(sessionId: string): void {
     db().prepare('DELETE FROM sessions WHERE session_id = ?').run(sessionId);
+    db().prepare('DELETE FROM message_attachments WHERE session_id = ?').run(sessionId);
   }
 
   private read(sessionId: string, column: 'title' | 'cwd'): string | undefined {

@@ -104,11 +104,6 @@ export const api = {
     filePath.startsWith('/')
       ? `/api/fs/file?path=${encodeURIComponent(filePath)}`
       : `/api/sessions/${id}/preview?path=${encodeURIComponent(filePath)}`,
-  /**
-   * A transcript attachment. Absolute paths are uploads, which live outside every session's
-   * cwd, so they go to the filesystem route.
-   */
-  attachmentUrl: (id: string, filePath: string) => api.previewUrl(id, filePath),
   /** Upload files for a session (stored under the data directory). */
   uploadFiles: async (id: string, files: File[]): Promise<UploadResponse> => {
     const form = new FormData();

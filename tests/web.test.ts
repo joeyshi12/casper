@@ -44,8 +44,6 @@ import {
 } from '../web/src/util/toolRender.js';
 import {
   ATTACHMENTS_PREFIX,
-  attachmentPaths,
-  imageAttachmentPaths,
   stripAttachmentsLine,
 } from '@casper/shared';
 import {
@@ -69,37 +67,21 @@ import {
   looksLikeMath,
 } from '../web/src/util/currencyDollars.js';
 
-describe('attachments line (drives image thumbnails; stripped from the bubble)', () => {
+describe('attachments line (sent for the agent; stripped from the bubble)', () => {
   const msg = `${ATTACHMENTS_PREFIX}.casper/uploads/a.png, .casper/uploads/notes.txt\nplease review`;
 
-  it('attachmentPaths: parses both paths', () => {
-    const paths = attachmentPaths(msg);
-    assert.equal(paths.length, 2);
-    assert.equal(paths[0], '.casper/uploads/a.png');
-  });
-  it('imageAttachmentPaths: keeps only images', () => {
-    assert.equal(imageAttachmentPaths(msg).join(), '.casper/uploads/a.png');
-  });
   it('stripAttachmentsLine: removes the attachments line', () => {
     assert.equal(stripAttachmentsLine(msg), 'please review');
-  });
-  it('attachmentPaths: none when absent', () => {
-    assert.equal(attachmentPaths('just a message').length, 0);
   });
   it('stripAttachmentsLine: unchanged without the line', () => {
     assert.equal(stripAttachmentsLine('hello world'), 'hello world');
   });
 
-  // Regression: a pasted-image-plus-text message. The composer terminates the
-  // attachments line with '\n', so the turn_started echo and hydrateTranscript
-  // (which join prompt text blocks with '', not '\n') still recover the typed
-  // text and the image path - otherwise the line-based strip swallowed it.
+  // Regression: the composer terminates the line with '\n', so a transcript that joins
+  // prompt text blocks with '' still recovers the typed text rather than swallowing it.
   const joinedEmpty = [`${ATTACHMENTS_PREFIX}.casper/uploads/pasted.png\n`, 'look at this'].join('');
   it('attachments+text: typed text survives an empty-string join', () => {
     assert.equal(stripAttachmentsLine(joinedEmpty), 'look at this');
-  });
-  it('attachments+text: image path parsed after an empty-string join', () => {
-    assert.equal(imageAttachmentPaths(joinedEmpty).join(), '.casper/uploads/pasted.png');
   });
 });
 
@@ -1236,10 +1218,13 @@ describe('session controller', () => {
   /** Records what the controller did to its socket, and lets a test answer back. */
   const socketDouble = () => {
     const calls: string[] = [];
+    /** What each prompt carried, so a dropped argument is visible. */
+    const sent: { content: unknown; attachments?: unknown }[] = [];
     let handlers: SessionSocketHandlers | null = null;
     let deliverable = true;
     return {
       calls,
+      sent,
       handlers: () => {
         assert.ok(handlers, 'no socket was created');
         return handlers;
@@ -1254,8 +1239,9 @@ describe('session controller', () => {
           connect: () => calls.push('connect'),
           close: () => calls.push('close'),
           reset: (head: number) => calls.push(`reset:${head}`),
-          prompt: () => {
+          prompt: (content: unknown, attachments?: unknown) => {
             calls.push('prompt');
+            sent.push({ content, attachments });
             return deliverable;
           },
           cancel: () => calls.push('cancel'),
@@ -1514,6 +1500,19 @@ describe('session controller', () => {
 
     assert.ok(socket.calls.includes('reset:12'));
     assert.equal(useStore.getState().appliedSeq, 12);
+  });
+
+  // The attachment metadata is threaded through four hops to reach the server. TypeScript
+  // allows a narrower function where a wider one is expected, so a handler that forgot the
+  // second parameter silently discarded it and still compiled.
+  it('carries attachment metadata to the socket, not just the prompt text', async () => {
+    const { controller, socket } = build();
+    await controller.openSession('s1');
+    const zip = { path: '/up/a.zip', name: 'a.zip', size: 8446, kind: 'binary' as const };
+    controller.send([{ type: 'text', text: 'have a look' }], [zip]);
+
+    assert.equal(socket.sent.length, 1);
+    assert.deepEqual(socket.sent[0]!.attachments, [zip]);
   });
 
   it('a reload applies the refreshed detail and moves the cursor with it', async () => {
