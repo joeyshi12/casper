@@ -18,6 +18,7 @@ import {
 
 import { bumpChatToTop, upsertChat } from './chats.js';
 import { classifyTurnFailure } from '../util/turnFailure.js';
+import { uuid } from '../util/uuid.js';
 import type { ConnStatus } from '../api/SessionSocket.js';
 
 /** A rendered tool call in the transcript (shared shape). */
@@ -242,7 +243,7 @@ export const useStore = create<CasperState>((set, get) => ({
     })),
 
   newChatId: () => {
-    const chatId = crypto.randomUUID();
+    const chatId = uuid();
     set({ chatId });
     return chatId;
   },

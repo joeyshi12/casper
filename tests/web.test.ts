@@ -30,6 +30,7 @@ import { splitWords, rehypeFadeWords } from '../web/src/util/rehypeFadeWords.js'
 import { widgetCallOf } from '../web/src/util/widgetCall.js';
 import { lazyImageProps } from '../web/src/util/lazyImage.js';
 import { classifyTurnFailure } from '../web/src/util/turnFailure.js';
+import { uuid } from '../web/src/util/uuid.js';
 import {
   classifyTool,
   toolLabel,
@@ -1795,5 +1796,36 @@ describe('session controller', () => {
     controller.syncRoute(null, false);
     await controller.openChat('s1');
     assert.equal(controller.canSend, true, 'and so does an open session');
+  });
+});
+
+describe('uuid (chat ids outside a secure context)', () => {
+  const real = globalThis.crypto;
+  const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+  const swapCrypto = (value: unknown) =>
+    Object.defineProperty(globalThis, 'crypto', { value, configurable: true, writable: true });
+
+  after(() => swapCrypto(real));
+
+  it('uses randomUUID where the context offers one', () => {
+    swapCrypto({ randomUUID: () => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' });
+    assert.equal(uuid(), 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+  });
+
+  // Plain HTTP on a LAN address: randomUUID is secure-context only and so absent, which
+  // used to throw and leave the app unable to mint a chat id. getRandomValues is not gated.
+  it('falls back to getRandomValues when randomUUID is missing', () => {
+    swapCrypto({ getRandomValues: (a: Uint8Array) => real.getRandomValues(a) });
+
+    const ids = Array.from({ length: 500 }, () => uuid());
+    for (const id of ids) assert.match(id, V4);
+    assert.equal(new Set(ids).size, ids.length, 'ids must be distinct');
+  });
+
+  it('produces an id the server will accept as a chat id', () => {
+    swapCrypto({ getRandomValues: (a: Uint8Array) => real.getRandomValues(a) });
+    // Mirrors isValidChatId in server/src/util/paths.ts: nothing that could traverse.
+    assert.match(uuid(), /^[A-Za-z0-9._-]+$/);
   });
 });
