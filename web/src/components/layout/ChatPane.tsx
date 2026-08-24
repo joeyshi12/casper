@@ -6,7 +6,7 @@ import { FileTree } from '../chat/FileTree.js';
 import { FilePreview } from '../chat/FilePreview.js';
 import { Composer } from '../chat/Composer.js';
 import { ConnDot } from '../common/ConnBanner.js';
-import { Spinner, FilesIcon, MenuIcon, RefreshIcon } from '../common/icons.js';
+import { Spinner, FilesIcon, MenuIcon, RefreshIcon, WarningIcon, CloseIcon } from '../common/icons.js';
 
 interface Props {
   /** A session being composed: no id yet, created by the first prompt. */
@@ -99,27 +99,27 @@ export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
     );
   }
 
+  const notice = chatNotice && (
+    <div className="notice-banner" role="alert">
+      <WarningIcon size={16} className="notice-icon" />
+      <div className="notice-text">
+        <p className="notice-title">{chatNotice.title}</p>
+        {chatNotice.fix && <p className="notice-sub">{chatNotice.fix}</p>}
+      </div>
+      <button
+        className="notice-x"
+        onClick={dismissChatNotice}
+        aria-label="Dismiss"
+      >
+        <CloseIcon size={14} />
+      </button>
+    </div>
+  );
+
   // Prompt, then a single bar: config on the left, live stats on the right.
   const composer = (
     <div className="composer-wrap">
-      {chatNotice && (
-        <div className="notice-banner" role="alert">
-          <span className="notice-icon" aria-hidden>
-            ⚠
-          </span>
-          <div className="notice-text">
-            <p className="notice-title">{chatNotice.title}</p>
-            {chatNotice.fix && <p className="notice-sub">{chatNotice.fix}</p>}
-          </div>
-          <button
-            className="notice-x"
-            onClick={dismissChatNotice}
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      )}
+      {notice}
       <Composer
         chatId={chatId}
         connStatus={connStatus}

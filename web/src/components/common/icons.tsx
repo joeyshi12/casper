@@ -122,6 +122,28 @@ export function CheckIcon({ size = 16, className }: IconProps) {
   );
 }
 
+/** Warning triangle - the session notice banner. */
+export function WarningIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+      <line x1="12" y1="9.5" x2="12" y2="13.5" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
 /** Padlock - used on the lock/logout control. */
 export function LockIcon({ size = 18, className }: IconProps) {
   return (
