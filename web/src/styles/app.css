@@ -1130,7 +1130,7 @@
   overflow-x: hidden;
   /* Centred reading column; the scroll area itself stays full width so the
      scrollbar and the wheel target remain at the pane edge. */
-  padding: var(--gutter) var(--chat-inset);
+  padding: var(--gutter) var(--chat-inset) var(--transcript-end-slack);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1503,9 +1503,15 @@
   color: var(--aurora-red);
 }
 
-/* A blocking condition that outlives the turn (bad credentials, missing binary).
-   Pinned above the composer because the next send will hit the same wall. */
+/* A blocking condition that outlives the turn (bad credentials, missing binary), or an
+   action that couldn't run. Floats above the composer, so it never shifts the transcript. */
 .notice-banner {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: var(--chat-inset);
+  right: var(--chat-inset);
+  /* Over the transcript's own affordances (10), under menus (30). */
+  z-index: 20;
   display: flex;
   align-items: flex-start;
   gap: 11px;
@@ -1514,12 +1520,13 @@
   border-left-width: 3px;
   border-radius: var(--r-md);
   padding: 11px 13px;
-  margin-bottom: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 .notice-icon {
   color: var(--aurora-red);
   flex: none;
-  line-height: 1.4;
+  /* Centres on the title's first line, not its ~21px box. */
+  margin-top: 2px;
 }
 .notice-text {
   flex: 1;
@@ -1538,14 +1545,16 @@
   word-break: break-word;
 }
 .notice-x {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: none;
   color: var(--n3);
-  font-size: 16px;
-  line-height: 1;
   cursor: pointer;
   padding: 0;
   flex: none;
+  margin-top: 3px;
 }
 .notice-x:hover {
   color: var(--n6);
@@ -2200,6 +2209,8 @@
 /* Composer */
 /* Prompt input, then the agent/model config row, then the live stats strip. */
 .composer-wrap {
+  /* Containing block for the notice banner, which floats just above it. */
+  position: relative;
   flex-shrink: 0;
   border-top: 1px solid var(--n1);
   background: var(--n-abyss);

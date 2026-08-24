@@ -8,7 +8,7 @@ import { FileIcon } from '../common/icons.js';
 
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { ToolCallCard } from './ToolCallCard.js';
-import { CompressIcon, Spinner } from '../common/icons.js';
+import { CompressIcon, Spinner, WarningIcon } from '../common/icons.js';
 import { lazyImageProps } from '../../util/lazyImage.js';
 import {
   TranscriptViewport,
@@ -360,7 +360,7 @@ function TurnErrorBlock({
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
         >
-          <span aria-hidden>⚠</span>
+          <WarningIcon size={13} />
           <span className="sysnote-label">{failure.title}</span>
           <span className="sysnote-toggle">{open ? 'Hide details' : 'Show details'}</span>
         </button>

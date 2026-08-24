@@ -44,6 +44,10 @@
   --header-h: 56px;
   --gutter: 16px;
 
+  /* Slack after the last message, so it clears the notice banner floating above the
+     composer: the banner's tallest wrap plus the 10px it sits above it. */
+  --transcript-end-slack: 96px;
+
   /* Reading width for the conversation. Long lines are hard to track across, so
      the transcript and the composer share this cap and sit centred in whatever
      space the chat column has. */
