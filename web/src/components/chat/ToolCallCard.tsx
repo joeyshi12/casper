@@ -145,22 +145,42 @@ function GenericToolCall({ tool, arriving = false }: ToolCallCardProps) {
   const [open, setOpen] = useState(status === 'failed');
   const summary = summaryOf(tool);
   const imagePaths = extractImagePaths(tool.input);
+  // An image-only read shows its image below the header and has nothing else to reveal, so
+  // it gets no chevron and no fold rather than one that opens onto an empty strip.
+  const body = renderBody(tool);
+  const hasBody = body != null;
 
-  return (
-    <div className={`toolcall toolcall-${status} ${arriving ? 'is-arriving' : ''}`}>
-      <button className="toolcall-head" onClick={() => setOpen((o) => !o)}>
-        <span className={`toolcall-dot dot-${status}`} />
-        <span className="toolcall-title">{toolLabel(tool)}</span>
-        {summary && (
-          <span className="toolcall-summary" title={summary.title ?? summary.text}>
-            {summary.text}
-          </span>
-        )}
-        <span className="toolcall-status">{STATUS_LABEL[status] ?? status}</span>
+  const head = (
+    <>
+      <span className={`toolcall-dot dot-${status}`} />
+      <span className="toolcall-title">{toolLabel(tool)}</span>
+      {summary && (
+        <span className="toolcall-summary" title={summary.title ?? summary.text}>
+          {summary.text}
+        </span>
+      )}
+      <span className="toolcall-status">{STATUS_LABEL[status] ?? status}</span>
+      {hasBody && (
         <span className={`toolcall-chevron ${open ? 'is-open' : ''}`}>
           <ChevronIcon size={14} />
         </span>
-      </button>
+      )}
+    </>
+  );
+
+  return (
+    <div className={`toolcall toolcall-${status} ${arriving ? 'is-arriving' : ''}`}>
+      {hasBody ? (
+        <button
+          className="toolcall-head"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+        >
+          {head}
+        </button>
+      ) : (
+        <div className="toolcall-head">{head}</div>
+      )}
 
       {imagePaths.length > 0 && (
         <div className="toolcall-images">
@@ -183,9 +203,11 @@ function GenericToolCall({ tool, arriving = false }: ToolCallCardProps) {
         </div>
       )}
 
-      <Collapse open={open}>
-        <div className="toolcall-body">{renderBody(tool)}</div>
-      </Collapse>
+      {hasBody && (
+        <Collapse open={open}>
+          <div className="toolcall-body">{body}</div>
+        </Collapse>
+      )}
     </div>
   );
 }

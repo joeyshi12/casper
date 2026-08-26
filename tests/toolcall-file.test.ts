@@ -161,5 +161,92 @@ describe('the file heading on a tool call (rendered in a DOM)', () => {
   });
 });
 
+// An image read shows its image outside the fold, so there is nothing left for the fold to
+// hold. It used to keep a chevron that opened onto an empty, bordered strip.
+describe('a tool call with nothing to reveal offers no fold (rendered in a DOM)', () => {
+  let createElement: Any;
+  let act: Any;
+  let createRoot: Any;
+  let ToolCallCard: Any;
+  let host: HTMLElement;
+  let root: Any;
+
+  const imageRead = (): ToolCallView =>
+    ({
+      id: 'i1',
+      title: 'read',
+      name: 'read',
+      status: 'completed',
+      content: [],
+      input: { operations: [{ mode: 'Image', image_paths: ['/work/proj/mascot.png'] }] },
+    }) as unknown as ToolCallView;
+
+  const textRead = (): ToolCallView =>
+    ({
+      id: 'i2',
+      title: 'read',
+      name: 'read',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: 'file body\n' } }],
+      input: { operations: [{ mode: 'Line', path: '/work/proj/notes.md' }] },
+    }) as unknown as ToolCallView;
+
+  const render = (tool: ToolCallView) =>
+    act(() => {
+      root?.unmount();
+      root = createRoot(host);
+      root.render(createElement(ToolCallCard, { tool }));
+    });
+
+  before(async () => {
+    const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', {
+      pretendToBeVisual: true,
+      url: 'https://casper.test/',
+    });
+    const w = dom.window as Any;
+    w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+    const g = globalThis as Any;
+    for (const k of [
+      'window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event',
+      'MouseEvent', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame',
+      'matchMedia', 'DocumentFragment',
+    ]) g[k] = w[k];
+    g.IS_REACT_ACT_ENVIRONMENT = true;
+
+    const react = await import('react');
+    g.React = react.default ?? react;
+    ({ createElement, act } = react);
+    ({ createRoot } = await import('react-dom/client'));
+    ({ ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js'));
+    host = w.document.getElementById('host');
+  });
+
+  it('shows the image, and no chevron or body to expand', () => {
+    render(imageRead());
+    assert.ok(host.querySelector('.toolcall-image'), 'the image renders');
+    assert.equal(host.querySelector('.toolcall-chevron'), null, 'no expand affordance');
+    assert.equal(host.querySelector('.toolcall-body'), null, 'no empty body strip');
+  });
+
+  it('its header is not a button, so it cannot be toggled', () => {
+    render(imageRead());
+    const head = host.querySelector('.toolcall-head') as HTMLElement;
+    assert.equal(head.tagName, 'DIV', 'inert, since there is nothing to open');
+    act(() => head.click());
+    assert.equal(host.querySelector('.toolcall-body'), null, 'clicking still reveals nothing');
+  });
+
+  it('a read with file text keeps its fold', () => {
+    render(textRead());
+    const head = host.querySelector('.toolcall-head') as HTMLElement;
+    assert.equal(head.tagName, 'BUTTON');
+    assert.ok(host.querySelector('.toolcall-chevron'), 'the affordance is there');
+    assert.equal(head.getAttribute('aria-expanded'), 'false');
+    act(() => head.click());
+    assert.ok(host.querySelector('.toolcall-body'), 'and it opens onto real content');
+    assert.equal(head.getAttribute('aria-expanded'), 'true');
+  });
+});
+
 /* The DOM globals and React internals here are untyped by nature. */
 type Any = any;
