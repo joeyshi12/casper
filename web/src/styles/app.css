@@ -1718,6 +1718,9 @@
   padding: 1px 5px;
   border-radius: var(--r-sm);
   color: var(--frost-teal);
+  /* Wraps even inside the <pre> that a single-line fence renders it in, whose
+     white-space: pre would otherwise run it off the screen. */
+  white-space: pre-wrap;
 }
 .md table {
   border-collapse: collapse;
