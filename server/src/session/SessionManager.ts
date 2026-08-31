@@ -248,6 +248,20 @@ export class SessionManager {
 
     // Confirm the chat exists before recording an override for it.
     const s = await this.ensureOpen(chatId);
+    await this.settleReload(s);
+
+    // Repointing disposes the child, so it is refused for the same reasons a reload is:
+    // mid-turn it kills the turn, and mid-compaction it loses the work and strands the
+    // compacting flag - the process_exited that would clear it never fires, because the
+    // exit handler ignores a process that is no longer the session's.
+    if (s.running) {
+      throw new Error('Cannot change the working directory while a turn is running');
+    }
+    if (s.turnState.get().compacting) {
+      throw new Error(
+        'Cannot change the working directory while the conversation is being compacted',
+      );
+    }
 
     this.store.setCwd(chatId, resolved);
     if (s.cwd !== resolved) {

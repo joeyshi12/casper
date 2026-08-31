@@ -250,6 +250,11 @@ export function FileTree({ chatId, onClose }: FileTreeProps) {
   const expandedRef = useRef<Set<string>>(new Set());
   const setChats = useStore((s) => s.setChats);
   const openFilePreview = useStore((s) => s.openFilePreview);
+  // Repointing disposes the kiro child, so the server refuses it mid-turn and
+  // mid-compaction. Don't offer it either.
+  const busy = useStore(
+    (s) => s.observability.turnStatus !== 'idle' || s.observability.compacting,
+  );
   const summaryCwd = sessions.find((s) => s.chatId === chatId)?.cwd;
 
   // Watch the root plus every expanded directory: exactly what the tree can show,
@@ -317,7 +322,8 @@ export function FileTree({ chatId, onClose }: FileTreeProps) {
         <button
           className="ftree-refresh"
           onClick={() => setChangingFolder(true)}
-          title="Change working directory"
+          disabled={busy}
+          title={busy ? 'Change the folder after the turn' : 'Change working directory'}
           aria-label="Change working directory"
         >
           <FolderIcon size={14} />
@@ -341,7 +347,12 @@ export function FileTree({ chatId, onClose }: FileTreeProps) {
         {error && (
           <div className="ftree-error">
             {error}
-            <button className="ftree-repoint" onClick={() => setChangingFolder(true)}>
+            <button
+              className="ftree-repoint"
+              onClick={() => setChangingFolder(true)}
+              disabled={busy}
+              title={busy ? 'Change the folder after the turn' : undefined}
+            >
               Change folder…
             </button>
           </div>

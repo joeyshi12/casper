@@ -2717,6 +2717,15 @@
   background: var(--n1);
   color: var(--n6);
 }
+.ftree-refresh:disabled,
+.ftree-repoint:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ftree-refresh:disabled:hover {
+  background: none;
+  color: var(--n4);
+}
 /* Dimmed tap-to-close layer behind the mobile file-tree drawer. */
 .ftree-backdrop {
   display: none;

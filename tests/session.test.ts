@@ -975,6 +975,59 @@ describe('process lifecycle', () => {
       mgr.disposeAll();
     }
   });
+
+  // Repointing disposes the child, which mid-turn killed the turn and mid-compaction lost
+  // the work and stranded the compacting flag. Refused for the same reasons a reload is.
+  it('refuses while a turn is running, leaving the process and the cwd alone', async () => {
+    let release: () => void = () => {};
+    const held = new Promise<never>((_, reject) => {
+      release = () => reject(new Error('cancelled'));
+    });
+    const proc = fakeKiroProcess({
+      sessionId: 'busy-cwd',
+      onPrompt: () => held,
+    });
+    const mgr = managerWith(() => proc);
+    const target = path.join(sessionsCwd, 'nope');
+    try {
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'busy-cwd' });
+      await mgr.runPrompt('busy-cwd', [{ type: 'text', text: 'a long job' }]);
+
+      await assert.rejects(
+        () => mgr.setChatCwd('busy-cwd', target),
+        /while a turn is running/,
+      );
+      assert.equal(proc.disposed(), false, 'the running turn keeps its process');
+      assert.equal(await mgr.getChatCwd('busy-cwd'), sessionsCwd, 'no override recorded');
+    } finally {
+      release();
+      mgr.disposeAll();
+    }
+  });
+
+  it('refuses while a compaction is in flight', async () => {
+    const proc = fakeKiroProcess({ sessionId: 'compacting-cwd' });
+    const mgr = managerWith(() => proc);
+    const target = path.join(sessionsCwd, 'nope-either');
+    try {
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'compacting-cwd' });
+      const s = await mgr.ensureOpen('compacting-cwd');
+      s.record({
+        kind: 'compaction',
+        params: { status: { type: 'started' } },
+      } as CasperEventPayload);
+      assert.equal(s.turnState.get().compacting, true, 'precondition');
+
+      await assert.rejects(
+        () => mgr.setChatCwd('compacting-cwd', target),
+        /being compacted/,
+      );
+      assert.equal(proc.disposed(), false);
+      assert.equal(await mgr.getChatCwd('compacting-cwd'), sessionsCwd);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
 });
 
 // kiro binds the agent definition, the workspace's .kiro directory and its MCP
