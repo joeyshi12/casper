@@ -529,6 +529,11 @@ export class SessionController {
     this.refreshSessions();
   }
 
+  /** Go to a chat chosen where there is no link to follow, such as the search palette. */
+  goToChat(id: string): void {
+    this.host?.navigate(pathForChat(id));
+  }
+
   /** Marked before the route changes, or the pane flashes back to the list. */
   markLoading(id: string): void {
     if (id === this.state.activeId) return;

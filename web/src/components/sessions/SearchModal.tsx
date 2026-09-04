@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ChatSummary } from '@casper/shared';
 import { fuzzyScore } from '../../util/fuzzy.js';
+import { sessionController } from '../../state/sessionController.js';
 import { SearchIcon } from '../common/icons.js';
 
 interface Props {
@@ -37,8 +38,10 @@ export function SearchModal({ sessions, onOpen, onClose }: Props) {
     setActive(0);
   }, [query]);
 
+  // A result is a button, not a link, so onOpen alone navigates nowhere.
   const choose = (id: string) => {
     onOpen(id);
+    sessionController.goToChat(id);
     onClose();
   };
 
