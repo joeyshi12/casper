@@ -267,6 +267,65 @@ describe('line diff (LCS): context kept, only changed lines marked', () => {
   it('identical text all context', () => assert.ok(lineDiff('x\ny', 'x\ny').every((l) => l.type === 'ctx')));
 });
 
+describe('store.applyEvent (streamed reasoning is trimmed when committed)', () => {
+  const thought = (seq: number, text: string): CasperEvent =>
+    ({
+      seq,
+      chatId: 's1',
+      ts: 0,
+      payload: {
+        kind: 'session_update',
+        update: { sessionUpdate: 'agent_thought_chunk', content: { text } },
+      },
+    }) as unknown as CasperEvent;
+
+  const turnEnded = (seq: number): CasperEvent =>
+    ({
+      seq,
+      chatId: 's1',
+      ts: 0,
+      payload: { kind: 'turn_ended', stopReason: 'end_turn' },
+    }) as unknown as CasperEvent;
+
+  const thinkingText = () => {
+    const it = useStore.getState().items.find(
+      (i) => i.type === 'message' && i.message.role === 'thinking',
+    );
+    assert.ok(it?.type === 'message');
+    return it.message.text;
+  };
+
+  beforeEach(() => {
+    useStore.getState().clearActive();
+  });
+
+  // A separator chunk arriving after the previous commit used to open the next block with
+  // blank lines, which show because .thought-text is pre-wrap.
+  it('drops whitespace the stream carried in at the front', () => {
+    useStore.getState().applyEvent(thought(1, '\n\n'));
+    useStore.getState().applyEvent(thought(2, 'Checking the guard order.'));
+    useStore.getState().applyEvent(turnEnded(3));
+    assert.equal(thinkingText(), 'Checking the guard order.');
+  });
+
+  it('keeps newlines inside the reasoning', () => {
+    useStore.getState().applyEvent(thought(1, 'First.\n\nSecond.\n'));
+    useStore.getState().applyEvent(turnEnded(2));
+    assert.equal(thinkingText(), 'First.\n\nSecond.');
+  });
+
+  it('commits nothing when the stream was only whitespace', () => {
+    useStore.getState().applyEvent(thought(1, '\n \n'));
+    useStore.getState().applyEvent(turnEnded(2));
+    assert.equal(
+      useStore.getState().items.filter(
+        (i) => i.type === 'message' && i.message.role === 'thinking',
+      ).length,
+      0,
+    );
+  });
+});
+
 describe('store.applyEvent (duplicate event suppression)', () => {
   const userTurn = (seq: number, text: string): CasperEvent => ({
     seq,

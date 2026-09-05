@@ -335,6 +335,55 @@ describe('hydrateTranscript: inline tool-result images are not shipped', () => {
   });
 });
 
+// A thinking block renders pre-wrap, so surrounding whitespace shows as blank lines.
+describe('hydrateTranscript: thinking text is trimmed', () => {
+  const sid = 'hydrate-thinking-trim-test';
+  const file = path.join(config.kiroSessionsDir, `${sid}.jsonl`);
+
+  before(() => {
+    fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
+    const line = {
+      kind: 'AssistantMessage',
+      data: {
+        message_id: 'm1',
+        content: [
+          { kind: 'thinking', data: { text: '\n\n  Weighing the options.\n\n' } },
+          { kind: 'text', data: { text: 'Here is the answer.' } },
+        ],
+      },
+    };
+    fs.writeFileSync(file, JSON.stringify(line) + '\n');
+  });
+  after(() => fs.rmSync(file, { force: true }));
+
+  it('keeps the reasoning without its surrounding blank lines', async () => {
+    const items = await hydrateTranscript(sid);
+    const thought = items.find(
+      (i) => i.type === 'message' && i.message.role === 'thinking',
+    );
+    assert.ok(thought?.type === 'message');
+    assert.equal(thought.message.text, 'Weighing the options.');
+  });
+
+  it('a block of nothing but whitespace is still dropped', async () => {
+    const blank = 'hydrate-thinking-blank-test';
+    const f = path.join(config.kiroSessionsDir, `${blank}.jsonl`);
+    fs.writeFileSync(
+      f,
+      JSON.stringify({
+        kind: 'AssistantMessage',
+        data: { message_id: 'm1', content: [{ kind: 'thinking', data: { text: '\n \n' } }] },
+      }) + '\n',
+    );
+    const items = await hydrateTranscript(blank);
+    assert.equal(
+      items.filter((i) => i.type === 'message' && i.message.role === 'thinking').length,
+      0,
+    );
+    fs.rmSync(f, { force: true });
+  });
+});
+
 // The identity problem: a live message is keyed by Casper's event seq and a rebuilt one by
 // kiro's message_id, so neither side can use the other's. Position is the only key both can
 // compute, which makes this the load-bearing test for the whole scheme.

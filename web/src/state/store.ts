@@ -469,7 +469,14 @@ function commitStreaming(
   if (state.streamingThought.trim()) {
     next.push({
       type: 'message',
-      message: { id: `t-${baseId}`, role: 'thinking', text: state.streamingThought, timestamp: ts },
+      // Trimmed: the block renders pre-wrap, so a separator chunk that arrives after the
+      // previous commit would otherwise open this one with blank lines.
+      message: {
+        id: `t-${baseId}`,
+        role: 'thinking',
+        text: state.streamingThought.trim(),
+        timestamp: ts,
+      },
     });
   }
   if (state.streamingText.trim()) {

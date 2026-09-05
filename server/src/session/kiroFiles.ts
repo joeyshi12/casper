@@ -283,7 +283,7 @@ export async function hydrateTranscript(
       // Order within an assistant turn: reasoning, spoken text, then tool uses.
       const thinking = textOf('thinking');
       if (thinking.trim())
-        pushMsg({ id: `t-${baseId}`, role: 'thinking', text: thinking, timestamp: ts });
+        pushMsg({ id: `t-${baseId}`, role: 'thinking', text: thinking.trim(), timestamp: ts });
       const text = textOf('text');
       if (text.trim())
         pushMsg({ id: `a-${baseId}`, role: 'assistant', text, timestamp: ts });
