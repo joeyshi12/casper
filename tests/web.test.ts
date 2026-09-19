@@ -1468,7 +1468,7 @@ describe('session controller', () => {
     assert.equal(await controller.createChat({}), true);
     await settle();
 
-    assert.deepEqual(nav.to, ['/chats/created-1']);
+    assert.deepEqual(nav.to, ['/c/created-1']);
     assert.equal(useStore.getState().activeId, 'created-1');
     const fetches = rest.calls.filter((c) => c.startsWith('getChat'));
     assert.deepEqual(fetches, [], 'the created detail is adopted, not refetched');

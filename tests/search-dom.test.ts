@@ -77,7 +77,7 @@ describe('opening a chat from the search palette', () => {
     const hit = results().find((b) => b.textContent?.includes('Tailoring'));
     assert.ok(hit, 'the palette lists the chat');
     act(() => hit.click());
-    assert.deepEqual(navigated, ['/chats/chat-tailoring'], 'the route has to change');
+    assert.deepEqual(navigated, ['/c/chat-tailoring'], 'the route has to change');
   });
 
   it('still tells the parent, so the mobile drawer closes and the row shows a spinner', () => {
@@ -88,7 +88,7 @@ describe('opening a chat from the search palette', () => {
     act(() => hit!.click());
     assert.deepEqual(opened, ['chat-alpha']);
     assert.equal(closed, 1, 'the palette closes');
-    assert.deepEqual(navigated, ['/chats/chat-alpha']);
+    assert.deepEqual(navigated, ['/c/chat-alpha']);
   });
 
   it('encodes the id it puts in the path', () => {
@@ -100,6 +100,6 @@ describe('opening a chat from the search palette', () => {
       root.render(createElement(SearchModal, { sessions: odd, onOpen: () => {}, onClose: () => {} }));
     });
     act(() => results()[0]!.click());
-    assert.deepEqual(navigated, ['/chats/a%20b%2Fc']);
+    assert.deepEqual(navigated, ['/c/a%20b%2Fc']);
   });
 });

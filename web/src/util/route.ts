@@ -1,5 +1,5 @@
 /** Owns the chat URL shape: the route pattern and the paths that match it. */
-const CHATS = '/chats';
+const CHATS = '/c';
 
 export const CHAT_ROUTE = `${CHATS}/:chatId`;
 
