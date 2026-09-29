@@ -1105,6 +1105,15 @@ describe('currency versus inline math', () => {
     );
   });
 
+  for (const [src, out] of [
+    ['A $5-$10 range', 'A \\$5-$10 range'],
+    ['Pay $5 + $10 shipping', 'Pay \\$5 + $10 shipping'],
+    ['At $3/kg or $4/kg', 'At \\$3/kg or $4/kg'],
+  ]) {
+    it(`escapes an amount whose closing dollar starts another amount: ${src}`, () =>
+      assert.equal(escapeCurrencyDollars(src), out));
+  }
+
   it('leaves real inline math untouched', () => {
     const src = 'The area is $\\pi r^2$ exactly.';
     assert.equal(escapeCurrencyDollars(src), src);

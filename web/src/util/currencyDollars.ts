@@ -19,6 +19,7 @@ const TRAILING_PUNCT = /[.,;:!?]$/;
 const NEWLINE = /\n/;
 const WHITESPACE = /\s+/;
 const GROUPED_NUMBER = /\d,\d{3}\b/;
+const DIGIT = /\d/;
 
 /**
  * Whether the text between two dollar signs is mathematical. Errs toward math only when
@@ -88,7 +89,9 @@ export function escapeCurrencyDollars(source: string): string {
       const close = source.indexOf('$', i + 1);
       if (close !== -1) {
         const content = source.slice(i + 1, close);
-        if (!looksLikeMath(content)) {
+        // A closing dollar directly followed by a digit starts the next amount, as in
+        // "$5-$10" or "$3/kg or $4/kg". Pandoc uses the same rule.
+        if (DIGIT.test(source[close + 1] ?? '') || !looksLikeMath(content)) {
           // Escape the opener only, and reconsider the closer: in "$30 ... $x^2$" the
           // dollar that ended this pair is the one that starts the real math.
           out += `\\$${content}`;
