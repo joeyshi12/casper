@@ -122,6 +122,7 @@ export class TranscriptViewport {
       this.lastMaxTop = this.bottomOf(el);
       this.prevPendingCount = content.pendingCount;
       this.setFlags({ showScrollButton: false });
+      this.fillIfShort(el);
       return;
     }
 
@@ -129,6 +130,14 @@ export class TranscriptViewport {
     this.prevPendingCount = content.pendingCount;
     if (this.follow) this.scheduleFollow();
     else this.updateButton(el);
+    this.fillIfShort(el);
+  }
+
+  /* Older pages load on a scroll near the top, but a page that fits on screen (grouped
+     tool calls are short) gives the user nothing to scroll. Load until it overflows.
+     clientHeight 0 means the element is not laid out, so there is nothing to measure. */
+  private fillIfShort(el: ViewportElement): void {
+    if (el.clientHeight > 0 && this.bottomOf(el) < LOAD_OLDER_WITHIN) this.loadOlder();
   }
 
   onScroll(): void {

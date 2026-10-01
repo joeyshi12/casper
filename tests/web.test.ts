@@ -815,6 +815,20 @@ describe('transcript viewport', () => {
       assert.equal(el.scrollTop, at);
     });
 
+    it('loads an older page by itself when the content does not fill the view', () => {
+      const el = fakeElement(500, 600);
+      const h = build(el, { pages: [page(80)] });
+      h.viewport.onContent(content({ remainingOlder: 200 }));
+      assert.deepEqual(h.requests, [{ chatId: 's1', offset: 120, limit: 80 }]);
+    });
+
+    it('does not load an older page by itself when the content overflows', () => {
+      const el = fakeElement(2000, 600);
+      const h = build(el, { pages: [page(80)] });
+      h.viewport.onContent(content({ remainingOlder: 200 }));
+      assert.deepEqual(h.requests, []);
+    });
+
     it('an empty page ends the walk without moving the view', async () => {
       const el = fakeElement(2000, 600, 100);
       const h = build(el, { pages: [[]] });
