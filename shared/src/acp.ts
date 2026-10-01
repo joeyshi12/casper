@@ -206,6 +206,36 @@ export interface KiroCompactionStatusParams {
   summary: string | null;
 }
 
+export type SubagentStatusType = 'working' | 'terminated' | string;
+
+/** One running or finished subagent, as reported by `_kiro.dev/subagent/list_update`. */
+export interface KiroSubagentInfo {
+  sessionId: string;
+  /** The stage name, matching the `subagent` tool call's `rawInput.stages[].name`. */
+  sessionName: string;
+  agentName?: string;
+  initialQuery?: string;
+  status: { type: SubagentStatusType; message?: string };
+  group?: string;
+  role?: string;
+  dependsOn?: string[];
+  hasLoop?: boolean;
+  loopIteration?: number;
+  loopMaxIterations?: number;
+  createdAtMs?: number;
+}
+
+/**
+ * `_kiro.dev/subagent/list_update` - the full set of subagents currently running or just
+ * finished on this kiro-cli process. Carries no sessionId of its own: it is a per-process
+ * broadcast, not scoped to one parent session. Since Casper spawns one kiro-cli child per
+ * chat, every list_update seen on a chat's process belongs to that chat's own subagents.
+ */
+export interface KiroSubagentListUpdateParams {
+  subagents: KiroSubagentInfo[];
+  pendingStages: unknown[];
+}
+
 // Well-known method names, so string literals never drift.
 export const ACP_METHODS = {
   initialize: 'initialize',

@@ -9,7 +9,9 @@ import { config } from '../config.js';
  * `chats` is the chat itself, keyed by the id the client mints: the session kiro later binds to
  * it, plus the title and working directory Casper layers over kiro's files; `logins` holds the
  * device sessions the auth cookie is checked against; `message_attachments` records what was
- * attached to each prompt.
+ * attached to each prompt; `subagent_links` records which parent tool call and stage name a
+ * child session belongs to, learned live from `_kiro.dev/subagent/list_update` and otherwise
+ * lost once the parent chat's process is gone.
  * node:sqlite is built in, which is why the Node floor is 24 rather than a native driver.
  *
  * Attachments are keyed by ordinal - the position of the user message within the session -
@@ -42,6 +44,13 @@ CREATE TABLE IF NOT EXISTS message_attachments (
   kind     TEXT    NOT NULL,
   PRIMARY KEY (chat_id, ordinal, path)
 );
+CREATE TABLE IF NOT EXISTS subagent_links (
+  child_session_id  TEXT PRIMARY KEY,
+  parent_session_id TEXT NOT NULL,
+  tool_call_id      TEXT NOT NULL,
+  stage_name        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS subagent_links_parent ON subagent_links (parent_session_id);
 `;
 
 let handle: DatabaseSync | undefined;

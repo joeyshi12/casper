@@ -143,6 +143,36 @@ export interface TranscriptPageResponse {
   items: TranscriptItem[];
 }
 
+// ---------------------------------------------------------------------------
+// Subagents
+// ---------------------------------------------------------------------------
+
+/** One subagent (child session) spawned by a chat's `subagent` tool call. */
+export interface SubagentSummary {
+  /** The child kiro session id - also what GET .../subagents/:id reads by. */
+  sessionId: string;
+  /** The stage name from the parent's `subagent` tool call. */
+  stageName: string;
+  /** The parent's tool call this subagent belongs to, if still known. Absent for
+   *  one found only on disk (e.g. after a server restart lost the live link). */
+  toolCallId?: string;
+  status: 'pending' | 'working' | 'completed' | 'failed';
+  /** One short phrase of what it's doing now, e.g. "Reading sprite-dom.ts" or "Done". */
+  activity?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SubagentListResponse {
+  subagents: SubagentSummary[];
+}
+
+/** A subagent's own transcript, hydrated the same way a chat's is. */
+export interface SubagentDetailResponse {
+  subagent: SubagentSummary;
+  transcript: TranscriptItem[];
+}
+
 export interface SetModelRequest {
   modelId: string;
 }
