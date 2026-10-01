@@ -1,5 +1,3 @@
-// Run with: npm test
-//
 // The `subagent` tool call renders as one line that opens onto a list of its subagents,
 // each row opening in place onto that subagent's own task and transcript. Rendered in a
 // DOM the same way tests/transcript-dom.test.ts renders Transcript: jsdom computes no
@@ -8,9 +6,9 @@
 
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { JSDOM } from 'jsdom';
 import type { SubagentSummary, TranscriptItem } from '@casper/shared';
 import type { ToolCallView } from '../web/src/state/store.js';
+import { installDomGlobals } from './helpers.js';
 
 type Any = any;
 
@@ -50,31 +48,11 @@ const summary = (over: Partial<SubagentSummary>): SubagentSummary => ({
 });
 
 before(async () => {
-  const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', {
-    pretendToBeVisual: true,
-    url: 'https://casper.test/',
-  });
-  const w = dom.window as Any;
-  w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-  const g = globalThis as Any;
-  for (const key of [
-    'window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event',
-    'MouseEvent', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame',
-    'matchMedia', 'DocumentFragment',
-  ]) {
-    g[key] = w[key];
-  }
-  g.IS_REACT_ACT_ENVIRONMENT = true;
-
-  const react = await import('react');
-  g.React = react.default ?? react;
-  ({ createElement, act } = react);
+  ({ host, react: { createElement, act } } = await installDomGlobals());
   ({ createRoot } = await import('react-dom/client'));
   ({ ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js'));
   ({ useStore } = await import('../web/src/state/store.js'));
   ({ api } = await import('../web/src/api/rest.js'));
-
-  host = w.document.getElementById('host');
 });
 
 after(() => {
@@ -116,7 +94,7 @@ describe('the subagent tool call (rendered in a DOM)', () => {
       subagentsCalls.push(chatId);
       return { subagents: [summary({ status: 'working' }), summary({ sessionId: 'child-2', stageName: 'map_web', status: 'pending', activity: 'Waits for map_server', createdAt: '', updatedAt: '' })] };
     };
-    api.subagentDetail = async (chatId: string, subagentId: string) => {
+    api.subagentDetail = async (_chatId: string, subagentId: string) => {
       detailCalls.push(subagentId);
       // A user-role message, not assistant: MarkdownRenderer schedules an idle katex
       // preload that outlives this test file in jsdom, which has no bearing on what

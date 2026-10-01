@@ -1,6 +1,42 @@
 import { EventEmitter } from 'node:events';
+import { JSDOM } from 'jsdom';
 import type { SessionPromptResult } from '@casper/shared';
 import type { ManagedProcess } from '../server/src/session/SessionManager.js';
+
+const DOM_GLOBALS = [
+  'window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event',
+  'MouseEvent', 'KeyboardEvent', 'getComputedStyle', 'requestAnimationFrame',
+  'cancelAnimationFrame', 'matchMedia', 'DocumentFragment',
+];
+
+/**
+ * A jsdom window wired into globalThis for rendering React components outside a
+ * browser: adds matchMedia, which jsdom has none of, and sets
+ * IS_REACT_ACT_ENVIRONMENT so `act` doesn't warn. `extraGlobals` lets a test add
+ * what it needs (localStorage, DataTransfer, File, ...) without copying this list.
+ * tsx compiles JSX here with the classic runtime - run from the repo root it never
+ * reads web/tsconfig.json - so components' JSX becomes React.createElement calls
+ * with no React import in scope; this also sets globalThis.React to cover that.
+ */
+export async function installDomGlobals(extraGlobals: string[] = []) {
+  const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', {
+    pretendToBeVisual: true,
+    url: 'https://casper.test/',
+  });
+  const w = dom.window as unknown as Record<string, unknown>;
+  w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+
+  const g = globalThis as unknown as Record<string, unknown>;
+  for (const key of [...DOM_GLOBALS, ...extraGlobals]) {
+    if (w[key] !== undefined) g[key] = w[key];
+  }
+  g.IS_REACT_ACT_ENVIRONMENT = true;
+
+  const react = await import('react');
+  g.React = react.default ?? react;
+  const host = (w.document as Document).getElementById('host') as HTMLElement;
+  return { dom, window: w, host, react };
+}
 
 /** Shared by the suites that construct server objects wanting a logger. */
 export function noopLogger() {

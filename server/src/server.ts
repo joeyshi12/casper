@@ -3,11 +3,10 @@ import { config } from './config.js';
 import { logger } from './util/logger.js';
 import { isWithinRoot } from './util/paths.js';
 
-/** Start the HTTP/WebSocket server and block until a signal stops it. */
+/** Starts the HTTP/WebSocket server and blocks until a signal stops it. */
 export async function serve(): Promise<void> {
-  // Fail fast on a misconfiguration where the default working directory sits
-  // outside the file-access boundary - otherwise the directory picker and
-  // session creation silently break (403 / throw) for every request.
+  // Fail fast on a misconfigured DEFAULT_CWD outside the file-access boundary,
+  // or the directory picker and session creation silently break for every request.
   if (!isWithinRoot(config.fileRoot, config.defaultCwd)) {
     logger.warn(
       { fileRoot: config.fileRoot, defaultCwd: config.defaultCwd },

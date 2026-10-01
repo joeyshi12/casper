@@ -16,13 +16,10 @@ import {
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 
 /**
- * The file preview, for whoever asks: the file tree, or a read/write tool call in the
- * transcript.
- * the panel was open. The store holds the path; this loads it and renders PreviewModal.
- *
- * Portalled to the body like the app's other modals - a `transform` on an ancestor would
- * otherwise become the containing block for a `position: fixed` overlay, and the mobile
- * panel is transformed.
+ * The file preview, for the file tree or a read/write tool call in the transcript.
+ * Portalled to the body like the app's other modals - a `transform` on an ancestor
+ * becomes the containing block for `position: fixed`, and the mobile panel is
+ * transformed.
  */
 
 interface PreviewState {
@@ -37,7 +34,6 @@ interface PreviewState {
 
 const basename = (p: string): string => p.split('/').pop() || p;
 
-/** The modal itself - text content, image, or a rendered page in a centered overlay. */
 function PreviewModal({
   preview,
   chatId,
@@ -47,10 +43,8 @@ function PreviewModal({
   chatId: string;
   onClose: () => void;
 }) {
-  // A class rather than the Fullscreen API, which iOS Safari won't grant to
-  // arbitrary elements - and this gets used from a phone.
+  // A class rather than the Fullscreen API, which iOS Safari won't grant to arbitrary elements.
   const [full, setFull] = useState(false);
-  // Keyed by path so switching files doesn't carry the previous file's choice over.
   const [sourceByPath, setSourceByPath] = useState<Record<string, boolean>>({});
 
   const download = () => {
@@ -69,7 +63,6 @@ function PreviewModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // Rendered by default: a generated page or a README is opened to be read.
   const showSource = sourceByPath[preview.path] ?? false;
   const canRender = preview.kind === 'html' || preview.kind === 'markdown';
   const showRendered = canRender && !showSource;
@@ -80,7 +73,6 @@ function PreviewModal({
       <div className={`fpreview-modal${full ? ' fpreview-full' : ''}`}>
         <div className="fpreview-header">
           {canRender && !preview.error && (
-            // The active side is filled, so it reads as a position not an action.
             <div className="fpreview-seg" role="group" aria-label="Preview mode">
               <button
                 className={`fpreview-seg-btn${showSource ? '' : ' is-active'}`}
@@ -147,7 +139,7 @@ function PreviewModal({
             />
           )}
           {!preview.error && preview.kind === 'html' && showRendered && (
-            // No allow-same-origin, so scripts run but the page can't touch the session
+            // No allow-same-origin: scripts run but the page can't reach the session
             // cookie or the API. The server sends a matching CSP.
             <iframe
               src={`${api.previewUrl(chatId, preview.path)}&raw=1`}
@@ -157,7 +149,6 @@ function PreviewModal({
             />
           )}
           {!preview.loading && !preview.error && preview.kind === 'markdown' && showRendered && preview.content !== null && (
-            // The file's own HTML renders, sanitised with GitHub's schema first.
             <div className="fpreview-md">
               <MarkdownRenderer text={preview.content} html />
             </div>
@@ -185,8 +176,7 @@ export function FilePreview() {
 
   const close = useCallback(() => closeFilePreview(), [closeFilePreview]);
 
-  // Load whatever the store points at. `stale` covers a second file being opened while
-  // the first is still in flight, which is what the old per-path comparison did.
+  // `stale` guards against a second file opening while the first is still in flight.
   useEffect(() => {
     if (!path || !chatId) {
       setPreview(null);
@@ -212,8 +202,6 @@ export function FilePreview() {
         if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
         const text = await res.text();
         if (stale) return;
-        // Show the file as soon as it arrives; highlighting lands separately so a big
-        // file isn't held behind it.
         setPreview((p) => (p && p.path === path ? { ...p, content: text, loading: false } : p));
 
         const lang = langFromFilename(basename(path));

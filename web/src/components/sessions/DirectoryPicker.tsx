@@ -5,15 +5,12 @@ import { PopoverMenu } from '../common/PopoverMenu.js';
 import type { DirListing } from '@casper/shared';
 
 const SEP = '/';
-/** Crumbs kept either side of the fold: root, then the parent and the current folder. */
 const TAIL = 2;
 
 interface Props {
   /** Where to start browsing. A seed: the picker owns its position afterwards. */
   initialPath: string;
-  /** The resolved absolute path currently chosen. */
   onChange: (path: string) => void;
-  /** Enter with no suggestion highlighted. */
   onSubmit: () => void;
 }
 
@@ -23,7 +20,6 @@ function parentOf(dir: string): string {
   return cut <= 0 ? SEP : dir.slice(0, cut);
 }
 
-/** The path as clickable ancestors, root first. */
 function crumbsOf(dir: string): { name: string; path: string }[] {
   const out = [{ name: SEP, path: SEP }];
   let acc = '';
@@ -34,16 +30,10 @@ function crumbsOf(dir: string): { name: string; path: string }[] {
   return out;
 }
 
-/** An entry's name: the server sends absolute paths, the breadcrumb supplies the rest. */
 function nameUnder(dir: string, full: string): string {
   return full.slice(dir.length).replace(/^\/+/, '');
 }
 
-/**
- * Pick a directory by browsing it: the breadcrumb says where you are, the input filters
- * within it, so neither has to hold a whole path. Implements the WAI-ARIA editable combobox
- * with list autocomplete, so the suggestions are reachable by keyboard.
- */
 export function DirectoryPicker({ initialPath, onChange, onSubmit }: Props) {
   const [browseDir, setBrowseDir] = useState(initialPath.trim());
   const [query, setQuery] = useState('');
@@ -57,7 +47,7 @@ export function DirectoryPicker({ initialPath, onChange, onSubmit }: Props) {
   const seeded = useRef(false);
   const browseDirRef = useRef(browseDir);
   browseDirRef.current = browseDir;
-  // A ref so a parent passing a fresh closure each render doesn't re-run the fetch.
+  // A ref so a fresh closure from the parent each render doesn't re-run the fetch.
   const report = useRef(onChange);
   report.current = onChange;
 
@@ -79,8 +69,8 @@ export function DirectoryPicker({ initialPath, onChange, onSubmit }: Props) {
         .then((r) => {
           if (requested.current !== pathQuery) return;
           setListing(r);
-          // Learn where an empty seed started. Once only, or adopting it would change
-          // pathQuery and fire a second request for the same directory.
+          // Adopt the server's resolved dir only once an empty seed, or adopting it
+          // again would change pathQuery and fire a second request.
           if (!seeded.current && r.dir) {
             seeded.current = true;
             if (!browseDirRef.current) setBrowseDir(r.dir);
@@ -104,9 +94,8 @@ export function DirectoryPicker({ initialPath, onChange, onSubmit }: Props) {
   const root = crumbs[0]!;
   const here = crumbs[crumbs.length - 1];
 
-  // Keep the highlighted row visible: the list is a fixed-height scroller, so arrowing
-  // down walks the active option out of sight, and aria-activedescendant means a screen
-  // reader is describing something the user cannot see.
+  // Keeps the highlighted row visible: aria-activedescendant lets a screen reader
+  // describe an option scrolled out of view otherwise.
   useEffect(() => {
     if (active < 0) return;
     const row = listRef.current?.children[active] as HTMLElement | undefined;
@@ -136,7 +125,6 @@ export function DirectoryPicker({ initialPath, onChange, onSubmit }: Props) {
       if (chosen) goTo(chosen);
       else onSubmit();
     } else if (e.key === 'Escape' && active >= 0) {
-      // Only when a row is highlighted; otherwise Escape belongs to the sheet.
       e.stopPropagation();
       setActive(-1);
     }
@@ -160,8 +148,7 @@ export function DirectoryPicker({ initialPath, onChange, onSubmit }: Props) {
 
   return (
     <div className="dirpick">
-      {/* A fixed set, not a scroller: a sideways swipe that overshoots a horizontal
-          scroller fires the browser's back gesture. Folded ancestors open as a menu. */}
+      {/* No horizontal scroller: an overshooting swipe fires the browser's back gesture. */}
       <div className="dirpick-crumbs">
         {crumbButton(root)}
         {hiddenCrumbs.length > 0 && (
@@ -179,7 +166,6 @@ export function DirectoryPicker({ initialPath, onChange, onSubmit }: Props) {
         )}
         {tailCrumbs.map((c, i) => (
           <span key={c.path} className="dirpick-crumb-wrap">
-            {/* Root's own label is "/", so nothing right after it takes a separator. */}
             {(i > 0 || hiddenCrumbs.length > 0) && <span className="dirpick-sep">/</span>}
             {crumbButton(c)}
           </span>
@@ -218,7 +204,6 @@ export function DirectoryPicker({ initialPath, onChange, onSubmit }: Props) {
         spellCheck={false}
         onChange={(e) => {
           setQuery(e.target.value);
-          // Or Enter during the debounce would take the old listing's active row.
           setActive(-1);
         }}
         onKeyDown={onKeyDown}
@@ -237,7 +222,6 @@ export function DirectoryPicker({ initialPath, onChange, onSubmit }: Props) {
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => goTo(full)}
           >
-            {/* Elided at the front: a name is distinguished by its end. */}
             <span className="dirpick-tail">
               <span>{nameUnder(hereDir, full)}</span>
             </span>
@@ -250,7 +234,6 @@ export function DirectoryPicker({ initialPath, onChange, onSubmit }: Props) {
         )}
       </div>
 
-      {/* Always rendered, so a notice appearing cannot move anything below it. */}
       <div className="dirpick-status" aria-live="polite">
         {willCreate && <span className="dirpick-note is-new">This folder will be created</span>}
         {isFile && <span className="dirpick-note is-bad">That path is a file, not a folder</span>}

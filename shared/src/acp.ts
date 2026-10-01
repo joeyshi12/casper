@@ -1,8 +1,6 @@
 // ACP (Agent Client Protocol) types for kiro-cli, transported as
 // newline-delimited JSON-RPC 2.0 over stdio. See https://kiro.dev/docs/cli/acp/
 
-// JSON-RPC 2.0 envelope
-
 export type JsonRpcId = number | string;
 
 export interface JsonRpcRequest<P = unknown> {
@@ -55,8 +53,6 @@ export function isJsonRpcNotification(
   return !('id' in m) && 'method' in m;
 }
 
-// session/new, session/load
-
 // kiro spawns MCP servers itself from its config, so Casper always passes [].
 export interface SessionNewParams {
   cwd: string;
@@ -90,8 +86,6 @@ export interface SessionLoadParams {
   mcpServers: never[];
 }
 
-// session/prompt
-
 export interface TextContentBlock {
   type: 'text';
   text: string;
@@ -121,10 +115,6 @@ export type StopReason =
 export interface SessionPromptResult {
   stopReason: StopReason;
 }
-
-// ---------------------------------------------------------------------------
-// session/update notifications (streamed during a prompt turn)
-// ---------------------------------------------------------------------------
 
 export interface AgentMessageChunkUpdate {
   sessionUpdate: 'agent_message_chunk';
@@ -181,14 +171,12 @@ export interface SessionUpdateParams {
   update: SessionUpdate;
 }
 
-// ---------------------------------------------------------------------------
 // _kiro.dev/* extension notifications (observability + commands)
-// ---------------------------------------------------------------------------
 
 export interface MeteringUsage {
   value: number;
-  unit: string; // "credit"
-  unitPlural: string; // "credits"
+  unit: string;
+  unitPlural: string;
 }
 
 export interface KiroMetadataParams {
@@ -211,7 +199,7 @@ export type SubagentStatusType = 'working' | 'terminated' | string;
 /** One running or finished subagent, as reported by `_kiro.dev/subagent/list_update`. */
 export interface KiroSubagentInfo {
   sessionId: string;
-  /** The stage name, matching the `subagent` tool call's `rawInput.stages[].name`. */
+  /** Matches the `subagent` tool call's `rawInput.stages[].name`. */
   sessionName: string;
   agentName?: string;
   initialQuery?: string;
@@ -225,18 +213,14 @@ export interface KiroSubagentInfo {
   createdAtMs?: number;
 }
 
-/**
- * `_kiro.dev/subagent/list_update` - the full set of subagents currently running or just
- * finished on this kiro-cli process. Carries no sessionId of its own: it is a per-process
- * broadcast, not scoped to one parent session. Since Casper spawns one kiro-cli child per
- * chat, every list_update seen on a chat's process belongs to that chat's own subagents.
- */
+/** The full set of subagents running or just finished on this kiro-cli process.
+ *  Carries no sessionId of its own; one kiro-cli child per chat means it's always
+ *  that chat's. */
 export interface KiroSubagentListUpdateParams {
   subagents: KiroSubagentInfo[];
   pendingStages: unknown[];
 }
 
-// Well-known method names, so string literals never drift.
 export const ACP_METHODS = {
   initialize: 'initialize',
   sessionNew: 'session/new',

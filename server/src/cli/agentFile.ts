@@ -4,10 +4,9 @@ import url from 'node:url';
 import { sha256 } from '../util/hash.js';
 
 /**
- * Write the casper agent where kiro looks for it, so `--agent casper` resolves from any
- * working directory. A copy, not a symlink: npm replaces the install directory on
- * upgrade and deletes it on removal, leaving a link dangling. The recorded hash
- * separates our own older output from the user's edits.
+ * Writes the casper agent where kiro looks for it. A copy, not a symlink: npm
+ * replaces the install directory on upgrade, leaving a link dangling. The recorded
+ * hash separates our own older output from the user's edits.
  */
 type AgentResult =
   | { action: 'installed' | 'updated' | 'unchanged'; target: string }
@@ -36,31 +35,28 @@ export interface KiroAgent {
   model: string | null;
 }
 
-/** Plain text on disk so an edit diffs line by line, and read rather than imported. */
+/** Plain text, read rather than imported, so an edit diffs line by line. */
 export function agentPrompt(): string | null {
   const here = path.dirname(url.fileURLToPath(import.meta.url));
   const candidates = [
-    path.resolve(here, 'agents/prompt.txt'), // bundled: beside server.js
-    path.resolve(here, '../../../assets/agents/prompt.txt'), // from source
+    path.resolve(here, 'agents/prompt.txt'),
+    path.resolve(here, '../../../assets/agents/prompt.txt'),
   ];
   const found = candidates.find((c) => fs.existsSync(c));
   return found ? fs.readFileSync(found, 'utf8').trimEnd() : null;
 }
 
-/** Absolute path to the bundled MCP server, or null when there's no build to point at. */
 function mcpServerPath(): string | null {
   const here = path.dirname(url.fileURLToPath(import.meta.url));
   const candidates = [
-    path.resolve(here, 'mcp.js'), // bundled: beside server.js
-    path.resolve(here, '../../dist/mcp.js'), // from source, if built
+    path.resolve(here, 'mcp.js'),
+    path.resolve(here, '../../dist/mcp.js'),
   ];
   return candidates.find((c) => fs.existsSync(c)) ?? null;
 }
 
-/**
- * The only field that can't be static: the service's PATH has no npm bin, so `casper
- * mcp` would not spawn. null gives that short form regardless, for a hand-written file.
- */
+/** `mcp` is null when there's no build to point at, falling back to the `casper mcp`
+ *  command, which won't spawn under a PATH with no npm bin. */
 export function agentConfig(prompt: string, mcp: string | null): KiroAgent {
   return {
     name: 'casper',
@@ -98,8 +94,8 @@ export function installAgentFile(home: string, dataDir: string): AgentResult {
     fs.writeFileSync(stampFile, `${sha256(desired)}\n`);
   };
 
-  // lstat, not existsSync: existsSync follows a symlink left by the old installer into
-  // a directory npm has replaced, reports false, then writing fails with ENOENT.
+  // lstat, not existsSync: existsSync follows a symlink into a directory npm has
+  // replaced, reports false, then writing fails with ENOENT.
   let current: fs.Stats | undefined;
   try {
     current = fs.lstatSync(target);
@@ -112,7 +108,6 @@ export function installAgentFile(home: string, dataDir: string): AgentResult {
     return { action: 'installed', target };
   }
 
-  // A symlink is always ours from an older install.
   if (current.isSymbolicLink()) {
     fs.rmSync(target);
     write();

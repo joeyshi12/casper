@@ -1,7 +1,6 @@
 // The CLI: argument validation, the settings and agent files, and doctor.
-// Run with: npm test
 
-import { describe, it, before, beforeEach, after } from 'node:test';
+import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -19,12 +18,12 @@ import {
 import { mcpWiring } from '../server/src/cli/doctor.js';
 import type { Command } from 'commander';
 import { buildProgram } from '../server/src/cli/program.js';
-import { handleMessage, DEFAULT_PROTOCOL_VERSION } from '../server/src/mcp/protocol.js';
+import { handleMessage } from '../server/src/mcp/protocol.js';
 import { spawnSync } from 'node:child_process';
 
 describe('cli argument validation', () => {
-  // `casper reset-token --dry-run` used to adopt "--dry-run" as the new token and
-  // revoke every session - the destructive act the flag was meant to avoid.
+  // An unknown option like --dry-run must be rejected, not silently adopted as the next
+  // positional argument - for reset-token that would mean revoking every session.
   function parse(args: string[]): string | undefined {
     const program = buildProgram();
     // Neither override propagates to subcommands, and without them a subcommand error
@@ -153,8 +152,8 @@ describe('cli agent file', () => {
 
   it('refreshes an unmodified copy when the shipped file changes', () => {
     installAgentFile(home, data);
-    // Same effect as a new version shipping: the stamp no longer matches the file
-    // we would write, but it does match what is on disk.
+    // Simulates a shipped version change: the stamp no longer matches the file we would
+    // write, but still matches what is on disk.
     const stamp = path.join(data, 'agent-stamp');
     fs.writeFileSync(target, 'superseded contents');
     fs.writeFileSync(
@@ -233,10 +232,9 @@ describe('config file precedence', () => {
 });
 
 describe('pre-settings paths', () => {
-  // bootstrap writes the first-run token through these helpers, while the server
-  // reads it through config. If they ever disagree the token lands somewhere the
-  // server doesn't look, and it starts with authentication silently disabled -
-  // which is exactly the bug this pairing fixed.
+  // bootstrap writes the first-run token through these helpers, while the server reads it
+  // through config. If they disagree, the token lands where the server doesn't look and
+  // auth silently stays disabled.
   it('resolves the same settings file the config reads', () => {
     assert.equal(configFilePath(), config.configFile);
   });
@@ -275,8 +273,8 @@ describe('doctor: casper mcp', () => {
   const agent = (server: unknown) => JSON.stringify({ mcpServers: server ? { casper: server } : {} });
 
   it('passes when the script it names is really there', () => {
-    // A real file, made here: pointing at a build artifact made this pass locally and
-    // fail in CI, which runs the tests without building first.
+    // A real file, made here: a build artifact would pass locally but fail in CI,
+    // which runs tests without building first.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-mcp-'));
     const script = path.join(dir, 'mcp.js');
     fs.writeFileSync(script, '');
@@ -346,7 +344,6 @@ describe('shipped agent config', () => {
     }
   });
 
-  // Nothing checked the output against kiro's schema before.
   it('writes a file kiro accepts', (t) => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-valid-'));
     const res = installAgentFile(home, path.join(home, 'data'));

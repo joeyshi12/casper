@@ -3,15 +3,12 @@ import { config } from '../config.js';
 import { db } from './db.js';
 import { sha256 } from '../util/hash.js';
 
-/** A logged-in device. The cookie holds the raw token; we store only its hash. */
+/** A logged-in device. The cookie holds the raw token; only its hash is stored. */
 interface LoginRecord {
-  /** Stable id used to revoke this device (safe to expose to the client). */
   id: string;
-  /** SHA-256 of the session token. The raw token lives only in the cookie. */
   hash: string;
   createdAt: string;
   lastSeenAt: string;
-  /** User-Agent at login, for the device list. */
   userAgent?: string;
 }
 
@@ -21,15 +18,13 @@ export interface DeviceInfo {
   createdAt: string;
   lastSeenAt: string;
   userAgent?: string;
-  /** True for the device making the request. */
   current: boolean;
 }
 
-// Only write a lastSeen bump if it advanced by at least this much, so an active
-// device doesn't touch the database on every request.
+// A lastSeen bump is written only past this interval, so an active device
+// doesn't touch the database on every request.
 const LAST_SEEN_WRITE_INTERVAL_MS = 60_000;
 
-/** A row from `logins`, read defensively - the driver hands back loose values. */
 type Row = Record<string, unknown>;
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
@@ -43,12 +38,9 @@ const toRecord = (r: Row): LoginRecord => ({
 });
 
 /**
- * Device logins, in the `logins` table.
- *
- * Each login gets an opaque random token (the cookie value) and only its hash is
- * stored, so the database can't be used to authenticate. That enables per-device
- * revocation, a device list, and log-out-everywhere, and it survives restarts -
- * which a random per-process signing secret did not.
+ * Device logins, in the `logins` table. Only the token's hash is stored, so the
+ * database can't be used to authenticate, which enables per-device revocation,
+ * a device list, and log-out-everywhere.
  */
 export class LoginStore {
   constructor() {
@@ -59,13 +51,12 @@ export class LoginStore {
     return config.sessionTtlSeconds * 1000;
   }
 
-  /** Drop logins whose last activity is older than the TTL. */
   private pruneExpired(now = Date.now()): void {
     const cutoff = new Date(now - this.ttlMs()).toISOString();
     db().prepare('DELETE FROM logins WHERE last_seen_at < ?').run(cutoff);
   }
 
-  /** Create a login. Returns the raw token to set as the cookie value. */
+  /** Creates a login. Returns the raw token to set as the cookie value. */
   create(userAgent?: string): { token: string; record: LoginRecord } {
     const token = randomBytes(32).toString('base64url');
     const nowIso = new Date().toISOString();
@@ -85,10 +76,7 @@ export class LoginStore {
     return { token, record };
   }
 
-  /**
-   * Verify a raw token. Returns the record (sliding its expiry forward) or null
-   * if unknown/expired. Writes the lastSeen bump at most once a minute.
-   */
+  /** Verifies a raw token, sliding its expiry forward. Null if unknown or expired. */
   verify(token: string | undefined): LoginRecord | null {
     if (!token) return null;
     const now = Date.now();
@@ -109,7 +97,7 @@ export class LoginStore {
     return record;
   }
 
-  /** List all active devices, marking the one owning `currentToken`. */
+  /** All active devices, marking the one owning `currentToken`. */
   list(currentToken?: string): DeviceInfo[] {
     this.pruneExpired();
     const currentHash = currentToken ? sha256(currentToken) : undefined;
@@ -123,25 +111,24 @@ export class LoginStore {
     }));
   }
 
-  /** Revoke the device holding this token (used on logout). */
+  /** Revokes the device holding this token (used on logout). */
   revokeToken(token: string | undefined): void {
     if (!token) return;
     db().prepare('DELETE FROM logins WHERE hash = ?').run(sha256(token));
   }
 
-  /** Revoke a device by its public id. Returns false if there was no such device. */
+  /** Revokes a device by its public id. False if there was no such device. */
   revokeId(id: string): boolean {
     const res = db().prepare('DELETE FROM logins WHERE id = ?').run(id);
     return res.changes > 0;
   }
 
-  /** Log out every device. */
   revokeAll(): void {
     db().prepare('DELETE FROM logins').run();
   }
 }
 
-/** Compare two hex hashes without leaking position through timing. */
+/** Compares two hex hashes without leaking position through timing. */
 function sameHash(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   return timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));

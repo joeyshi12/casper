@@ -14,10 +14,10 @@ export function titleFromPrompt(content: PromptContentBlock[]): string {
     .map((b) => b.text)
     .join('\n');
 
-  // The attachments line is machine-facing, and would otherwise become the title of
-  // every message sent with a file.
+  // The attachments line is machine-facing and would otherwise become the title
+  // of every message sent with a file.
   const words = stripAttachmentsLine(text)
-    .replace(/```[\s\S]*?```/g, ' ') // fenced code says nothing about the topic
+    .replace(/```[\s\S]*?```/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   if (!words) return '';

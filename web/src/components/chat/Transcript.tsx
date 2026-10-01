@@ -22,7 +22,6 @@ import {
   type RunMember,
 } from '../../util/toolGroups.js';
 
-/** How long a running turn may be quiet before the dots come back. */
 const STALL_MS = 700;
 
 const reduceMotion =
@@ -30,10 +29,6 @@ const reduceMotion =
     ? window.matchMedia('(prefers-reduced-motion: reduce)')
     : null;
 
-/**
- * The files attached to one message: images as thumbnails, anything else a chip that opens
- * the preview panel. Shared by the sent message and the optimistic bubble.
- */
 function AttachmentList({
   chatId,
   attachments,
@@ -79,30 +74,19 @@ function AttachmentList({
   );
 }
 
-/**
- * The conversation transcript. Autoscroll (following new content to the bottom)
- * is opt-in: it turns on only when the user clicks the jump-to-latest button,
- * and turns off again the moment they scroll up. On opening a session the view
- * jumps to the latest message once, without enabling continuous follow.
- *
- * Memoized: toggling unrelated ChatPane state (like the file panel) must not
- * re-render the whole transcript, which is expensive for long histories.
- */
 export const Transcript = memo(function Transcript() {
   const items = useStore((s) => s.items);
   const streamingText = useStore((s) => s.streamingText);
   const streamingThought = useStore((s) => s.streamingThought);
   const pending = useStore((s) => s.pending);
-  // A prompt that has left the composer but has no turn yet: a draft is still creating its
-  // session, or its socket is still opening. The dots say the app is working on it.
   const waitingToStart = pending.some((pm) => pm.status === 'sending');
   const turnStatus = useStore((s) => s.observability.turnStatus);
   const compacting = useStore((s) => s.observability.compacting);
   const activeId = useStore((s) => s.activeId);
   const openFilePreview = useStore((s) => s.openFilePreview);
   const remainingOlder = useStore((s) => s.remainingOlder);
-  // Items already on screen when a session opened must not animate, or opening an old session
-  // flashes every card at once. Anything not in this set arrived live.
+  /* Items already on screen when the session opened must not animate, or opening
+     an old session flashes every card at once. */
   const hydrated = useRef<{ session: string | null; ids: Set<string> }>({
     session: null,
     ids: new Set(),
@@ -117,11 +101,6 @@ export const Transcript = memo(function Transcript() {
   }
   const arrivedLive = (id: string) => !hydrated.current.ids.has(id);
 
-  // Runs of consecutive plain tool calls and thinking messages (no other message or
-  // widget between them) collapse into one group; everything else passes through
-  // unchanged. Memoized on items alone, so a streaming thought's growing text - which
-  // re-renders Transcript on every chunk - never recomputes this or the row arrays
-  // handed to each group, which would otherwise re-render every row in every group.
   const grouped = useMemo(() => groupToolCalls(items), [items]);
   const rowsByRun = useMemo(() => {
     const map = new Map<GroupedEntry, RunRowInput[]>();
@@ -145,8 +124,7 @@ export const Transcript = memo(function Transcript() {
     showScrollButton: false,
   });
 
-  // Follow, anchoring across a prepend, and older-page loading are one concern and
-  // live in the viewport. Created once: it holds the scroll state across renders.
+  // Holds the scroll state across renders; created once.
   const viewportRef = useRef<TranscriptViewport | null>(null);
   if (!viewportRef.current) {
     viewportRef.current = new TranscriptViewport({
@@ -174,7 +152,7 @@ export const Transcript = memo(function Transcript() {
     });
   }, [items, streamingText, streamingThought, pending, activeId, compacting, remainingOlder, viewport]);
 
-  // Before paint, so a prepend never shows as a jump.
+  // Must run before paint, or a prepend shows as a jump.
   useLayoutEffect(() => {
     viewport.restoreAnchor();
   }, [items, viewport]);
@@ -202,13 +180,7 @@ export const Transcript = memo(function Transcript() {
       )}
 
       {grouped.map((entry, i) => {
-        // The live streaming thought, still arriving, joins the last entry's row set
-        // rather than appearing as its own block below it - see lastEntryJoinsStreamingThought.
-        // A pending (optimistically sent) message always renders after grouped, so a
-        // thought cannot join across one even though it isn't part of `items` yet.
         const isLast = i === grouped.length - 1;
-        // The last group or tool line of a running turn shimmers until something else
-        // (the answer, a new message) follows it.
         const active = isLast && turnStatus === 'running' && !streamingText && pending.length === 0;
         const joiningThought =
           isLast && streamingThought && pending.length === 0 && lastEntryJoinsStreamingThought(entry)
@@ -216,7 +188,7 @@ export const Transcript = memo(function Transcript() {
             : undefined;
 
         if (entry.type === 'run') {
-          // Keyed by the first member, so a row joining the run keeps it mounted and open.
+          // Keyed by the first member, so a row joining the run keeps it mounted.
           const first = entry.members[0]!;
           const key = first.type === 'tool' ? first.tool.id : first.item.message.id;
           const arriving = entry.members.some(
@@ -233,8 +205,6 @@ export const Transcript = memo(function Transcript() {
           );
         }
         if (entry.type === 'tool') {
-          // A lone tool call with a live thought still streaming after it: show both as
-          // one run of two, rather than a tool line with a separate thought block below.
           if (joiningThought !== undefined) {
             return (
               <ToolCallGroupCard
@@ -270,8 +240,6 @@ export const Transcript = memo(function Transcript() {
         const item = entry.item;
         return item.type === 'message' ? (
           item.message.role === 'thinking' ? (
-            // groupToolCalls only puts a thinking message here when it isn't adjacent to
-            // a run or tool call - still rendered as a lone thought line.
             <ThoughtLineCard key={item.message.id} text={item.message.text} />
           ) : (
             <div key={item.message.id} className={`msg msg-${item.message.role}`}>
@@ -294,7 +262,6 @@ export const Transcript = memo(function Transcript() {
             </div>
           )
         ) : item.type === 'tool_call' ? (
-          // A widget or choice call: groupToolCalls never puts these in a run.
           <ToolCallCard key={item.tool.id} tool={item.tool} arriving={arrivedLive(item.tool.id)} />
         ) : item.type === 'turn_error' ? (
           <TurnErrorBlock key={item.id} message={item.message} />
@@ -380,24 +347,10 @@ export const Transcript = memo(function Transcript() {
   );
 });
 
-/**
- * The matching RunRowInput for a single run member, so a lone tool call or thought that
- * gains a trailing live thought can be shown as a two-row run without duplicating the
- * conversion logic that ToolCallGroupCard also uses for a run read off the transcript.
- */
 function runRowOf(member: RunMember): RunRowInput {
   return member.type === 'tool' ? { kind: 'tool', tool: member.tool } : { kind: 'thought', text: member.text };
 }
 
-/**
- * Divider marking where kiro compacted the conversation. The summary shown is what the
- * model now carries as context, collapsed by default because these run long.
- */
-/**
- * A failed turn, shown as a system event rather than something the assistant said. One
- * line by default, borrowing the compaction divider's shape, expanding to the cause,
- * what to do about it, and the server's raw output.
- */
 function TurnErrorBlock({
   message,
 }: {
@@ -407,7 +360,6 @@ function TurnErrorBlock({
   const [copied, setCopied] = useState(false);
   const failure = classifyTurnFailure(message);
   const lastPrompt = useStore((s) => {
-    // The prompt that produced this failure, so Retry can send it again.
     for (let i = s.items.length - 1; i >= 0; i--) {
       const it = s.items[i]!;
       if (it.type === 'message' && it.message.role === 'user') return it.message.text;

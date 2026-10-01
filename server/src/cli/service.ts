@@ -4,13 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import url from 'node:url';
 
-/**
- * Install Casper as a systemd user service.
- *
- * The unit hardcodes the resolved node binary and script path, both of which move on
- * upgrade, so this has to be re-run afterwards. That is the trade for a unit that starts
- * reliably under systemd's minimal PATH, where a bare `node` often isn't found.
- */
+// Installs Casper as a systemd user service. The unit hardcodes the resolved node
+// binary and script path, which move on upgrade, so this must be re-run afterwards.
 const SERVICE = 'casper.service';
 
 function unitPath(): string {
@@ -30,7 +25,6 @@ function hasUserSystemd(): boolean {
   return r.status === 0;
 }
 
-/** The entry the bin symlink points at, which is what the unit must exec. */
 function entryScript(): string {
   const here = path.dirname(url.fileURLToPath(import.meta.url));
   const bundled = path.join(here, 'casper.js');

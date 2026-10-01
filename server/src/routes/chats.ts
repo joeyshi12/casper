@@ -37,7 +37,6 @@ export function registerChatRoutes(
     }
   });
 
-  // Get session detail (hydrated transcript + observability + replay head).
   app.get<{ Params: { id: string } }>('/api/chats/:id', async (req, reply) => {
     try {
       return await manager.getDetail(req.params.id);
@@ -47,8 +46,7 @@ export function registerChatRoutes(
     }
   });
 
-  // Older transcript items for lazy load-on-scroll-up: returns items in
-  // [offset, offset+limit) of the full transcript.
+  // Older transcript items for lazy load-on-scroll-up.
   app.get<{ Params: { id: string }; Querystring: { offset?: string; limit?: string } }>(
     '/api/chats/:id/transcript',
     async (req, reply) => {
@@ -67,8 +65,6 @@ export function registerChatRoutes(
     },
   );
 
-  // Fire-and-forget prompt over REST (also available over WS). runPrompt spawns
-  // the kiro process lazily if the session isn't live yet.
   app.post<{ Params: { id: string }; Body: PromptRequest }>(
     '/api/chats/:id/prompt',
     async (req, reply) => {
@@ -103,7 +99,6 @@ export function registerChatRoutes(
     },
   );
 
-  // Rename a session (Casper-side title override).
   app.post<{ Params: { id: string }; Body: RenameChatRequest }>(
     '/api/chats/:id/rename',
     async (req) => {
@@ -112,8 +107,7 @@ export function registerChatRoutes(
     },
   );
 
-  // Re-point a session at a different working directory (Casper-side override,
-  // for when the original folder was moved or deleted).
+  // Casper-side cwd override, for when the original folder was moved or deleted.
   app.post<{ Params: { id: string }; Body: SetCwdRequest }>(
     '/api/chats/:id/cwd',
     async (req, reply) => {
@@ -131,9 +125,6 @@ export function registerChatRoutes(
     },
   );
 
-  // Restart the session's kiro child so a `.kiro` directory, agent definition or
-  // MCP server that changed since it started is picked up. Returns the refreshed
-  // detail, so the client applies it exactly as it applies a resync.
   app.post<{ Params: { id: string } }>('/api/chats/:id/reload', async (req, reply) => {
     try {
       return await manager.reloadChat(req.params.id);
@@ -143,7 +134,6 @@ export function registerChatRoutes(
     }
   });
 
-  // Permanently delete a session (memory + on-disk files).
   app.delete<{ Params: { id: string } }>('/api/chats/:id', async (req) => {
     await manager.deleteChat(req.params.id);
     return { ok: true };

@@ -1,9 +1,8 @@
 export { langFromPath } from './fileKind.js';
 
-// Pure helpers for rendering tool calls. They normalize the several content
-// shapes kiro produces - persisted {kind,data} blocks, live ACP
+// Normalizes kiro's content shapes - persisted {kind,data} blocks, live ACP
 // {type:'content',content:{text}} blocks, and live {type:'diff'} edit blocks -
-// into simple values the renderers consume. Unit-tested.
+// into values the renderers consume.
 
 type Block = Record<string, unknown>;
 
@@ -20,13 +19,8 @@ type ToolKind =
   | 'introspect'
   | 'generic';
 
-/**
- * Which specialized renderer handles a tool call. Prefer the canonical tool name (kiro's
- * _meta.kiro.toolName live, the persisted name on hydrate), which is identical either way.
- *
- * The kind + input heuristics below are not legacy: live ACP updates can arrive without
- * that name, and the tests pin live and hydrated output to the same result.
- */
+/** Which specialized renderer handles a tool call. Prefers the canonical tool name;
+ *  live ACP updates can arrive without one, so the heuristics below are not legacy. */
 export function classifyTool(tool: { name?: string; title?: string; kind?: string; input?: unknown }): ToolKind {
   switch (tool.name) {
     case 'shell':
@@ -47,15 +41,14 @@ export function classifyTool(tool: { name?: string; title?: string; kind?: strin
     case 'introspect':
       return 'introspect';
   }
-  if (tool.name) return 'generic'; // a known tool with no specialized renderer
+  if (tool.name) return 'generic';
 
   const inp = isObj(tool.input) ? tool.input : {};
   const k = tool.kind;
   const cmd = typeof inp.command === 'string' ? inp.command : undefined;
   const has = (key: string) => Object.prototype.hasOwnProperty.call(inp, key);
 
-  // todo_list has no ACP kind; identify by its command/keys (create is shared
-  // with write, so it's disambiguated by the task-list keys below).
+  // todo_list disambiguated from write (which shares the `create` command) by task-list keys.
   if (
     tool.title === 'todo_list' ||
     has('tasks') ||
@@ -67,8 +60,7 @@ export function classifyTool(tool: { name?: string; title?: string; kind?: strin
     return 'todo';
   }
   if (k === 'read' || Array.isArray(inp.operations) || tool.title === 'read') return 'read';
-  // grep specifically has a `pattern`. kind 'search' also covers web_search
-  // (which has a `query` instead) - that falls through to the generic view.
+  // grep has `pattern`; kind 'search' also covers web_search (which has `query` instead).
   if (tool.title === 'grep' || (typeof inp.pattern === 'string' && !has('operations'))) {
     return 'grep';
   }
@@ -82,20 +74,14 @@ export function classifyTool(tool: { name?: string; title?: string; kind?: strin
     return 'write';
   }
   if (k === 'execute' || tool.title === 'shell' || typeof inp.command === 'string') return 'shell';
-  // Name-less fallbacks for the web / introspect tools. `url` is unique to
-  // web_fetch; web_search vs introspect both carry a `query`, so lean on
-  // kind/title to disambiguate.
+  // `url` is unique to web_fetch; web_search and introspect both carry `query`,
+  // so lean on kind/title to tell them apart.
   if (typeof inp.url === 'string') return 'webfetch';
   if (typeof inp.query === 'string' && (k === 'search' || tool.title === 'web_search')) return 'websearch';
   if (tool.title === 'introspect' || typeof inp.doc_path === 'string') return 'introspect';
   return 'generic';
 }
 
-/**
- * A canonical tool label for the header, consistent whether the call is live or
- * hydrated. Prefer the real tool name (identical across both); else derive from
- * the classified kind, then a single-token title, then "tool".
- */
 const KIND_LABEL: Record<ToolKind, string | undefined> = {
   shell: 'shell',
   write: 'write',
@@ -110,15 +96,11 @@ const KIND_LABEL: Record<ToolKind, string | undefined> = {
 
 /** A namespaced MCP tool, as "server/tool" or "@server/tool". */
 const NAMESPACED = /^@?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/;
-/** kiro's own rendering of one, e.g. "Running: @casper/show_widget". */
 const IN_TITLE = /@([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/;
 
-/**
- * An MCP tool as "@server/tool", or null when it is not one. Live, kiro sends the tool name
- * bare and puts the namespace only in the title, so the server has to come from there. The
- * title is matched against the name before it is trusted, because a shell command can carry
- * something that looks like one: "Running: npm i @casper/web" is the shell tool.
- */
+/* An MCP tool as "@server/tool", or null. Live, kiro sends the tool name bare and
+   puts the namespace only in the title, so the title must be checked against the
+   name first: a shell command like "npm i @casper/web" would otherwise look like one. */
 function mcpLabel(tool: { name?: string; title?: string }): string | null {
   const named = NAMESPACED.exec(tool.name ?? '');
   if (named) return `@${named[1]}/${named[2]}`;
@@ -141,7 +123,6 @@ export function toolLabel(tool: { name?: string; title?: string; kind?: string; 
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
 const baseName = (p: string): string => p.split('/').pop() || p;
 
-/** The first readable path from a `read` tool's operations (file or image). */
 function readTarget(input: Block): string | undefined {
   const ops = Array.isArray(input.operations) ? input.operations : [];
   for (const op of ops) {
@@ -154,8 +135,6 @@ function readTarget(input: Block): string | undefined {
   return undefined;
 }
 
-/** Past and present tense verbs for a tool kind, used when there is no target
- *  to name ("Ran a command") and as the lead word when there is ("Read x.ts"). */
 const KIND_VERB: Record<ToolKind, [string, string]> = {
   shell: ['Ran', 'Running'],
   write: ['Wrote', 'Writing'],
@@ -170,8 +149,6 @@ const KIND_VERB: Record<ToolKind, [string, string]> = {
 
 export type ToolLike = { name?: string; title?: string; kind?: string; input?: unknown };
 
-/** The target a kind's verb acts on, e.g. a filename or a search pattern. Undefined
- *  when the kind has no single target (shell, generic) or none was found. */
 function toolTarget(tool: ToolLike, kind: ToolKind): string | undefined {
   const inp = isObj(tool.input) ? tool.input : null;
   if (!inp) return undefined;
@@ -202,12 +179,6 @@ function toolTarget(tool: ToolLike, kind: ToolKind): string | undefined {
   }
 }
 
-/**
- * One line of text for a tool call: the agent's own `__tool_use_purpose` when it gave one,
- * else a plain phrase built from the tool kind and its target. Past tense when done, present
- * tense ("Running a command") while the call is still in progress - the caller picks tense
- * by passing `live`.
- */
 export function toolPhrase(tool: ToolLike, live: boolean): string {
   const inp = isObj(tool.input) ? tool.input : null;
   const purpose = inp ? str(inp.__tool_use_purpose) : undefined;
@@ -217,16 +188,12 @@ export function toolPhrase(tool: ToolLike, live: boolean): string {
   const target = toolTarget(tool, kind);
   const verb = live ? present : past;
   if (!target) {
-    // "Running"/"Ran" alone reads as a command specifically; the other kinds already
-    // say what they did ("Searching the web").
     if (kind === 'shell') return live ? 'Running a command' : 'Ran a command';
     return verb;
   }
   return `${verb} ${target}`;
 }
 
-/** Plain noun phrase for a kind with no target, used in a run's summary line
- *  ("Ran a command, read 2 files"). Singular / plural(n). */
 const KIND_NOUN: Record<ToolKind, [string, (n: number) => string]> = {
   shell: ['ran a command', (n) => `ran ${n} commands`],
   write: ['wrote a file', (n) => `wrote ${n} files`],
@@ -239,8 +206,6 @@ const KIND_NOUN: Record<ToolKind, [string, (n: number) => string]> = {
   generic: ['ran a tool', (n) => `ran ${n} tools`],
 };
 
-/** The closed summary line for a run of two or more tool calls, grouped by kind and counted:
- *  "Ran a command, read 2 files". Capitalised, in the kinds' first-seen order. */
 export function toolRunSummary(tools: ToolLike[]): string {
   const order: ToolKind[] = [];
   const counts = new Map<ToolKind, number>();
@@ -258,17 +223,10 @@ export function toolRunSummary(tools: ToolLike[]): string {
   return joined.charAt(0).toUpperCase() + joined.slice(1);
 }
 
-/** The closed summary line for a run that may mix thinking messages and tool calls.
- *  Thinking adds nothing to the text once there is a tool call to describe - the tool
- *  calls are the part worth naming. A run with no tool calls at all, only thoughts,
- *  reads "Thought". */
 export function runSummary(tools: ToolLike[]): string {
   return tools.length > 0 ? toolRunSummary(tools) : 'Thought';
 }
 
-/** Concatenated plain text from a tool call's content, across shapes:
- *  ACP {type:'content',content:{text}}, {type:'text',text}, persisted
- *  {kind:'text',data}. (JSON blocks are handled by firstJsonData.) */
 export function outputText(content: unknown[]): string {
   const parts: string[] = [];
   for (const b of content) {
@@ -284,7 +242,6 @@ export function outputText(content: unknown[]): string {
   return parts.join('');
 }
 
-/** The first persisted JSON block's data (shell result, grep results). */
 export function firstJsonData(content: unknown[]): Record<string, unknown> | null {
   for (const b of content) {
     if (isObj(b) && b.kind === 'json' && isObj(b.data)) return b.data;
@@ -292,9 +249,6 @@ export function firstJsonData(content: unknown[]): Record<string, unknown> | nul
   return null;
 }
 
-/** If a JSON object carries exactly one string field (e.g. introspect's
- *  { documentation }), return that string - it reads far better as text than
- *  as escaped JSON. Otherwise null. */
 export function soleStringField(data: Record<string, unknown>): string | null {
   const keys = Object.keys(data);
   return keys.length === 1 && typeof data[keys[0]!] === 'string'
@@ -302,9 +256,6 @@ export function soleStringField(data: Record<string, unknown>): string | null {
     : null;
 }
 
-/** kiro's live rawOutput ({items:[{Text}|{Json}]}, or a plain string) turned
- *  into content-like blocks, so the same extractors work on live output as on
- *  the persisted {kind,data} content. */
 export function outputToBlocks(output: unknown): unknown[] {
   if (output == null) return [];
   if (typeof output === 'string') return output ? [{ kind: 'text', data: output }] : [];
@@ -320,8 +271,6 @@ export function outputToBlocks(output: unknown): unknown[] {
   return [];
 }
 
-/** All renderable blocks for a tool: its content plus its normalized output.
- *  Live results arrive in output (rawOutput); persisted ones in content. */
 export function toolBlocks(tool: { content?: unknown[]; output?: unknown }): unknown[] {
   const content = Array.isArray(tool.content) ? tool.content : [];
   return [...content, ...outputToBlocks(tool.output)];
@@ -333,7 +282,6 @@ interface DiffContent {
   newText: string;
 }
 
-/** The first live ACP diff block ({type:'diff', path, oldText, newText}). */
 export function firstDiff(content: unknown[]): DiffContent | null {
   for (const b of content) {
     if (isObj(b) && b.type === 'diff' && typeof b.oldText === 'string' && typeof b.newText === 'string') {
@@ -352,9 +300,6 @@ interface TodoTask {
   done: boolean;
 }
 
-/** The task list from a todo_list result: a persisted {kind:'json'} block, or
- *  a live text block whose JSON we parse. The result always carries the full
- *  current list regardless of the command (create/complete/add/remove/list). */
 export function parseTodo(content: unknown[]): TodoTask[] | null {
   let data: Block | null = firstJsonData(content);
   if (!data || !Array.isArray(data.tasks)) {

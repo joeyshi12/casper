@@ -1,6 +1,5 @@
 // Drives the running server over REST + WS. Key check: disconnect mid-turn,
 // reconnect with a stale cursor, and assert the missed events replay.
-// Run with: npm run e2e
 import { WebSocket } from 'ws';
 import type {
   CasperEvent,
@@ -117,7 +116,6 @@ async function main() {
     assert(typeof sid === 'string', `created session ${sid}`);
     assert(detail.modes.length > 0, `session exposes ${detail.modes.length} agent modes`);
 
-    // 3. Prompt over WS, collect to turn_ended
     const hasTurnEnd = (evs: CasperEvent[]) =>
       evs.some((e) => e.payload.kind === 'turn_ended');
     const ws1 = new WebSocket(`${WSBASE}/ws?sessionId=${sid}&cursor=0`, {
@@ -129,7 +127,6 @@ async function main() {
     });
     ws1.send(JSON.stringify({ type: 'prompt', content: [{ type: 'text', text: 'Reply with exactly: ALPHA' }] }));
 
-    // 4. Disconnect mid-turn: grab a couple events, then hard-close.
     let midCursor = 0;
     await new Promise<void>((resolve) => {
       let count = 0;
@@ -147,7 +144,6 @@ async function main() {
     });
     console.log(`   disconnected mid-turn at cursor=${midCursor}`);
 
-    // 5. Reconnect with the stale cursor; assert we get turn_ended via replay.
     const { events, ws: ws2 } = await collect(sid, midCursor, hasTurnEnd);
     ws2.close();
     const turnEnded = events.find((e) => e.payload.kind === 'turn_ended');
@@ -162,14 +158,12 @@ async function main() {
       after.observability.creditsSpent > 0,
       `observability shows credits spent: ${after.observability.creditsSpent.toFixed(4)}`,
     );
-    // 6b. Context usage is a finite, sane percentage (meter source).
     assert(
       Number.isFinite(after.observability.contextUsagePercentage) &&
         after.observability.contextUsagePercentage >= 0 &&
         after.observability.contextUsagePercentage <= 100,
       `context usage is a sane percentage: ${after.observability.contextUsagePercentage}`,
     );
-    // 6c. The user's prompt survived into the transcript (persisted turn).
     const userMsg = after.transcript.find(
       (it) => it.type === 'message' && it.message.role === 'user',
     );
@@ -178,8 +172,8 @@ async function main() {
     await api('POST', `/api/chats/${sid}/model`, { modelId: 'auto' });
     console.log('✅ set_model round-trip ok');
 
-    // 8. Compact the conversation: exec_command 'compact' triggers kiro's
-    // compaction, which emits compaction/status started -> completed.
+    // Compaction: exec_command 'compact' triggers kiro's compaction, which emits
+    // compaction/status started -> completed.
     const wsC = new WebSocket(`${WSBASE}/ws?sessionId=${sid}&cursor=0`, {
       headers: cookie ? { cookie } : {},
     });

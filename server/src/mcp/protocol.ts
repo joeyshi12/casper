@@ -115,7 +115,7 @@ function text(body: string, isError = false): unknown {
 }
 
 function callError(id: JsonRpcResponse['id'], message: string): JsonRpcResponse {
-  // A tool-level error, not a protocol one: the model should read it and retry.
+  // A tool-level error, not a protocol one: the model reads it and can retry.
   return ok(id, text(message, true));
 }
 
@@ -155,9 +155,8 @@ function handleShowWidget(
     return callError(id, 'Pass a fragment, not a document: drop the doctype, html and body tags.');
   }
 
-  // Nothing to do here: Casper renders the widget from this tool call as kiro
-  // reports it, so the call itself is the delivery mechanism. This only validates
-  // and tells the model what the user is now looking at.
+  // Nothing to do here: Casper renders the widget from this tool call as kiro reports
+  // it, so this only validates and tells the model what the user is now looking at.
   return ok(id, text(`Widget "${title}" is on screen. Don't repeat its content in prose.`));
 }
 

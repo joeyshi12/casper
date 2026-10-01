@@ -19,9 +19,8 @@ interface Pending {
   timer?: NodeJS.Timeout;
 }
 
-// JSON-RPC 2.0 client over newline-delimited JSON on kiro-cli acp's stdio.
-// Never end the writable stream except on shutdown: kiro-cli exits as soon as
-// its stdin hits EOF.
+// JSON-RPC 2.0 client over newline-delimited JSON on kiro-cli acp's stdio. Never
+// end the writable stream except on shutdown: kiro-cli exits as soon as stdin hits EOF.
 export class AcpClient extends EventEmitter {
   private nextId = 1;
   private readonly pending = new Map<JsonRpcId, Pending>();
@@ -73,13 +72,12 @@ export class AcpClient extends EventEmitter {
       return;
     }
 
-    // A request from the agent to the client (has both id and method).
+    // A request from the agent to the client.
     if ('id' in msg && 'method' in msg) {
       this.emit('serverRequest', msg as JsonRpcRequest);
     }
   }
 
-  /** Send a request and await its result. */
   request<R = unknown>(
     method: string,
     params?: unknown,
@@ -120,12 +118,8 @@ export class AcpClient extends EventEmitter {
     this.writable.write(JSON.stringify(msg) + '\n');
   }
 
-  /**
-   * Reject all pending requests; call when the child process exits. The reason
-   * is passed through verbatim because it reaches the user as a turn_error -
-   * the caller supplies something readable, so don't bury it behind a prefix
-   * about ACP internals.
-   */
+  /** Rejects all pending requests, called when the child process exits. The
+   *  reason passes through verbatim, since it reaches the user as a turn_error. */
   fail(reason: string): void {
     this.closed = true;
     for (const [id, pending] of this.pending) {

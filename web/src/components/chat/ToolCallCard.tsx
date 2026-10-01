@@ -45,7 +45,6 @@ function extractImagePaths(input: unknown): string[] {
 const imageUrl = (absolutePath: string) =>
   `/api/fs/file?path=${encodeURIComponent(absolutePath)}`;
 
-// One check per path for the life of the page: whether the file still exists as an image.
 const imageChecks = new Map<string, Promise<boolean>>();
 function imageExists(path: string): Promise<boolean> {
   let check = imageChecks.get(path);
@@ -58,10 +57,6 @@ function imageExists(path: string): Promise<boolean> {
   return check;
 }
 
-/**
- * The image paths that still point at an image. Null until the checks finish, so the
- * call renders as usual while they run.
- */
 function useExistingImages(paths: string[]): string[] | null {
   const key = paths.join('\n');
   const [found, setFound] = useState<{ key: string; paths: string[] } | null>(null);
@@ -80,10 +75,6 @@ function useExistingImages(paths: string[]): string[] | null {
   return found?.key === key ? found.paths : null;
 }
 
-/**
- * A tool call's image paths and opening body together. `hidden` is true for an image read
- * whose images are all gone and which has nothing else to show.
- */
 function useToolContent(tool: ToolCallView): { images: string[]; body: ReactNode; hidden: boolean } {
   const paths = extractImagePaths(tool.input);
   const existing = useExistingImages(paths);
@@ -93,27 +84,14 @@ function useToolContent(tool: ToolCallView): { images: string[]; body: ReactNode
   return { images, body, hidden };
 }
 
-/**
- * A tool invocation. Common tools get a tailored, syntax-highlighted body
- * (shell -> command + output, writes -> diff or full file, read -> file
- * contents, grep -> matches); anything else falls back to a generic
- * input/output view. Collapsed by default, failures included, with an
- * informative header so the transcript stays compact.
- */
 interface ToolCallCardProps {
   tool: ToolCallView;
-  /** Arrived during this turn rather than with the transcript, so it fades in. */
   arriving?: boolean;
-  /** The last thing in a running turn, so more work may follow: its line shimmers. */
   active?: boolean;
 }
 
-/**
- * A widget, a choice, or the subagent list is the point of its own call, not a tool to
- * inspect. Dispatched here rather than inside the body, because the body holds state: a
- * call that gains recognisable input mid-stream would otherwise change how many hooks run
- * and React would throw.
- */
+/** A widget, choice, or subagent list is dispatched here rather than inside the body,
+ *  since the body holds hook state and must not change hook count mid-stream. */
 function ToolCallCardBody({ tool, arriving, active }: ToolCallCardProps) {
   if (isSubagentCall(tool)) return <SubagentToolCall tool={tool} />;
   const widget = widgetCallOf(tool);
@@ -125,7 +103,6 @@ function ToolCallCardBody({ tool, arriving, active }: ToolCallCardProps) {
         </div>
       );
     }
-    // kiro reports the arguments with the call, so there is nothing to wait for.
     return widget.code ? <WidgetBlock code={widget.code} /> : null;
   }
   const choice = choiceCallOf(tool);
@@ -133,7 +110,6 @@ function ToolCallCardBody({ tool, arriving, active }: ToolCallCardProps) {
   return <GenericToolCall tool={tool} arriving={arriving} active={active} />;
 }
 
-/** The images a read pulled in, shown inside the call's fold. */
 function ToolImages({ paths }: { paths: string[] }) {
   if (paths.length === 0) return null;
   return (
@@ -158,12 +134,6 @@ function ToolImages({ paths }: { paths: string[] }) {
   );
 }
 
-/**
- * One tool call: a plain line of text with a chevron, opening onto its tailored body. No
- * card border, no status dot, no monospace tool name - the call reads as a sentence, not
- * a log line. A failed call stays red whether its line is open or closed; a running one
- * gets the shimmer on its text instead of a spinner.
- */
 function GenericToolCall({ tool, arriving = false, active = false }: ToolCallCardProps) {
   const status = tool.status;
   const [open, setOpen] = useState(false);
@@ -193,11 +163,6 @@ function GenericToolCall({ tool, arriving = false, active = false }: ToolCallCar
   );
 }
 
-/**
- * The plain-text line shared by a standalone tool call and each row inside a run's box:
- * the phrase, a shimmer while live, red while failed, and a chevron that only appears
- * when there is something to open.
- */
 function ToolLine({
   text,
   detail,
@@ -207,7 +172,6 @@ function ToolLine({
   onToggle,
 }: {
   text: string;
-  /** Shown after the text in brighter type, e.g. a web search's query. */
   detail?: string;
   live: boolean;
   failed: boolean;
@@ -235,24 +199,13 @@ function ToolLine({
   );
 }
 
-/** One member of a run as its caller sees it: a tool call, or a thinking message's text. */
 export type RunRowInput =
   | { kind: 'tool'; tool: ToolCallView }
   | { kind: 'thought'; text: string };
 
-/**
- * A run of two or more consecutive tool calls and thinking messages, collapsed into one
- * closed line. Opening it reveals the members in order as rows in one lightly bordered
- * box; each tool row opens in place onto that call's own body, exactly as it would
- * standalone, and each thought row opens onto its muted italic text. Closed by default,
- * including while something in it is still running - matching a lone tool line or a lone
- * thought.
- *
- * `liveThought`, when given, is the streaming thought still arriving: it is appended as a
- * trailing row of its own, and while it is present the group's line reads "Thinking" with
- * the shimmer unless a tool call is also running (a tool call's own phrase wins, since it
- * is the more specific thing happening right now).
- */
+/** `liveThought`, when given, is the streaming thought still arriving, appended as a
+ *  trailing row; while present the group's line reads "Thinking" unless a tool call
+ *  is also running, whose own phrase takes priority. */
 function ToolCallGroup({
   rows,
   liveThought,
@@ -262,7 +215,6 @@ function ToolCallGroup({
   rows: RunRowInput[];
   liveThought?: string;
   arriving?: boolean;
-  /** The last thing in a running turn, so more rows may join: its line shimmers. */
   active?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -278,12 +230,9 @@ function ToolCallGroup({
 
   return (
     <div className={`toolline-wrap ${arriving ? 'is-arriving' : ''}`}>
-      {/* Only the failed row inside is red: one failure does not mark the whole group. */}
       <ToolLine text={text} live={live} failed={false} open={open} onToggle={() => setOpen((o) => !o)} />
       {open && (
         <div className="toolline-box">
-          {/* One keyed list, so the live thought keeps its row (and its open state) once
-              it is saved and becomes an ordinary thought row at the same index. */}
           {[
             ...rows.map((row, i) =>
               row.kind === 'tool' ? (
@@ -302,7 +251,6 @@ function ToolCallGroup({
   );
 }
 
-/** One row inside a run's box: the same line, its own open state, its own body. */
 function ToolCallRow({ tool }: { tool: ToolCallView }) {
   const status = tool.status;
   const [open, setOpen] = useState(false);
@@ -332,9 +280,6 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
   );
 }
 
-/** A thinking message's row, inside a run's box or on its own: the plain muted "Thinking"
- *  line, opening onto the thought text in muted italic. Closed by default, including while
- *  still streaming. */
 function ThoughtRow({ text, live = false }: { text: string; live?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
@@ -349,11 +294,6 @@ function ThoughtRow({ text, live = false }: { text: string; live?: boolean }) {
   );
 }
 
-/**
- * A lone thinking message, outside any run: the same plain muted line and chevron as a
- * tool line, opening onto the thought text in muted italic. Closed by default, including
- * while still streaming.
- */
 function ThoughtLine({
   text,
   live = false,
@@ -376,13 +316,8 @@ function ThoughtLine({
   );
 }
 
-/**
- * Height transition for expanding/collapsing content. Uses the grid-rows
- * 0fr -> 1fr trick so it animates to the content's natural height without
- * measuring. The body stays lazily mounted: it mounts on first open and
- * unmounts again once the closing transition finishes, so collapsed tool calls
- * still don't pay for highlighting until opened.
- */
+/* grid-rows 0fr -> 1fr animates to natural height without measuring. Body unmounts
+   only after the closing transition ends, so a closed card pays nothing to render. */
 function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
   const [mounted, setMounted] = useState(open);
   useEffect(() => {
@@ -455,21 +390,13 @@ function renderShell(tool: ToolCallView): ReactNode {
   );
 }
 
-/**
- * The file a read or write acted on, above its body. Its own component so that reading
- * the session cwd from the store re-renders this and not the whole memoised card.
- *
- * Clickable only when the file is inside the workspace: the preview endpoint is confined
- * to the session cwd, so anything outside it has no preview to open.
- */
+/* Clickable only when the file is inside the workspace: the preview endpoint is
+   confined to the session cwd. */
 function FileHeading({ path }: { path: string }) {
   const activeId = useStore((s) => s.activeId);
   const cwd = useStore((s) => s.chats.find((x) => x.chatId === s.activeId)?.cwd ?? '');
   const openFilePreview = useStore((s) => s.openFilePreview);
   const relative = activeId ? workspaceRelative(cwd, path) : null;
-  // Inside the workspace, the relative path is the useful one: it says where the file
-  // sits without repeating the cwd on every row. Outside it, only the full path means
-  // anything. The absolute path is on the tooltip either way.
   const shown = relative ?? path;
 
   if (!relative) {
@@ -505,18 +432,15 @@ function renderWrite(tool: ToolCallView): ReactNode {
       body
     );
   const command = str(inp?.command);
-  // New file / inserted content: show the whole thing highlighted by extension.
   if (command === 'create' || command === 'insert') {
     const content = str(inp?.content);
     if (content !== undefined) return withPath(<Code code={content} lang={langFromPath(path)} />);
   }
-  // strReplace (the `write` tool or the standalone one): diff old -> new.
   const oldStr = str(inp?.oldStr);
   const newStr = str(inp?.newStr);
   if (oldStr !== undefined && newStr !== undefined) {
     return withPath(<DiffView diff={lineDiff(oldStr, newStr)} />);
   }
-  // Live edit streamed as a diff block before the input is available.
   const d = firstDiff(tool.content);
   if (d) return withPath(<DiffView diff={lineDiff(d.oldText, d.newText)} />);
   return withPath(renderGeneric(tool));
@@ -527,10 +451,7 @@ function renderRead(tool: ToolCallView): ReactNode {
   const ops = inp && Array.isArray(inp.operations) ? inp.operations : [];
   const text = outputText(toolBlocks(tool));
   if (!text.trim()) {
-    // Image-only read: the images are the whole body, shown by the caller.
     if (extractImagePaths(tool.input).length > 0) return null;
-    // A read-kind tool without file text - show it generically rather than
-    // leaving the body empty.
     return renderGeneric(tool);
   }
   const textOp = ops.map(asObj).find((o) => o && o.mode !== 'Image');
@@ -579,7 +500,6 @@ function renderGrep(tool: ToolCallView): ReactNode {
 function renderTodo(tool: ToolCallView): ReactNode {
   const tasks = parseTodo(toolBlocks(tool));
   if (!tasks) return renderGeneric(tool);
-  // kiro empties the list once its last task is completed.
   if (tasks.length === 0) return <div className="todo-empty">All tasks done.</div>;
   return (
     <div className="todo">
@@ -595,10 +515,6 @@ function renderTodo(tool: ToolCallView): ReactNode {
   );
 }
 
-/** introspect: show the query, then render the `documentation` as markdown.
- *  The result is JSON ({ documentation, query_context }); the docs read far
- *  better rendered than as an escaped JSON blob (which is what the generic
- *  view produces, since the two-field object defeats soleStringField). */
 function renderIntrospect(tool: ToolCallView): ReactNode {
   const inp = asObj(tool.input);
   const query = str(inp?.query) ?? str(inp?.doc_path);
@@ -624,8 +540,6 @@ function renderIntrospect(tool: ToolCallView): ReactNode {
   );
 }
 
-/** web_fetch: a clickable source URL (+ mode tag / search terms), then the
- *  fetched page content rendered as markdown. */
 function renderWebFetch(tool: ToolCallView): ReactNode {
   const inp = asObj(tool.input);
   const url = str(inp?.url);
@@ -667,9 +581,6 @@ interface SearchHit {
   snippet?: string;
 }
 
-/** Pull a list of {title,url,snippet} from web_search output regardless of the
- *  envelope key (results/items/data, or a bare array), tolerating the common
- *  field-name variants. */
 function searchHits(j: Record<string, unknown> | null): SearchHit[] | null {
   if (!j) return null;
   const arr = Array.isArray(j.results)
@@ -693,8 +604,6 @@ function searchHits(j: Record<string, unknown> | null): SearchHit[] | null {
   return hits.length ? hits : null;
 }
 
-/** web_search: the query, then a compact list of result hits (title links +
- *  snippets). Falls back to the generic view when results aren't structured. */
 function renderWebSearch(tool: ToolCallView): ReactNode {
   const blocks = toolBlocks(tool);
   const hits = searchHits(firstJsonData(blocks));
@@ -723,7 +632,6 @@ function renderWebSearch(tool: ToolCallView): ReactNode {
   );
 }
 
-/** A result's domain without "www.", or undefined when the URL can't be parsed. */
 function hostOf(url: string | undefined): string | undefined {
   if (!url) return undefined;
   try {
@@ -733,8 +641,6 @@ function hostOf(url: string | undefined): string | undefined {
   }
 }
 
-/** A web search's query, shown on its line. Only when the line uses the plain verb: an
- *  agent-supplied purpose already says what was searched. */
 function searchQuery(tool: ToolCallView): string | undefined {
   if (classifyTool(tool) !== 'websearch') return undefined;
   const inp = asObj(tool.input);
@@ -749,7 +655,7 @@ function renderGeneric(tool: ToolCallView): ReactNode {
     inputStr = input;
   } else if (asObj(input)) {
     const { __tool_use_purpose, ...rest } = asObj(input)!;
-    void __tool_use_purpose; // excluded from the dump; shown in the header subtitle
+    void __tool_use_purpose;
     inputStr = JSON.stringify(rest, null, 2);
   }
   const blocks = toolBlocks(tool);
@@ -775,8 +681,6 @@ function renderGeneric(tool: ToolCallView): ReactNode {
   );
 }
 
-/** Syntax-highlighted code with no surrounding chrome (bar/border), so it reads
- *  as colored text inside the tool card rather than a nested window. */
 function Code({ code, lang }: { code: string; lang: string }) {
   const [html, setHtml] = useState<string | null>(null);
   useEffect(() => {
@@ -795,7 +699,6 @@ function Code({ code, lang }: { code: string; lang: string }) {
   );
 }
 
-/** Red/green line diff for a file edit. */
 function DiffView({ diff }: { diff: DiffLine[] }) {
   return (
     <div className="diff-body">
@@ -811,17 +714,11 @@ function DiffView({ diff }: { diff: DiffLine[] }) {
   );
 }
 
-/**
- * Memoized: the transcript re-renders on every streamed chunk, and a card's body work is
- * not cheap - classification, JSON dumps, and a line diff for writes. The store replaces
- * only the tool object that changed, so the other cards' props stay identical.
- */
+/* Memoized: the transcript re-renders on every streamed chunk, and the store
+   replaces only the tool object that changed, so other cards' props stay identical. */
 export const ToolCallCard = memo(ToolCallCardBody);
 
-/** Memoized for the same reason as ToolCallCard: the box re-renders only when one of its
- *  rows actually changes. `liveThought` is a plain string prop, so a growing streaming
- *  thought re-renders only the group it belongs to, not any other row or card. */
+/** Memoized for the same reason as ToolCallCard. */
 export const ToolCallGroupCard = memo(ToolCallGroup);
 
-/** Memoized for the same reason as ToolCallCard. */
 export const ThoughtLineCard = memo(ThoughtLine);

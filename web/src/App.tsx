@@ -10,11 +10,9 @@ import { CHAT_ROUTE, DRAFT_PATH } from './util/route.js';
 
 type AuthState = 'checking' | 'gate' | 'ready';
 
-/** Matches the stylesheet's breakpoint: under this the panel is a drawer over the chat. */
 const MOBILE_MAX = 768;
 
 export function App() {
-  // Probe first, so an already-authed user never sees the login page flash by.
   const [auth, setAuth] = useState<AuthState>('checking');
 
   useEffect(() => {
@@ -22,7 +20,6 @@ export function App() {
     api
       .listChats()
       .then((r) => {
-        // This probe is also the first list fetch, so keep what it returned.
         useStore.getState().setChats(r.chats);
         setAuth('ready');
       })
@@ -34,8 +31,7 @@ export function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* A layout route, so navigating doesn't remount Shell and drop the
-            socket. The children only exist to put :chatId in the URL. */}
+        {/* A layout route, so navigating doesn't remount Shell and drop the socket. */}
         <Route element={<Shell onLock={() => setAuth('gate')} />}>
           <Route index element={null} />
           <Route path={DRAFT_PATH} element={null} />
@@ -48,11 +44,9 @@ export function App() {
 }
 
 /**
- * Sidebar beside the chat on desktop, one pane at a time on mobile.
- *
- * Renders and routes; every session action belongs to sessionController. Narrow
- * selectors, not the whole store: streaming mutates streamingText on every chunk,
- * and this renders both panes.
+ * Sidebar beside the chat on desktop, one pane at a time on mobile. Narrow
+ * selectors, not the whole store: streaming mutates streamingText on every
+ * chunk, and this renders both panes.
  */
 function Shell({ onLock }: { onLock: () => void }) {
   const sessions = useStore((s) => s.chats);
@@ -61,28 +55,21 @@ function Shell({ onLock }: { onLock: () => void }) {
   const connStatus = useStore((s) => s.connStatus);
   const loadingChatId = useStore((s) => s.loadingChatId);
   const navigate = useNavigate();
-  // Not useParams: the param belongs to the child route, so it isn't visible here.
+  // useMatch, not useParams: the param belongs to the child route, invisible here.
   const matchedId = useMatch(CHAT_ROUTE)?.params.chatId ?? null;
-  // A draft is a chat that does not exist yet: it opens immediately and the first prompt
-  // creates it. Both /new and the default page, so landing with nothing open still puts you
-  // in front of a composer. The two patterns are disjoint, so a match here is never a chat.
   const isDraft = useMatch(DRAFT_PATH) !== null || (!matchedId && activeId === null);
 
-  // The two things only React can do. Re-attached rather than set once, because
-  // navigate's identity changes with the router's state.
+  // Re-attached rather than set once: navigate's identity changes with router state.
   useEffect(() => {
     sessionController.attach({ navigate, onLock });
   }, [navigate, onLock]);
 
   useEffect(() => {
     sessionController.loadPickers();
-    // The auth probe fetched the list already; this covers the other way in, a
-    // fresh login, where nothing has.
+    // Covers a fresh login; the auth probe already fetched the list otherwise.
     if (useStore.getState().chats.length === 0) sessionController.refreshSessions();
   }, []);
 
-  // The route owns which session is open, so cold loads, back/forward and clicks
-  // all arrive here.
   useEffect(() => {
     sessionController.syncRoute(matchedId, isDraft);
   }, [matchedId, isDraft]);
@@ -92,19 +79,12 @@ function Shell({ onLock }: { onLock: () => void }) {
     sessionController.watchPaths(watchedPaths);
   }, [watchedPaths, connStatus]);
 
-  // Lock the app: clear the session cookie server-side, then tear everything down.
   const lock = useCallback(() => {
     void logout();
     sessionController.lock();
   }, []);
 
-  // Mobile shows one pane at a time and the list is home, so landing on the default
-  // draft must not push the chat over it - only an explicit new-session tap does.
-  // The panel is a column beside the chat where there is room, and a drawer over it where
-  // there is not. Either way, the chat is what you land on.
   const [navOpen, setNavOpen] = useState(() => window.innerWidth > MOBILE_MAX);
-  // Follow the breakpoint when it is crossed - rotating a phone or resizing a window - since
-  // the panel is a column where there is room and a drawer where there is not.
   useEffect(() => {
     const mq = window.matchMedia(`(max-width: ${MOBILE_MAX}px)`);
     const onChange = (e: MediaQueryListEvent) => setNavOpen(!e.matches);
@@ -133,7 +113,6 @@ function Shell({ onLock }: { onLock: () => void }) {
         onRename={(id, title) => void sessionController.renameChat(id, title)}
         onLock={lock}
       />
-      {/* Only the drawer needs dismissing; a wide screen gives the panel its own column. */}
       {navOpen && (
         <button
           className="nav-scrim"

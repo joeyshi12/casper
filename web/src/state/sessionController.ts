@@ -13,18 +13,8 @@ import { SessionSocket, type SessionSocketHandlers } from '../api/SessionSocket.
 import { DRAFT_PATH, pathForChat } from '../util/route.js';
 import { useStore } from './store.js';
 
-/**
- * Everything that happens to a session between a click and the screen: opening
- * one, creating one, sending to it, deleting it, and tearing the socket down.
- *
- * Deliberately not a component or a hook. React owns rendering and routing; this
- * owns coordination, which is what makes it reachable from a test - a hook would
- * need a renderer, and inside a component none of this could be called at all.
- */
-
 export type CreateOpts = Omit<CreateChatRequest, 'freshWorkspace'>;
 
-/** The REST calls a session's lifecycle needs. `api` satisfies it. */
 export interface SessionApi {
   listChats(): Promise<ChatListResponse>;
   getChat(id: string): Promise<ChatDetail>;
@@ -36,7 +26,6 @@ export interface SessionApi {
   agents(): Promise<AgentsResponse>;
 }
 
-/** The socket surface the controller drives. SessionSocket satisfies it. */
 export interface ControlledSocket {
   connect(): void;
   close(): void;
@@ -55,7 +44,6 @@ export type CreateSocket = (
   startCursor: number,
 ) => ControlledSocket;
 
-/** What only React can do: change the URL, and send the user back to the gate. */
 export interface ControllerHost {
   navigate: (path: string, opts?: { replace?: boolean }) => void;
   onLock: () => void;
@@ -64,16 +52,13 @@ export interface ControllerHost {
 export interface ControllerOptions {
   api?: SessionApi;
   createSocket?: CreateSocket;
-  /** Clustered list refreshes collapse into one request within this window. */
   listCoalesceMs?: number;
-  /** kiro persists a session shortly after a turn ends; wait, then reconcile. */
   turnEndedRefreshMs?: number;
-  /** If a compact command never lands, don't leave the UI stuck compacting. */
   compactTimeoutMs?: number;
 }
 
-// Human names for the control actions the server acks, so a rejection reads as
-// "Model change failed: ..." rather than leaking the wire action name.
+// Human names for control actions, so a rejection reads as "Model change failed: ..."
+// instead of the wire action name.
 const ACTION_LABEL: Record<string, string> = {
   prompt: 'Message',
   cancel: 'Stop',
@@ -91,20 +76,16 @@ export class SessionController {
 
   private host: ControllerHost | null = null;
   private socket: ControlledSocket | null = null;
-  /** The session an open is currently racing toward, so a stale fetch is dropped. */
   private openTarget: string | null = null;
-  /** The route already acted on, so a claim survives the navigation landing. */
   private handledRoute: string | null | undefined = undefined;
   private isDraft = false;
   private lastSent: string | null = null;
   private msgSeq = 0;
-  /** A draft's first prompt, held until the new session's socket is connected. */
   private firstPrompt: {
     id: string;
     content: PromptContentBlock[];
     attachments?: MessageAttachment[];
   } | null = null;
-  /** What the last create asked for, so the error screen's Retry can repeat it. */
   private lastCreateOpts: CreateOpts | null = null;
   private listSeq = 0;
   private listTimer: ReturnType<typeof setTimeout> | null = null;
@@ -118,7 +99,6 @@ export class SessionController {
     this.compactTimeoutMs = opts.compactTimeoutMs ?? 120_000;
   }
 
-  /** The Shell hands over the two things only React can do. */
   attach(host: ControllerHost): void {
     this.host = host;
   }
@@ -127,16 +107,8 @@ export class SessionController {
     return useStore.getState();
   }
 
-  // -------------------------------------------------------------------------
-  // Session list
-  // -------------------------------------------------------------------------
-
-  /**
-   * Refreshes cluster - boot, route changes, a turn starting or ending, a reconnect
-   * replaying events - so calls within a short window collapse into one request, and
-   * only the newest reply is applied: a late answer from before a session was named
-   * would undo its title.
-   */
+  /* Within listCoalesceMs, calls collapse into one request; only the newest reply
+     is applied, so a late answer from before a session was named can't undo its title. */
   refreshSessions(): void {
     if (this.listTimer !== null) return;
     this.listTimer = setTimeout(() => {
@@ -151,7 +123,6 @@ export class SessionController {
     }, this.listCoalesceMs);
   }
 
-  /** Models and agents for the pickers. Quiet on failure: an empty picker is its own signal. */
   loadPickers(): void {
     void this.api
       .models()
@@ -163,19 +134,9 @@ export class SessionController {
       .catch(() => {});
   }
 
-  // -------------------------------------------------------------------------
-  // Opening
-  // -------------------------------------------------------------------------
 
-  /**
-   * The route owns which session is open, so cold loads, back/forward and clicks all
-   * arrive here. Acts on a change of route rather than on every render.
-   */
   syncRoute(routeSessionId: string | null, isDraft: boolean): void {
     this.isDraft = isDraft;
-    // A draft needs an identity before it sends, so an upload has somewhere to go. Minted
-    // above the route-change check below, because loading straight into the draft route is
-    // not a change - and the chat still needs an id.
     if (isDraft && !this.state.chatId) this.state.newChatId();
     if (this.handledRoute === routeSessionId) return;
     this.handledRoute = routeSessionId;
@@ -184,10 +145,6 @@ export class SessionController {
     } else {
       this.openTarget = null;
       this.closeSocket();
-      // Whether this is a draft that already has an identity, as opposed to arriving from a
-      // real session: keep the id in that case, so a file uploaded a moment ago is still
-      // in the chat that is about to be created. Coming from a session, mint a new one, or
-      // the draft would upload into that session's directory and then bind to it.
       const continuingDraft = this.state.activeId === null && this.state.chatId !== null;
       this.state.clearActive();
       if (!continuingDraft) this.state.newChatId();
@@ -200,11 +157,6 @@ export class SessionController {
     this.socket = null;
   }
 
-  /**
-   * `adopted` is a detail already in hand, from creating the session: there is nothing
-   * to fetch, and no "Opening session" state to show, which is what made the draft
-   * look like it reloaded the page.
-   */
   async openChat(id: string, adopted?: ChatDetail): Promise<void> {
     if (this.state.activeId === id) return;
     this.openTarget = id;
@@ -220,17 +172,13 @@ export class SessionController {
         detail = await this.api.getChat(id);
       } catch (err) {
         if (this.openTarget !== id) return;
-        // Fetch failed (network, or the session was deleted): don't strand the
-        // UI in "connecting" - reset and surface the error.
         this.state.setConnStatus('closed');
         this.state.setLoadingChat(null);
         console.error('open session failed:', err);
-        // Replaced, so a refresh doesn't retry it and back doesn't return to it.
         this.host?.navigate('/', { replace: true });
         return;
       }
     }
-    // Abandoned while fetching: leave whatever the user moved on to alone.
     if (this.openTarget !== id) return;
     this.state.loadDetail(detail, { keepPending: Boolean(adopted) });
 
@@ -242,18 +190,14 @@ export class SessionController {
     return {
       onEvent: (e) => {
         this.state.applyEvent(e);
-        // A first turn is when the server names an unnamed session, so pick the list
-        // up now instead of leaving the row untitled until the turn ends.
         if (e.payload.kind === 'turn_started') this.refreshSessions();
-        // kiro persists the session around now, so reconcile the list for its
-        // real updatedAt, title and credits. Delayed until that settles.
+        // kiro persists the session shortly after a turn ends; this delay waits for that.
         if (e.payload.kind === 'turn_ended') {
           setTimeout(() => this.refreshSessions(), this.turnEndedRefreshMs);
         }
       },
       onStatus: (status) => {
         this.state.setConnStatus(status);
-        // The prompt that created the session, delivered once there is a socket.
         if (status === 'connected' && this.firstPrompt) {
           const held = this.firstPrompt;
           this.firstPrompt = null;
@@ -268,22 +212,15 @@ export class SessionController {
       },
       onAck: (action, ok, error) => {
         if (ok) return;
-        // The server explains every rejection; don't drop it on the floor.
         const reason = error ?? 'The server rejected the request.';
         if (action === 'prompt') {
-          // The reason rides on the failed bubble, which is where the user
-          // is already looking.
           if (this.lastSent) this.state.markPendingFailed(this.lastSent, reason);
           return;
         }
-        // set_model / set_mode / cancel / exec_command have no bubble to
-        // attach to, so this only reaches the console for now.
         console.error(`${ACTION_LABEL[action] ?? action} rejected:`, reason);
       },
       onFsChanged: (path) => this.state.bumpFsPath(path),
       onUnauthorized: () => {
-        // The cookie is already invalid, so drop the session and show the gate
-        // rather than looping on reconnects.
         this.closeSocket();
         this.state.clearActive();
         this.host?.onLock();
@@ -294,37 +231,27 @@ export class SessionController {
     };
   }
 
-  // -------------------------------------------------------------------------
-  // Creating
-  // -------------------------------------------------------------------------
-
   async createChat(opts: CreateOpts): Promise<boolean> {
-    // Enter the session view right away; it shows "Connecting" until ready.
     this.closeSocket();
     this.state.setConnStatus('connecting');
     this.state.setCreateError(null);
     this.lastCreateOpts = opts;
     try {
       const detail = await this.api.createChat({
-        // The chat already exists client-side, and may already own uploaded files.
         chatId: this.state.chatId ?? undefined,
         cwd: opts.cwd || undefined,
         agentId: opts.agentId,
         modelId: opts.modelId,
-        // No directory named: the session gets one of its own.
         freshWorkspace: !opts.cwd,
       });
       this.refreshSessions();
       const id = detail.summary.chatId;
-      // Claim the route before navigating, so syncRoute leaves this one alone:
-      // it is already open, with the prompt that created it on screen.
       this.handledRoute = id;
       this.isDraft = false;
       this.host?.navigate(pathForChat(id));
       void this.openChat(id, detail);
       return true;
     } catch (err) {
-      // Keep the user on the chat pane and show what went wrong.
       this.state.setConnStatus('closed');
       this.state.setCreateError(
         err instanceof Error ? err.message : 'Failed to create session',
@@ -342,52 +269,30 @@ export class SessionController {
     this.host?.navigate('/');
   }
 
-  /**
-   * A new session costs nothing until there is something to say: the chat opens on a
-   * draft route, and the first prompt is what creates the session.
-   */
   startDraft(): void {
     this.openTarget = null;
     this.closeSocket();
     this.state.clearActive();
-    // An explicit new chat is always a new identity, so its uploads can't land in the
-    // directory of the chat that was open a moment ago.
     this.state.newChatId();
     this.state.setCreateError(null);
     this.host?.navigate(DRAFT_PATH);
   }
 
-  // -------------------------------------------------------------------------
-  // Sending
-  // -------------------------------------------------------------------------
-
-  /**
-   * Send a prompt. The user bubble shows immediately as "sending"; the server's
-   * turn_started echo clears it, and a delivery failure flags it for retry.
-   */
   send(content: PromptContentBlock[], attachments?: MessageAttachment[]): void {
     const id = `pending-${this.msgSeq++}`;
-    // Text for the pending bubble, minus the machine-facing "Attached files:"
-    // line (the transcript renders thumbnails instead).
     const text = stripAttachmentsLine(
       content
         .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
         .map((b) => b.text)
         .join('\n'),
     );
-    // An attachment of its own is a message, so the bubble needs no stand-in label.
     this.state.addPending({ id, text, attachments, content });
 
     if (this.isDraft) {
-      // Create on demand, then deliver: the socket opens as part of going to the
-      // new session, so the prompt waits for it rather than being dropped.
-      // The pickers are live in a draft, so it is created with whatever they show.
       const { currentModeId, currentModelId } = this.state;
       void this.createChat({
         agentId: currentModeId,
         modelId: currentModelId,
-        // Named on creation, so the row never appears as "Untitled session" for the
-        // moment between the session existing and its first turn starting.
         title: titleFromPrompt(content),
       }).then((created) => {
         if (created) this.firstPrompt = { id, content, attachments };
@@ -405,8 +310,6 @@ export class SessionController {
   ): void {
     this.lastSent = id;
     if (this.socket?.prompt(content, attachments)) return;
-    // The socket wasn't open, so the server never saw this. Say so on the
-    // bubble itself rather than leaving it unexplained.
     this.state.markPendingFailed(
       id,
       this.socket
@@ -415,11 +318,6 @@ export class SessionController {
     );
   }
 
-  /**
-   * Re-send a failed message. Reads back what was actually sent rather than rebuilding it
-   * from the bubble's text, which dropped the attachments line and any image blocks - so a
-   * retried message arrived without the files it was sent with.
-   */
   retrySend(id: string): void {
     const pending = this.state.pending.find((p) => p.id === id);
     if (!pending) return;
@@ -427,17 +325,9 @@ export class SessionController {
     this.deliver(id, pending.content, pending.attachments);
   }
 
-  /**
-   * Retry a turn that failed: send the same prompt again as a fresh message, so it
-   * gets its own pending bubble and its own failure reason if it fails twice.
-   */
   retryTurn(text: string): void {
     this.send([{ type: 'text', text }]);
   }
-
-  // -------------------------------------------------------------------------
-  // Control actions
-  // -------------------------------------------------------------------------
 
   cancel(): void {
     this.socket?.cancel();
@@ -457,31 +347,20 @@ export class SessionController {
   compact(): void {
     this.socket?.execCommand('compact');
     this.state.setCompacting(true);
-    // Safety net: if the command never lands (e.g. the socket dropped) and no
-    // compaction/status ever arrives, don't leave the UI stuck compacting.
     setTimeout(() => this.state.setCompacting(false), this.compactTimeoutMs);
   }
 
-  /**
-   * Restart the open session's kiro process, so a `.kiro` directory or an MCP server
-   * added since it started is detected. The reply is a fresh detail, applied the way a
-   * resync applies one; the pickers are refetched because a new agent only appears
-   * once the server has re-read kiro's list.
-   */
   async reloadChat(): Promise<void> {
     const id = this.state.activeId;
-    // Scoped to this session: another one restarting is no reason to refuse this.
     if (!id || this.state.reloadingId === id) return;
     this.state.setReloadingId(id);
     try {
       const detail = await this.api.reloadChat(id);
-      // Moved on while the process restarted: leave the new session alone.
       if (this.state.activeId !== id) return;
       this.state.loadDetail(detail);
       this.socket?.reset(detail.head);
       this.loadPickers();
     } catch (err) {
-      // Guarded like the success path: don't blame the session the user moved to.
       if (this.state.activeId !== id) return;
       const detail = err instanceof Error ? err.message : 'The server rejected the reload.';
       this.state.setChatNotice({
@@ -490,23 +369,13 @@ export class SessionController {
         detail,
       });
     } finally {
-      // Only if still ours - a later reload of another session owns the field now.
       if (this.state.reloadingId === id) this.state.setReloadingId(null);
     }
   }
 
-  /**
-   * The file panel declares which directories it is showing, and the server watches
-   * exactly those. Resent on reconnect, since watches live with the connection
-   * rather than the session.
-   */
   watchPaths(paths: string[]): void {
     this.socket?.watchPaths(paths);
   }
-
-  // -------------------------------------------------------------------------
-  // Sessions in the list
-  // -------------------------------------------------------------------------
 
   async deleteChat(id: string): Promise<void> {
     try {
@@ -521,7 +390,6 @@ export class SessionController {
   }
 
   async renameChat(id: string, title: string): Promise<void> {
-    // Optimistic: update the list immediately, then persist.
     this.state.renameChatRow(id, title);
     await this.api.renameChat(id, title).catch(() => {
       console.error('rename session failed');
@@ -529,41 +397,29 @@ export class SessionController {
     this.refreshSessions();
   }
 
-  /** Go to a chat chosen where there is no link to follow, such as the search palette. */
   goToChat(id: string): void {
     this.host?.navigate(pathForChat(id));
   }
 
-  /** Marked before the route changes, or the pane flashes back to the list. */
   markLoading(id: string): void {
     if (id === this.state.activeId) return;
     this.state.setLoadingChat(id);
   }
 
-  /**
-   * Lock the app: tear the socket down and clear the active session so nothing
-   * lingers behind the login gate. The caller clears the cookie.
-   */
   lock(): void {
     this.closeSocket();
     this.state.clearActive();
     this.host?.navigate('/', { replace: true });
     this.host?.onLock();
   }
-  /** True when there is somewhere for a widget's message to go. */
+
   get canSend(): boolean {
     return this.isDraft || useStore.getState().activeId !== null;
   }
 }
 
-/** The one the app uses. Tests construct their own with substituted ports. */
 export const sessionController = new SessionController();
 
-/**
- * A widget asking to send a message as the user. Capped, and a no-op when there is
- * nowhere to send, so a stale frame can't send into the void. A draft counts: the
- * message creates the session, exactly as one typed into the composer would.
- */
 export function sendWidgetPrompt(text: string): boolean {
   const clean = text.trim().slice(0, 4000);
   if (!clean || !sessionController.canSend) return false;

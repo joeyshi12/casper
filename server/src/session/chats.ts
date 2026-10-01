@@ -10,8 +10,8 @@ import { isValidChatId } from '../util/paths.js';
  *   <data dir>/chats/<chat id>/uploads     files the user attached
  *   <data dir>/chats/<chat id>/workspace   the agent's files, if Casper made the cwd
  *
- * The client mints the id, because kiro does not name a session until it starts one and a file
- * can be attached before that. `workspace` exists only for a chat Casper made a cwd for.
+ * The client mints the id, since kiro does not name a session until it starts one and a
+ * file can be attached before that.
  */
 export function chatsRoot(): string {
   return path.join(config.casperDataDir, 'chats');
@@ -37,9 +37,8 @@ export function createChatWorkspace(chatId: string): string {
 }
 
 /**
- * Everything a chat owns on disk, gone: uploads, and the workspace if Casper made one. A chat
- * that never got a directory is not an error. The id is validated first because it comes from
- * the client and this deletes a tree - an id that could traverse would take the wrong one.
+ * Everything a chat owns on disk, gone: uploads, and the workspace if Casper made one.
+ * The id is validated first because it comes from the client and this deletes a tree.
  */
 export async function removeChatDir(chatId: string): Promise<void> {
   if (!isValidChatId(chatId)) return;

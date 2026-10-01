@@ -1,5 +1,4 @@
 // HTTP surface: path confinement, the routes, and how failures are reported.
-// Run with: npm test
 
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,16 +13,15 @@ import type {
   DirListing,
   ServerMessage,
   ChatDetail,
-  ChatSummary,
   TreeResponse,
   UploadResponse,
 } from '@casper/shared';
 import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
 import { useStore } from '../web/src/state/store.js';
-import { config, parseConfigDoc, pickInt, pickString } from '../server/src/config.js';
+import { config } from '../server/src/config.js';
 import { AttemptLimiter } from '../server/src/util/rateLimit.js';
-import { SessionManager, Session } from '../server/src/session/SessionManager.js';
+import { SessionManager } from '../server/src/session/SessionManager.js';
 import { describeError } from '../server/src/acp/errors.js';
 import { registerFsRoutes } from '../server/src/routes/fs.js';
 import { registerUploadRoutes } from '../server/src/routes/uploads.js';
@@ -53,9 +51,8 @@ import {
   MAX_WATCHES,
 } from '../server/src/ws/dirWatchers.js';
 
-// Each test file gets its own data directory. The runner gives each file its own process,
-// so anything sharing one casper.db contends for its write lock - "database is locked" on a
-// loaded CI box. Set before the first db() call, which is what opens it.
+// Each test file gets its own data directory, since sharing one casper.db across files
+// contends for its write lock. Set before the first db() call, which is what opens it.
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-data-routes-'));
 (config as { casperDataDir: string }).casperDataDir = dataDir;
 closeDb();
@@ -182,8 +179,8 @@ describe('GET /api/fs/dirs: reports what the typed path is', () => {
     assert.equal(r.target, path.resolve(config.defaultCwd, 'some-relative-name'));
   });
 
-  // .kiro is the folder the reload feature exists to re-read, and it used to be
-  // unbrowsable: typeable, but never offered.
+  // .kiro is the folder the reload feature exists to re-read, so the picker must offer it
+  // rather than requiring it to be typed.
   it('lists dot-directories, after the ordinary ones', async () => {
     const box = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-dots-'));
     for (const name of ['.kiro', '.config', 'zebra', 'apple']) {
@@ -230,8 +227,8 @@ describe('createChat resolves a missing cwd by creating it', () => {
   let root: string;
   let dataDir: string;
   const origData = config.casperDataDir;
-  // A manager reaches the store, so this points somewhere disposable: AGENTS.md forbids a
-  // test writing into the developer's real ~/.casper, and it did until this was added.
+  // AGENTS.md forbids a test writing into the developer's real ~/.casper, and a manager
+  // reaches the store, so this points casperDataDir somewhere disposable first.
   before(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-mkcwd-'));
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-mkcwd-data-'));
@@ -260,8 +257,8 @@ describe('createChat resolves a missing cwd by creating it', () => {
   });
 });
 
-// The picker is only right if the list is re-read: agents are created while the
-// server runs, and the list used to be cached for its whole lifetime.
+// The picker is only right if the list is re-read: agents can be created while the
+// server runs, so the list cannot be cached for the server's whole lifetime.
 describe('the agent list does not go stale', () => {
   const fakeAgentBin = (log: string) => {
     const p = path.join(os.tmpdir(), `casper-agentbin-${Date.now()}-${Math.random()}.sh`);
@@ -318,10 +315,9 @@ describe('the agent list does not go stale', () => {
     }
   });
 
-  // kiro's table has drifted: 2.19 prints its own agents as (Built-in) where 2.11 used
-  // Global/Workspace/Local. The old parser required one of those three words, so on 2.19 it
-  // silently dropped every built-in and the picker fell back to a hardcoded list that had
-  // itself gone stale - offering kiro_guide, which is gone, and hiding kiro_help.
+  // kiro's table format has drifted: 2.19 prints its own agents as (Built-in) where 2.11
+  // used Global/Workspace/Local. The parser must accept both, or it silently drops every
+  // built-in agent.
   const agentBin = (table: string) => {
     const p = path.join(os.tmpdir(), `casper-agentlist-${Date.now()}-${Math.random()}.sh`);
     // The table goes to stderr, which is where kiro prints it.
@@ -467,8 +463,7 @@ describe('turn failures surface as system events, not assistant messages', () =>
     const items = useStore.getState().items;
     assert.equal(items.length, 1);
     assert.equal(items[0]!.type, 'turn_error');
-    // The old behaviour attributed this to the model; make sure that's gone.
-    assert.ok(!items.some((i) => i.type === 'message'));
+    assert.ok(!items.some((i) => i.type === 'message'), 'not attributed to the model');
     assert.ok(!JSON.stringify(items).includes('⚠️'));
   });
 
@@ -1050,12 +1045,11 @@ describe('ws gateway connection', () => {
   });
 });
 
-// The reason uploads are keyed by chat: a new chat has no kiro session id until it sends,
-// so keying them on one meant a first message could not carry a file.
-// The create route copies the body field by field, so a field added to CreateChatRequest
-// and not added here is dropped silently. chatId was, and it stranded every file attached to
-// a first prompt: the upload went to the chat the client minted, then the server minted a
-// different one for the session, so nothing referred to that directory again.
+// Uploads are keyed by chat id, not kiro's session id: a new chat has no session id until
+// it sends, so a first message could not otherwise carry a file. The create route copies
+// the request body field by field, so a field added to CreateChatRequest and not added
+// here is silently dropped - and chatId being that field would strand every upload, since
+// the client's chat id and the server's minted session id point at different directories.
 describe('POST /api/chats forwards the whole request', () => {
   it('passes every field through to the manager', async () => {
     let got: Record<string, unknown> | undefined;
@@ -1153,8 +1147,8 @@ describe('POST /api/chats/:chatId/uploads', () => {
   });
 });
 
-// The handlers are thin over confinedFile now, so these check the wiring: that
-// each route asks for the right thing and passes the status straight through.
+// The handlers are thin over confinedFile, so these check the wiring: that each route
+// asks for the right thing and passes the status straight through.
 describe('workspace file routes', () => {
   let cwd: string;
   let app: Awaited<ReturnType<typeof buildApp>>;

@@ -1,4 +1,3 @@
-//
 // PopoverMenu portals to body and positions from the trigger's rect, so it cannot add to the
 // sidebar list's scroll height or open past the bottom of the window. jsdom computes no
 // layout, so both rects are defined by hand: the portal target, the flip decision and the
@@ -6,7 +5,7 @@
 
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { JSDOM } from 'jsdom';
+import { installDomGlobals } from './helpers.js';
 
 type Any = any;
 
@@ -75,32 +74,12 @@ const mountAt = (anchorTop: number) => {
 let closed: true[] = [];
 
 before(async () => {
-  const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', {
-    pretendToBeVisual: true,
-    url: 'https://casper.test/',
-  });
-  w = dom.window as Any;
-  w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  ({ window: w, host, react: { createElement, act } } = await installDomGlobals());
   Object.defineProperty(w, 'innerHeight', { value: VIEWPORT_H, configurable: true });
   Object.defineProperty(w, 'innerWidth', { value: 1200, configurable: true });
 
-  const g = globalThis as Any;
-  for (const key of [
-    'window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event',
-    'MouseEvent', 'KeyboardEvent', 'getComputedStyle', 'requestAnimationFrame',
-    'cancelAnimationFrame', 'matchMedia', 'DocumentFragment',
-  ]) {
-    g[key] = w[key];
-  }
-  g.IS_REACT_ACT_ENVIRONMENT = true;
-
-  const react = await import('react');
-  g.React = react.default ?? react;
-  ({ createElement, act } = react);
   ({ createRoot } = await import('react-dom/client'));
   ({ PopoverMenu } = await import('../web/src/components/common/PopoverMenu.js'));
-
-  host = w.document.getElementById('host');
 });
 
 after(() => {

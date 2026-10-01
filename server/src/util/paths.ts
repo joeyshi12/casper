@@ -2,18 +2,14 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
-/**
- * Whether `target` resolves to `root` or below it. Lexical only: resolves `..`, ignores
- * symlinks. The `path.sep` suffix stops `/home/joey` matching `/home/joeyx`.
- */
+/** Whether `target` resolves to `root` or below it. Lexical only: ignores symlinks. */
 export function isWithinRoot(root: string, target: string): boolean {
   const resolved = path.resolve(target);
-  // "/" contains everything, and the suffix below would compare against "//".
   if (root === path.sep) return true;
   return resolved === root || resolved.startsWith(root + path.sep);
 }
 
-/** Resolve `input` under `root`, or null if it escapes. Lexical; see realConfineToRoot. */
+/** Resolves `input` under `root`, or null if it escapes. See realConfineToRoot. */
 export function confineToRoot(root: string, input: string): string | null {
   const resolved = path.resolve(root, input);
   return isWithinRoot(root, resolved) ? resolved : null;
@@ -33,10 +29,8 @@ function resolveRealRoot(root: string): string {
   return real;
 }
 
-/**
- * Confinement that survives symlinks: realpaths both sides before comparing, which defeats a
- * symlink inside the root pointing out of it. Null if it escapes or does not exist.
- */
+/** Confinement that survives symlinks: realpaths both sides first. Null if it
+ *  escapes or doesn't exist. */
 export async function realConfineToRoot(
   root: string,
   absPath: string,

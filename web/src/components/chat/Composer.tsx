@@ -22,24 +22,16 @@ const IMAGE_TYPES = new Set([
 interface Attachment {
   id: string;
   file: File;
-  /** True for images (shown as a thumbnail, inlined as an image block). */
   isImage: boolean;
-  /** Object URL for the thumbnail (images only). */
   previewUrl?: string;
 }
 
 interface Props {
-  /** Active session id - required to upload attachments. */
-  /** The chat that owns the uploads directory; present for a draft too. */
   chatId: string | null;
-  /** Trigger a /compact of the conversation to reduce context size. */
-  /** Live socket status - drives the placeholder and whether prompts can send. */
   connStatus: ConnStatus;
-  /** Composing the first prompt of a session that does not exist yet. */
   draft?: boolean;
 }
 
-/** ChatGPT-style input: + attach inside, paste, auto-grow, upload-on-send. */
 export function Composer({
   chatId,
   connStatus,
@@ -55,8 +47,6 @@ export function Composer({
   const currentModelId = useStore((s) => s.currentModelId);
   const running = turnStatus === 'running';
   const cancelling = turnStatus === 'cancelling';
-  // A draft has no socket: sending is what creates the session, so the connection
-  // states below don't apply to it.
   const live = draft || connStatus === 'connected';
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -93,7 +83,6 @@ export function Composer({
     setAttachments((prev) => [...prev, ...next]);
   }, []);
 
-  /** Turn upload metadata + local files into ACP content blocks. */
   const buildContent = async (
     uploaded: UploadedFile[],
     atts: Attachment[],
@@ -101,18 +90,15 @@ export function Composer({
   ): Promise<PromptContentBlock[]> => {
     const content: PromptContentBlock[] = [];
 
-    // 1. Where the files landed: the only way the agent can reach one it isn't handed.
     if (uploaded.length > 0) {
-      // Trailing newline keeps this its own line even when the prompt's text blocks are
-      // concatenated with no separator, or the line-based strip swallows the typed message.
+      // Trailing newline keeps this its own line even when text blocks are
+      // concatenated with no separator.
       content.push({
         type: 'text',
         text: ATTACHMENTS_PREFIX + uploaded.map((u) => u.path).join(', ') + '\n',
       });
     }
 
-    // 2. Images inline, because vision needs the bytes. Everything else stays a path:
-    // inlining contents put the whole file in the bubble as if the user had typed it.
     for (let i = 0; i < uploaded.length; i++) {
       const u = uploaded[i];
       const att = atts[i];
@@ -120,8 +106,7 @@ export function Composer({
       if (u.kind === 'image' && att) {
         try {
           const data = await readFileAsBase64(att.file);
-          // u.mimeType, not att.file.type: the browser leaves File.type empty for plenty of
-          // drops, and an image block with an empty mimeType is malformed.
+          // u.mimeType, not att.file.type: File.type is empty for plenty of drops.
           content.push({ type: 'image', data, mimeType: u.mimeType });
         } catch {
           /* skip unreadable image */
@@ -129,7 +114,6 @@ export function Composer({
       }
     }
 
-    // 3. The user's typed message last.
     if (typed) content.push({ type: 'text', text: typed });
     return content;
   };
@@ -229,7 +213,6 @@ export function Composer({
       });
     };
   }, []);
-
 
   const placeholder = composerPlaceholder({
     live,

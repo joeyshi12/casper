@@ -32,8 +32,6 @@ const RUNTIME = `
 
   function post(msg) { parent.postMessage(msg, '*'); }
 
-  // The only way a widget can talk to Casper: ask for a prompt to be sent. The
-  // app decides whether to honour it.
   window.casper = {
     sendPrompt: function (text) {
       if (typeof text !== 'string' || !text.trim()) return;
@@ -41,8 +39,7 @@ const RUNTIME = `
     },
   };
 
-  // Guarded, because a second pass would replace the nodes a widget's scripts are
-  // already driving with inert copies.
+  // Guards against a second pass replacing nodes a widget's scripts are already driving.
   function setContent(html) {
     if (!root) root = document.getElementById('root');
     if (!root || html === last) return;
@@ -50,10 +47,9 @@ const RUNTIME = `
     root.innerHTML = html;
   }
 
-  // innerHTML leaves scripts inert; recreating them runs them, once the content is
-  // final so a half-written script never executes. One at a time, waiting on anything
-  // with a src: a real document blocks there, and running them all at once is how you
-  // get "Chart is not defined".
+  // innerHTML leaves scripts inert; recreating them runs them. One at a time,
+  // waiting on anything with a src, or running them all at once risks
+  // "X is not defined" from a library that hasn't loaded yet.
   function runScripts() {
     if (scripted) return;
     scripted = true;
@@ -91,10 +87,9 @@ const RUNTIME = `
 
   var lastHeight = 0;
 
-  // Measured off #root, not the document: in a frame the html box is the viewport,
-  // so it reports the size the host already chose rather than the content's. The
-  // two spare pixels absorb fractional layout heights, which otherwise leave a
-  // sliver of overflow and a scrollbar.
+  // Off #root rather than the document: in a frame the html box reports the
+  // viewport size the host already chose, not the content's. +2px absorbs
+  // fractional layout heights that otherwise leave a scrollbar.
   function contentHeight() {
     if (!root) root = document.getElementById('root');
     var bottom = 0;
@@ -114,13 +109,12 @@ const RUNTIME = `
   if (window.ResizeObserver) {
     var ro = new ResizeObserver(reportHeight);
     ro.observe(document.documentElement);
-    // The one that actually grows with the content.
     if (root) ro.observe(root);
   }
 
-  // Canvases and late fonts resize without tripping the observer, so poll too -
-  // but only briefly after the content settles. A transcript full of widgets each
-  // polling forever would read layout dozens of times a second.
+  // Canvases and late fonts resize without tripping ResizeObserver, so poll too,
+  // briefly after content settles - a transcript full of widgets polling forever
+  // would read layout dozens of times a second.
   var poll = null;
   function pollHeight(ms) {
     if (poll) clearInterval(poll);
@@ -143,7 +137,6 @@ const RUNTIME = `
     setContent(d.html);
     reportHeight();
     runScripts();
-    // Scripts can draw for a while after they run; watch a little longer.
     pollHeight(4000);
   });
 })();
@@ -168,7 +161,6 @@ a { color: var(--color-accent, #bd93f9); }
 ::-webkit-scrollbar-thumb { background: var(--color-border, #44475a); border-radius: 4px; }
 `;
 
-/** The document every widget runs inside. Static, so the frame is created once. */
 export function buildWidgetShell(): string {
   return `<!doctype html>
 <html>

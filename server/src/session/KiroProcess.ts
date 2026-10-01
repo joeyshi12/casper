@@ -20,12 +20,10 @@ interface KiroProcessOptions {
   model?: string;
 }
 
-// How many trailing stderr lines to keep for the exit message. Enough to carry
-// a login/auth error without letting a chatty process grow this unbounded.
+// Trailing stderr lines kept for the exit message.
 const STDERR_KEEP = 8;
 
-// Owns one kiro-cli acp child process and its ACP client. Its lifecycle is
-// independent of any browser socket: it lives until disposed or it exits.
+// Owns one kiro-cli acp child and its ACP client, independent of any browser socket.
 export class KiroProcess extends EventEmitter {
   readonly client: AcpClient;
   private readonly child: ChildProcessWithoutNullStreams;
@@ -54,17 +52,15 @@ export class KiroProcess extends EventEmitter {
       this.emit('notification', n);
     });
 
-    // Answer agent-initiated requests minimally so the turn never stalls.
-    // With --trust-all-tools kiro shouldn't ask for permission, but fs/terminal
-    // client requests can still arrive; reject unknown ones politely.
+    // Answer agent-initiated requests minimally so the turn never stalls. With
+    // --trust-all-tools kiro shouldn't ask for permission, but fs/terminal client
+    // requests can still arrive.
     this.client.on('serverRequest', (req) => {
       this.log.debug({ method: req.method }, 'acp: unhandled server request');
       this.client.respond(req.id, {});
     });
 
-    // Keep the tail of stderr, not just the log: when kiro dies (expired
-    // credentials, a bad flag) the reason is printed here, and 'process exited
-    // (code=1)' on its own tells the user nothing.
+    // Keep the tail of stderr: when kiro dies the reason is printed here.
     const stderrLines = this.child.stderr.pipe(split2());
     stderrLines.on('data', (line: string) => {
       if (!line.trim()) return;
@@ -72,18 +68,14 @@ export class KiroProcess extends EventEmitter {
       this.recentStderr.push(line.trim());
       if (this.recentStderr.length > STDERR_KEEP) this.recentStderr.shift();
     });
-    // 'exit' can arrive before the last of stderr has been read, and on some node
-    // versions it does: the reason came out as a bare "exited with code 1" with kiro's
-    // actual complaint still in the pipe. Wait for the stream to finish instead of
-    // depending on which callback the event loop runs first.
+    // 'exit' can arrive before stderr finishes reading.
     const stderrEnded = new Promise<void>((resolve) => {
       stderrLines.once('end', resolve);
       stderrLines.once('error', () => resolve());
     });
 
     this.child.on('exit', (code, signal) => {
-      // Bounded: a stream that somehow never ends must not wedge the exit path, or an
-      // in-flight request would never reject and the session would never go dormant.
+      // Bounded so a stream that never ends can't wedge the exit path.
       const capped = new Promise<void>((resolve) => setTimeout(resolve, 250).unref());
       void Promise.race([stderrEnded, capped]).then(() => {
         this.client.fail(this.exitReason(code, signal));
@@ -94,22 +86,17 @@ export class KiroProcess extends EventEmitter {
       });
     });
 
-    // A spawn failure (e.g. bad cwd or missing binary) emits 'error'. Fail the
-    // ACP client so any in-flight request (like initialize) rejects, then log
-    // it. We do NOT re-emit 'error': an EventEmitter with no 'error' listener
-    // throws and would crash the server.
+    // Not re-emitted: an EventEmitter with no 'error' listener throws.
     this.child.on('error', (err) => {
       this.log.error({ err }, 'kiro-cli acp spawn error');
       this.client.fail(err.message);
     });
 
-    // Swallow stdin errors (e.g. EPIPE when writing to a process that failed to
-    // spawn) so they don't surface as unhandled stream errors.
     this.child.stdin.on('error', () => {});
     this.child.stdout.on('error', () => {});
   }
 
-  /** Perform the ACP initialize handshake. kiro's reply is not used. */
+  /** The ACP initialize handshake. kiro's reply is not used. */
   async initialize(): Promise<void> {
     await this.client.request(ACP_METHODS.initialize, {
       protocolVersion: 1,
@@ -117,8 +104,6 @@ export class KiroProcess extends EventEmitter {
         fs: { readTextFile: false, writeTextFile: false },
         terminal: false,
       },
-      // Informational only - kiro logs it and nothing reads it back, so it isn't
-      // worth wiring to package.json.
       clientInfo: { name: 'casper', version: '0.5.0' },
     });
   }
@@ -131,9 +116,9 @@ export class KiroProcess extends EventEmitter {
     return this.client.request<SessionNewResult>(ACP_METHODS.sessionLoad, params);
   }
 
-  /** Run a prompt turn to completion. Resolves with the stop reason. */
+  /** Runs a prompt turn to completion. */
   prompt(params: SessionPromptParams): Promise<SessionPromptResult> {
-    // A long agent task can run for many minutes; disable the request timeout.
+    // Disable the timeout: a long agent task can run for many minutes.
     return this.client.request<SessionPromptResult>(
       ACP_METHODS.sessionPrompt,
       params,
@@ -154,31 +139,19 @@ export class KiroProcess extends EventEmitter {
   }
 
   execCommand(sessionId: string, command: string): Promise<unknown> {
-    // kiro expects { command: <name>, args: <object> }, with no leading slash on the name
-    // (advertised as "/compact", executed as "compact"). A flat string param crashes it.
+    // kiro expects { command: <name>, args }, no leading slash on the name.
     return this.client.request(ACP_METHODS.commandsExecute, {
       sessionId,
       command: { command: command.replace(/^\//, ''), args: {} },
     });
   }
 
-  /** Cleanly shut down: close stdin (triggers kiro's graceful exit), then kill. */
-  /**
-   * Recent stderr from kiro, for attaching to a failure.
-   *
-   * A failed request doesn't always carry its cause in the JSON-RPC error - when
-   * it doesn't, kiro has usually written something here. Shared across turns, so
-   * treat it as context rather than proof.
-   */
+  /** Recent stderr from kiro, for attaching to a failure. */
   stderrTail(): string {
     return this.recentStderr.join('\n').trim();
   }
 
-  /**
-   * Why the child died, in terms a user can act on. The exit code alone is
-   * opaque, so append what kiro printed - that's where "credentials have
-   * expired, run kiro-cli login" and friends show up.
-   */
+  /** Why the child died: exit code plus whatever kiro printed. */
   private exitReason(code: number | null, signal: string | null): string {
     const base =
       signal ? `kiro-cli exited on ${signal}` : `kiro-cli exited with code ${code}`;
@@ -186,6 +159,7 @@ export class KiroProcess extends EventEmitter {
     return tail ? `${base}: ${tail}` : base;
   }
 
+  // Closes stdin to trigger kiro's graceful exit, then force-kills if it lingers.
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -194,17 +168,13 @@ export class KiroProcess extends EventEmitter {
     } catch {
       /* ignore */
     }
-    // Give kiro a moment to flush, then force-kill if still alive.
     setTimeout(() => {
       if (this.child.exitCode === null) this.child.kill('SIGTERM');
     }, 1000).unref();
   }
 
-  /**
-   * Dispose and resolve once the child has actually exited. kiro writes its
-   * session file on shutdown, so a caller that then deletes those files must
-   * wait for exit first, or kiro's write recreates them.
-   */
+  /** Resolves once the child has exited. Caller must wait before deleting
+   *  session files, or kiro's shutdown write recreates them. */
   disposeAndWait(timeoutMs = 4000): Promise<void> {
     if (this.child.exitCode !== null) {
       this.dispose();

@@ -6,10 +6,10 @@
 //   server/dist/web/        the built web app, served from beside the bundle
 //   server/dist/agents/     the agent prompt, written into ~/.kiro on first run
 //
-// The workspaces stay private, so @casper/shared can't be resolved from the
-// registry - inlining it is what makes one publishable package possible. Real
-// runtime dependencies stay external and declared, which matters most for pino:
-// it loads transports in worker threads and breaks if bundled.
+// The workspaces stay private, so @casper/shared can't be resolved from the registry
+// - inlining it is what makes one publishable package possible. Real runtime
+// dependencies stay external and declared; pino loads transports in worker threads
+// and breaks if bundled.
 import esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,7 +18,6 @@ import url from 'node:url';
 const root = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, 'server', 'dist');
 
-// The published package's own dependencies are exactly what must stay external.
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'server/package.json'), 'utf8'));
 const external = Object.keys(pkg.dependencies ?? {});
 
@@ -37,7 +36,7 @@ const result = await esbuild.build({
   metafile: true,
 });
 
-// Its own entry, because kiro spawns it as a separate stdio process.
+// Its own entry: kiro spawns it as a separate stdio process.
 await esbuild.build({
   entryPoints: [path.join(root, 'server/src/mcp/index.ts')],
   outfile: path.join(outDir, 'mcp.js'),
@@ -51,7 +50,7 @@ await esbuild.build({
 });
 
 // The bin entry is the launcher, not the bundle: it checks the Node version before
-// the bundle's node:sqlite import would fail at link time with nothing to explain it.
+// node:sqlite would fail at link time with nothing to explain it.
 fs.copyFileSync(path.join(root, 'scripts/launcher.js'), path.join(outDir, 'casper.js'));
 fs.chmodSync(path.join(outDir, 'casper.js'), 0o755);
 
@@ -61,16 +60,14 @@ if (!fs.existsSync(webSrc)) {
 }
 fs.cpSync(webSrc, path.join(outDir, 'web'), { recursive: true });
 
-// files: ["dist/"] can't reach ../assets, so the prompt has to live inside the bundle.
-// The rest of the agent file is an object literal in agentFile.ts, compiled in.
+// files: ["dist/"] can't reach ../assets, so the prompt lives inside the bundle.
 const promptSrc = path.join(root, 'assets/agents/prompt.txt');
 if (!fs.existsSync(promptSrc)) throw new Error(`missing ${promptSrc}`);
 fs.mkdirSync(path.join(outDir, 'agents'), { recursive: true });
 fs.copyFileSync(promptSrc, path.join(outDir, 'agents/prompt.txt'));
 
-// npm picks up README and LICENSE from the package directory only, and both live at
-// the repo root - without copying them in, the npm page has no readme and the tarball
-// ships no licence. Generated, so they're gitignored inside server/.
+// npm picks up README and LICENSE from the package directory only; both live at the
+// repo root. Generated, so they're gitignored inside server/.
 const pkgDir = path.join(root, 'server');
 for (const file of ['README.md', 'LICENSE']) {
   const from = path.join(root, file);

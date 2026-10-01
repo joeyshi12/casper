@@ -1,5 +1,3 @@
-// Run with: npm test
-
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -179,7 +177,7 @@ describe('SessionManager.wire: subagent list_update updates the tracker and is p
     const beta = subs.find((s) => s.stageName === 'beta');
     assert.equal(beta?.status, 'pending');
     assert.equal(beta?.activity, 'Waits for alpha');
-    // Started subagents list before a pending one, regardless of name order.
+    // Started subagents are listed before a pending one, regardless of name order.
     assert.equal(subs.at(-1)?.stageName, 'beta');
   });
 

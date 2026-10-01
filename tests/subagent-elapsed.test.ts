@@ -1,4 +1,3 @@
-// Run with: npm test
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { formatElapsed } from '../web/src/util/duration.js';

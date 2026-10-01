@@ -26,14 +26,9 @@ export interface DirWatchers {
   watching(): string[];
 }
 
-/**
- * Watches the directories a client is actually showing, non-recursively, and reports
- * which one changed.
- *
- * The tree only ever displays expanded directories, so watching just those keeps this
- * to a handful of inotify handles. Watching the workspace recursively instead is what
- * makes editors hit the descriptor limit on a large tree.
- */
+/** Watches the directories a client is actually showing, non-recursively, and reports
+ *  which one changed. Watching the workspace recursively instead is what makes
+ *  editors hit the descriptor limit on a large tree. */
 export function createDirWatchers(opts: {
   /** Absolute path for a relative one, or null when it escapes the workspace. */
   resolve: (relative: string) => Promise<string | null>;

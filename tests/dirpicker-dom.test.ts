@@ -1,12 +1,11 @@
-//
 // Covers browsing by breadcrumb, the WAI-ARIA combobox keyboard contract, and the sheet's
 // dismissal. The directory listing is a stub, so this proves the client asks for the right
 // thing and renders the reply, not how the server splits a path.
 
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { JSDOM } from 'jsdom';
 import type { DirListing } from '@casper/shared';
+import { installDomGlobals } from './helpers.js';
 
 type Any = any;
 
@@ -94,26 +93,7 @@ const key = async (k: string, opts_: Record<string, unknown> = {}) => {
 };
 
 before(async () => {
-  const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', {
-    pretendToBeVisual: true,
-    url: 'https://casper.test/',
-  });
-  w = dom.window as Any;
-  w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-
-  const g = globalThis as Any;
-  for (const k of [
-    'window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event',
-    'MouseEvent', 'KeyboardEvent', 'getComputedStyle', 'requestAnimationFrame',
-    'cancelAnimationFrame', 'matchMedia', 'DocumentFragment',
-  ]) {
-    g[k] = w[k];
-  }
-  g.IS_REACT_ACT_ENVIRONMENT = true;
-
-  const react = await import('react');
-  g.React = react.default ?? react;
-  ({ createElement, act } = react);
+  ({ window: w, host, react: { createElement, act } } = await installDomGlobals());
   ({ createRoot } = await import('react-dom/client'));
   ({ DirectoryPicker } = await import('../web/src/components/sessions/DirectoryPicker.js'));
   ({ ChangeFolderSheet } = await import('../web/src/components/sessions/ChangeFolderSheet.js'));
@@ -126,8 +106,6 @@ before(async () => {
       return r;
     });
   };
-
-  host = w.document.getElementById('host');
 });
 
 after(() => {
@@ -164,7 +142,6 @@ describe('DirectoryPicker (rendered in a DOM)', () => {
   it('shows names under a breadcrumb, not repeated absolute paths', async () => {
     await mountPicker('/home/joey/projects');
     assert.deepEqual(crumbs().map((c) => c.textContent), ['/', 'home', 'joey', 'projects']);
-    // The old field put the whole path in every row; the name carries it now.
     assert.ok(!opts()[0]!.textContent!.includes('/'), 'an option is a name, not a path');
   });
 
@@ -335,7 +312,6 @@ describe('DirectoryPicker (rendered in a DOM)', () => {
     assert.equal(el.getAttribute('aria-expanded'), 'true');
   });
 
-  // The sheet used to resize on every navigation, and again when the input lost focus.
   it('keeps the same structure whatever a folder contains', async () => {
     const shape = () => ({
       list: Boolean(host.querySelector('.dirpick-list')),

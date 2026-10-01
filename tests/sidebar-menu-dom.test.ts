@@ -1,12 +1,11 @@
-//
 // Portalling a row's menu to body moves the pointer off the row, so :hover drops and the
 // hover-only ⋮ fades out while its menu is still open; an is-menu-open class holds the state.
 // jsdom applies no stylesheet, so this proves the wiring, not the appearance.
 
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { JSDOM } from 'jsdom';
 import type { ChatSummary } from '@casper/shared';
+import { installDomGlobals } from './helpers.js';
 
 type Any = any;
 
@@ -36,32 +35,12 @@ const click = (el: Element) => {
 };
 
 before(async () => {
-  const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', {
-    pretendToBeVisual: true,
-    url: 'https://casper.test/',
-  });
-  w = dom.window as Any;
-  w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-
-  const g = globalThis as Any;
-  for (const key of [
-    'window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event',
-    'MouseEvent', 'KeyboardEvent', 'getComputedStyle', 'requestAnimationFrame',
-    'cancelAnimationFrame', 'matchMedia', 'DocumentFragment', 'localStorage', 'history',
-    'location',
-  ]) {
-    if (w[key] !== undefined) g[key] = w[key];
-  }
-  g.IS_REACT_ACT_ENVIRONMENT = true;
-
-  const react = await import('react');
-  g.React = react.default ?? react;
-  ({ createElement, act } = react);
+  ({ window: w, host, react: { createElement, act } } = await installDomGlobals([
+    'localStorage', 'history', 'location',
+  ]));
   ({ createRoot } = await import('react-dom/client'));
   ({ MemoryRouter } = await import('react-router'));
   ({ Sidebar } = await import('../web/src/components/layout/Sidebar.js'));
-
-  host = w.document.getElementById('host');
 });
 
 after(() => {

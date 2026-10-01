@@ -1,10 +1,9 @@
 /**
- * WebSocket protocol - the resumable streaming channel between browser and server.
+ * WebSocket protocol: the resumable streaming channel between browser and server.
  *
  * Every event carries a strictly increasing per-session `seq`. The client remembers the
  * last one it applied and sends that cursor on reconnect; the server replays everything
- * after it, or answers `resync` if the cursor is older than the buffer. This is what lets
- * a long agent run survive a disconnect.
+ * after it, or answers `resync` if the cursor is older than the buffer.
  */
 
 import type {
@@ -15,10 +14,6 @@ import type {
   StopReason,
 } from './acp.js';
 import type { MessageAttachment, SubagentSummary } from './rest-dto.js';
-
-// ---------------------------------------------------------------------------
-// Buffered events - the payloads stored in the EventStore and replayed
-// ---------------------------------------------------------------------------
 
 /** A streamed session/update (agent chunk, tool call, etc). */
 export interface SessionUpdateEvent {
@@ -31,28 +26,23 @@ export interface MetadataEvent {
   params: KiroMetadataParams;
 }
 
-/** Progress of a /compact operation, so the client can show a compacting state. */
 export interface CompactionEvent {
   kind: 'compaction';
   params: KiroCompactionStatusParams;
 }
 
 /**
- * The chat's subagents changed - a new one started, one's activity or status moved on,
- * or one finished. Carries the full list rather than a delta: there are at most a handful
- * per chat, and a delta would need its own merge logic on the client for no real saving.
+ * The chat's subagents changed. Carries the full list rather than a delta: there are at
+ * most a handful per chat, so a delta would need its own merge logic for no real saving.
  */
 export interface SubagentsChangedEvent {
   kind: 'subagents_changed';
   subagents: SubagentSummary[];
 }
 
-// Synthetic lifecycle events injected by the server.
 export interface TurnStartedEvent {
   kind: 'turn_started';
-  /** echo of the user's prompt so the transcript shows it immediately */
   prompt: PromptContentBlock[];
-  /** What was attached, so the bubble can show it without reading the prompt text. */
   attachments?: MessageAttachment[];
 }
 
@@ -82,7 +72,6 @@ export type CasperEventPayload =
   | TurnErrorEvent
   | ProcessExitedEvent;
 
-/** A seq-numbered event as stored in the EventStore and sent to clients. */
 export interface CasperEvent {
   seq: number;
   ts: number;
@@ -90,13 +79,8 @@ export interface CasperEvent {
   payload: CasperEventPayload;
 }
 
-// ---------------------------------------------------------------------------
-// Client -> Server messages
-// ---------------------------------------------------------------------------
-
 export interface ClientPrompt {
   type: 'prompt';
-  /** See PromptRequest.attachments. */
   attachments?: MessageAttachment[];
   content: PromptContentBlock[];
 }
@@ -124,10 +108,8 @@ export interface ClientPing {
   type: 'ping';
 }
 
-/**
- * The directories the file panel is currently showing, relative to the session's
- * working directory. Replaces the previous set, so closing a folder stops its watch.
- */
+/** The directories the file panel is showing, relative to the session's cwd.
+ *  Replaces the previous set, so closing a folder stops its watch. */
 export interface ClientWatchPaths {
   type: 'watch_paths';
   paths: string[];
@@ -142,17 +124,11 @@ export type ClientMessage =
   | ClientPing
   | ClientWatchPaths;
 
-// ---------------------------------------------------------------------------
-// Server -> Client messages
-// ---------------------------------------------------------------------------
-
-/** A buffered/live event delivered to the client. */
 export interface ServerEvent {
   type: 'event';
   event: CasperEvent;
 }
 
-/** Sent after the initial replay is done; client is now caught up. */
 export interface ServerReplayComplete {
   type: 'replay_complete';
   head: number;
@@ -164,7 +140,6 @@ export interface ServerResync {
   reason: string;
 }
 
-/** Acknowledge a control action (set_mode/set_model/exec). */
 export interface ServerAck {
   type: 'ack';
   action: string;
@@ -181,11 +156,8 @@ export interface ServerError {
   message: string;
 }
 
-/**
- * A watched directory changed on disk. Connection-scoped rather than a session event:
- * it depends on what this client is looking at, so it is not part of the replayable
- * history.
- */
+/** A watched directory changed on disk. Connection-scoped, not a session event:
+ *  it depends on what this client is looking at, not on replayable history. */
 export interface ServerFsChanged {
   type: 'fs_changed';
   path: string;

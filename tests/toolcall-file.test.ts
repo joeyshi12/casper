@@ -1,15 +1,13 @@
-// Run with: npm test
-//
 // The filename above a read or write body, and whether it can open a preview. The rule is
 // the server's: the session preview endpoint confines to the workspace, so a file outside
 // it has no preview to offer and the name stays plain text.
 
 import { describe, it, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { JSDOM } from 'jsdom';
 import { workspaceRelative } from '../web/src/util/workspacePath.js';
 import type { ToolCallView } from '../web/src/state/store.js';
 import type { ChatSummary } from '@casper/shared';
+import { installDomGlobals } from './helpers.js';
 
 describe('workspaceRelative', () => {
   const cwd = '/home/joey/workspace/casper';
@@ -100,27 +98,10 @@ describe('the file heading on a tool call (rendered in a DOM)', () => {
   const name = () => host.querySelector('.toolcall-file-name');
 
   before(async () => {
-    const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', {
-      pretendToBeVisual: true,
-      url: 'https://casper.test/',
-    });
-    const w = dom.window as Any;
-    w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-    const g = globalThis as Any;
-    for (const k of [
-      'window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event',
-      'MouseEvent', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame',
-      'matchMedia', 'DocumentFragment',
-    ]) g[k] = w[k];
-    g.IS_REACT_ACT_ENVIRONMENT = true;
-
-    const react = await import('react');
-    g.React = react.default ?? react;
-    ({ createElement, act } = react);
+    ({ host, react: { createElement, act } } = await installDomGlobals());
     ({ createRoot } = await import('react-dom/client'));
     ({ ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js'));
     ({ useStore } = await import('../web/src/state/store.js'));
-    host = w.document.getElementById('host');
   });
 
   beforeEach(() => {
@@ -132,7 +113,6 @@ describe('the file heading on a tool call (rendered in a DOM)', () => {
     });
   });
 
-  // The purpose used to win outright, so the filename was never shown.
   it('shows the path even when the agent supplied a purpose', () => {
     render(writeCall(`${cwd}/src/app.ts`));
     assert.equal(name()?.textContent, 'src/app.ts', 'relative to the workspace');
@@ -205,26 +185,10 @@ describe('image read tool calls (rendered in a DOM)', () => {
     });
 
   before(async () => {
-    const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', {
-      pretendToBeVisual: true,
-      url: 'https://casper.test/',
-    });
-    const w = dom.window as Any;
-    w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+    ({ host, react: { createElement, act } } = await installDomGlobals());
     const g = globalThis as Any;
-    for (const k of [
-      'window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event',
-      'MouseEvent', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame',
-      'matchMedia', 'DocumentFragment',
-    ]) g[k] = w[k];
-    g.IS_REACT_ACT_ENVIRONMENT = true;
-
-    const react = await import('react');
-    g.React = react.default ?? react;
-    ({ createElement, act } = react);
     ({ createRoot } = await import('react-dom/client'));
     ({ ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js'));
-    host = w.document.getElementById('host');
     g.fetch = async () => ({ ok: headStatus < 400, headers: { get: () => headType } });
   });
 
@@ -278,17 +242,9 @@ type Any = any;
 
 describe('a todo list call whose list kiro has emptied (rendered in a DOM)', () => {
   it('says all tasks are done instead of showing raw JSON', async () => {
-    const { JSDOM } = await import('jsdom');
-    const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', { url: 'https://casper.test/' });
-    const g = globalThis as Any;
-    const w = dom.window as Any;
-    for (const k of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent']) g[k] = w[k];
-    g.IS_REACT_ACT_ENVIRONMENT = true;
-    const react = await import('react');
-    g.React = react.default ?? react;
+    const { host, react } = await installDomGlobals();
     const { createRoot } = await import('react-dom/client');
     const { ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js');
-    const host = w.document.getElementById('host');
     const tool = {
       id: 'todo-1',
       name: 'todo_list',
@@ -311,17 +267,9 @@ describe('shell and web search bodies (rendered in a DOM)', () => {
   let host: Any;
   let root: Any;
   const open = async (tool: object) => {
-    const { JSDOM } = await import('jsdom');
-    const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', { url: 'https://casper.test/' });
-    const g = globalThis as Any;
-    const w = dom.window as Any;
-    for (const k of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent']) g[k] = w[k];
-    g.IS_REACT_ACT_ENVIRONMENT = true;
-    react = await import('react');
-    g.React = react.default ?? react;
+    ({ host, react } = await installDomGlobals());
     const { createRoot } = await import('react-dom/client');
     const { ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js');
-    host = w.document.getElementById('host');
     root = createRoot(host);
     react.act(() => root.render(react.createElement(ToolCallCard, { tool })));
   };

@@ -1,7 +1,6 @@
 // The widget frame, exercised in a real DOM.
-// Run with: npm test
 
-import { describe, it, before, beforeEach, after } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM, requestInterceptor } from 'jsdom';
 import { buildWidgetShell, WIDGET_CDNS } from '../web/src/components/chat/widgetShell.js';
@@ -86,8 +85,7 @@ describe('widget runtime', () => {
   it('measures height from the content, not the frame it was given', () => {
     const { win, send, root } = mountWidget();
     // jsdom has no layout. The frame is 120px until the host is told otherwise, so a
-    // document-based measurement reports that and the content overflows - which is
-    // exactly the scrollbar this replaced.
+    // document-based measurement reports that and the content overflows.
     Object.defineProperty(win.document.documentElement, 'scrollHeight', {
       value: 120,
       configurable: true,
@@ -188,7 +186,7 @@ describe('widget script sequencing', () => {
   // "Chart is not defined": the library was still in flight when its own code ran.
   const runtime = () => {
     const shell = buildWidgetShell();
-    // One script block now: the runtime. morphdom used to be the first.
+    // One script block: the runtime.
     return /<script>([\s\S]*?)<\/script>/.exec(shell)?.[1] ?? '';
   };
 

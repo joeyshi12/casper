@@ -2,12 +2,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
- * The two paths that have to be known before settings are read.
- *
- * Separate from config.ts, and free of any dependency, because config.ts evaluates
- * its settings once at import. First-run bootstrap has to write a generated token
- * *before* that snapshot is taken - otherwise the server starts with no token and
- * silently disables authentication until it's restarted.
+ * The two paths that have to be known before settings are read. Separate from
+ * config.ts, and free of any dependency, because config.ts snapshots its settings
+ * once at import - first-run bootstrap must write a generated token before that
+ * snapshot is taken, or the server starts with no token and auth silently disabled.
  */
 function fromEnv(name: string): string | undefined {
   const v = process.env[name];

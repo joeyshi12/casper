@@ -4,23 +4,15 @@ import type { Dirent, Stats } from 'node:fs';
 import { config } from '../config.js';
 import { confineToRoot, realConfineToRoot } from './paths.js';
 
-/**
- * The file-access sequence every file route needs, in one place: resolve the
- * path, confine it lexically, confine it again after following symlinks, stat
- * it, and check it is the kind of thing the caller asked for. A route gets back
- * either a resolved file or the status to answer with, so the ordering - and
- * the 400/403/404 policy that goes with it - is written and tested once instead
- * of once per handler.
- */
+// The file-access sequence every route needs: confine lexically, confine again past
+// symlinks, stat, then check the kind. Written once for a consistent 400/403/404 policy.
 
-/** A path that resolved inside its roots, with the stat the route needs anyway. */
+/** A path resolved inside its roots, with the stat the route needs anyway. */
 export interface ConfinedFile {
-  /** Canonical, symlink-resolved absolute path. Safe to read or stream. */
   real: string;
   stat: Stats;
 }
 
-/** Why a path can't be served, and the status the route should answer with. */
 export interface ConfineFailure {
   status: 400 | 403 | 404;
   error: string;
@@ -31,21 +23,13 @@ export type ConfineResult =
   | ({ ok: false } & ConfineFailure);
 
 interface ConfineSpec {
-  /**
-   * Roots the input resolves against and must stay inside lexically. For a
-   * session route this is the workspace cwd, so `../` cannot leave the project.
-   */
+  /** Roots the input must stay inside lexically (blocks `../`). */
   lexical: string[];
-  /**
-   * Roots the symlink-resolved path must stay inside - the security boundary.
-   * Deliberately separate from `lexical`: a workspace may legitimately hold a
-   * symlink pointing elsewhere under fileRoot, and that stays visible.
-   */
+  /** Roots the symlink-resolved path must stay inside: the real security boundary,
+   *  kept separate since a workspace may hold a symlink elsewhere under fileRoot. */
   real: string[];
   require: 'file' | 'directory';
-  /** Answered when the input escapes `lexical`. */
   escaped: ConfineFailure;
-  /** Answered when the path escapes `real`, is missing, or is a directory. */
   notFound: () => ConfineFailure | Promise<ConfineFailure>;
 }
 
@@ -71,9 +55,7 @@ async function resolveConfined(input: string, spec: ConfineSpec): Promise<Confin
     return { ok: false, ...(await spec.notFound()) };
   }
 
-  // A directory asked for as a file is the caller's mistake, so it is reported.
-  // A file asked for as a directory is indistinguishable from a bad path to the
-  // client, and readdir would have failed the same way, so it 404s.
+  // A directory asked for as a file is a 400; the reverse 404s, matching readdir.
   if (spec.require === 'file' && !stat.isFile()) {
     return { ok: false, status: 400, error: 'Path is not a file' };
   }
@@ -84,10 +66,6 @@ async function resolveConfined(input: string, spec: ConfineSpec): Promise<Confin
   return { ok: true, real, stat };
 }
 
-/**
- * Answer a route with a failure. The translation from result to reply is the only
- * part of this the routes should own, so it is written once.
- */
 export function replyWith(
   reply: { code: (status: number) => unknown },
   failure: ConfineFailure,
@@ -96,7 +74,6 @@ export function replyWith(
   return { error: failure.error };
 }
 
-/** The one method this module needs from SessionManager. */
 export interface ChatCwdSource {
   getChatCwd(chatId: string): Promise<string>;
 }
@@ -105,11 +82,8 @@ export type ChatPathResult =
   | ({ ok: true; cwd: string; relative: string } & ConfinedFile)
   | ({ ok: false } & ConfineFailure);
 
-/**
- * A file or directory inside a session's workspace. `require: 'file'` also makes
- * the path mandatory, matching download and preview; the tree asks for a
- * directory and lists the cwd itself when the path is empty.
- */
+/** A file or directory inside a session's workspace. `require: 'file'` makes the
+ *  path mandatory; the tree lists the cwd itself when the path is empty. */
 export async function resolveChatPath(
   sessions: ChatCwdSource,
   sessionId: string,
@@ -142,12 +116,8 @@ export async function resolveChatPath(
   return resolved.ok ? { ...resolved, cwd, relative } : resolved;
 }
 
-/**
- * A session's workspace can be moved or deleted after the session was created,
- * so a missing workspace gets its own message and the tree can explain why it
- * is empty instead of showing a bare "not found". Exported because the tree
- * needs the same answer when readdir fails after the path already resolved.
- */
+/** A workspace can be moved or deleted after creation; exported so the tree can
+ *  give the same answer when readdir fails after the path already resolved. */
 export async function workspaceNotFound(cwd: string): Promise<ConfineFailure> {
   let missing: boolean;
   try {
@@ -160,12 +130,8 @@ export async function workspaceNotFound(cwd: string): Promise<ConfineFailure> {
     : { status: 404, error: 'Directory not found' };
 }
 
-/**
- * Roots for paths that arrive absolute rather than relative to a session:
- * fileRoot, plus the data directory because uploads live there and a narrowed
- * CASPER_FILE_ROOT would otherwise hide the user's own attachments. Both roots
- * apply to the symlink check as well, which is what makes that promise hold.
- */
+/** Roots for paths that arrive absolute: fileRoot, plus the data directory so a
+ *  narrowed CASPER_FILE_ROOT doesn't hide the user's own uploads. */
 export function absoluteRoots(): string[] {
   return [config.fileRoot, config.casperDataDir];
 }
@@ -187,17 +153,12 @@ export async function resolveAbsolutePath(
 /** What a directory entry actually is, once symlinks are followed. */
 export interface DirentTarget {
   kind: 'directory' | 'file';
-  /** The path to stat or serve: a symlink's target rather than the link. */
   real: string;
 }
 
-/**
- * Classify one directory entry. `Dirent.isDirectory()` and `isFile()` describe
- * the entry itself, so a symlink reports false for both even when it points at
- * a real directory - resolve it to find out what it is. Returns null for
- * anything a listing should skip: a symlink escaping the roots, a broken link,
- * or a socket or device.
- */
+/** Dirent.isDirectory()/isFile() report false for a symlink even when it points at
+ *  a real directory, so resolve it. Null for a symlink escaping the roots, a broken
+ *  link, or a socket/device. */
 export async function classifyDirent(
   parentReal: string,
   entry: Dirent,
