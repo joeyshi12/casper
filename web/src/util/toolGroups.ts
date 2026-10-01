@@ -2,6 +2,7 @@ import type { TranscriptItem } from '@casper/shared';
 import type { ToolCallView } from '../state/store.js';
 import { widgetCallOf } from './widgetCall.js';
 import { choiceCallOf } from './choiceCall.js';
+import { isSubagentCall } from './subagentCall.js';
 
 /** A tool call inside a run or on its own line. */
 export interface ToolEntry {
@@ -18,7 +19,7 @@ export interface ThoughtEntry {
 }
 
 /** Anything else in the transcript - an assistant or user message, a widget, a choice,
- *  a compaction marker, a turn error - rendered as before and never
+ *  the subagent call, a compaction marker, a turn error - rendered as before and never
  *  grouped. */
 export interface OtherEntry {
   type: 'other';
@@ -30,10 +31,10 @@ export type RunMember = ToolEntry | ThoughtEntry;
 
 export type GroupedEntry = ToolEntry | ThoughtEntry | OtherEntry | { type: 'run'; members: RunMember[] };
 
-/** A widget or a choice is the point of its own turn, not a tool
+/** A widget, a choice, or the subagent list is the point of its own turn, not a tool
  *  to collapse into a run - each must render inline exactly where it arrived. */
 function isPlainToolCall(tool: ToolCallView): boolean {
-  return !widgetCallOf(tool) && !choiceCallOf(tool);
+  return !widgetCallOf(tool) && !choiceCallOf(tool) && !isSubagentCall(tool);
 }
 
 function toRunMember(item: TranscriptItem): RunMember | null {
@@ -50,7 +51,7 @@ function toRunMember(item: TranscriptItem): RunMember | null {
  * Transcript items with consecutive runs of thinking messages and plain tool calls folded
  * into one group. A run needs at least two members: a single thought or tool call stays its
  * own entry so it is not wrapped in machinery it doesn't need. Anything else - an assistant
- * or user message, a widget, a choice, a compaction marker, a turn error
+ * or user message, a widget, a choice, the subagent call, a compaction marker, a turn error
  * - breaks a run and passes through untouched.
  */
 export function groupToolCalls(items: TranscriptItem[]): GroupedEntry[] {
