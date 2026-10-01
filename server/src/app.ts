@@ -11,6 +11,7 @@ import { registerModelRoutes } from './routes/models.js';
 import { registerAgentRoutes } from './routes/agents.js';
 import { registerFsRoutes } from './routes/fs.js';
 import { registerChatRoutes } from './routes/chats.js';
+import { registerSubagentRoutes } from './routes/subagents.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { registerUploadRoutes } from './routes/uploads.js';
 import { registerHealthRoute } from './routes/health.js';
@@ -53,6 +54,7 @@ export async function buildApp(): Promise<CasperApp> {
   registerAgentRoutes(app);
   registerFsRoutes(app);
   registerChatRoutes(app, manager);
+  registerSubagentRoutes(app, manager);
   registerWorkspaceRoutes(app, manager);
   registerUploadRoutes(app);
   registerWsGateway(app, manager);

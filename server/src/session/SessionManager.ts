@@ -9,6 +9,7 @@ import {
   type JsonRpcNotification,
   type KiroCompactionStatusParams,
   type KiroMetadataParams,
+  type KiroSubagentListUpdateParams,
   type PromptContentBlock,
   type ChatDetail,
   type SessionLoadParams,
@@ -18,6 +19,8 @@ import {
   type SessionPromptResult,
   type ChatSummary,
   type SessionUpdateParams,
+  type SubagentDetailResponse,
+  type SubagentSummary,
   type TranscriptItem,
   resolveSessionTitle,
   sanitizeTitle,
@@ -33,15 +36,20 @@ import { isWithinRoot, isValidChatId } from '../util/paths.js';
 import { KiroProcess } from './KiroProcess.js';
 import { EventStore } from './EventStore.js';
 import { TurnState } from './TurnState.js';
+import { SubagentTracker, type SubagentStageInput } from './SubagentTracker.js';
+import { showSummaryAsAnswer } from './subagentResult.js';
+import { matchSubagentsFallback, subagentCallsIn } from './subagentFallbackMatch.js';
 import {
   deletePersistedSession,
   hasRecordedTurns,
   hydrateTranscript,
+  listChildSessions,
   promptCount,
   readPersistedSession,
   type PersistedSession,
 } from './kiroFiles.js';
 import { ChatStore, type ChatRow } from './chatStore.js';
+import { SubagentLinkStore } from './subagentLinks.js';
 
 // Resolve a working directory for a new session as an absolute path (relative input against
 // DEFAULT_CWD), created if missing, rejected if it exists as a file. Confined to
@@ -109,6 +117,7 @@ export class Session {
   readonly sessionId: string;
   readonly store: EventStore;
   readonly turnState = new TurnState();
+  readonly subagents = new SubagentTracker();
   cwd: string;
   agentId?: string;
   modelId?: string;
@@ -180,6 +189,34 @@ function mapNotification(n: JsonRpcNotification): CasperEventPayload | null {
   }
 }
 
+/** The `sessionId` carried in a notification's params, if it has one. */
+function notificationSessionId(n: JsonRpcNotification): string | undefined {
+  const params = n.params as { sessionId?: string } | undefined;
+  return params?.sessionId;
+}
+
+/**
+ * The declared stages of a `subagent` tool call, read off its rawInput. Returns null for
+ * anything else - a plain tool call, or a `subagent` call kiro hasn't tagged with its
+ * `_meta.kiro.toolName` yet (the `tool_call_chunk` preview on `_kiro.dev/session/update`,
+ * which Casper already ignores as an unknown method).
+ */
+function subagentCallStages(update: { sessionUpdate: string; [k: string]: unknown }): {
+  toolCallId: string;
+  stages: SubagentStageInput[];
+} | null {
+  if (update.sessionUpdate !== 'tool_call') return null;
+  const meta = (update as { _meta?: { kiro?: { toolName?: string } } })._meta;
+  if (meta?.kiro?.toolName !== 'subagent') return null;
+  const toolCallId = (update as { toolCallId?: string }).toolCallId;
+  const rawInput = (update as { rawInput?: { stages?: unknown } }).rawInput;
+  if (typeof toolCallId !== 'string' || !Array.isArray(rawInput?.stages)) return null;
+  const stages = rawInput.stages.filter(
+    (s): s is SubagentStageInput => typeof s === 'object' && s !== null && typeof (s as SubagentStageInput).name === 'string',
+  );
+  return { toolCallId, stages };
+}
+
 // How many transcript items to send on initial load / per older-page fetch.
 // A large session's full transcript is multiple MB; loading just the tail keeps
 // opening it fast, and the client fetches older pages on scroll-to-top.
@@ -209,6 +246,7 @@ export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly log: Logger;
   private readonly store = new ChatStore();
+  private readonly subagentLinks = new SubagentLinkStore();
   private readonly spawnProcess: SpawnProcess;
 
   constructor(log: Logger, opts: SessionManagerOptions = {}) {
@@ -423,9 +461,49 @@ export class SessionManager {
       // already hydrated from disk, so appending these would duplicate every
       // past message and tool call into the live chat.
       if (s.replaying) return;
-      const payload = mapNotification(n);
-      if (!payload) return;
-      s.record(payload);
+
+      // _kiro.dev/subagent/list_update carries no sessionId of its own - it's a
+      // per-process broadcast. Casper spawns one kiro-cli child per chat, so every
+      // one of these belongs to this chat's own subagents, regardless of what else
+      // is live. Fold it into the tracker and push the result to clients.
+      if (n.method === KIRO_NOTIFICATIONS.subagentListUpdate) {
+        const params = n.params as KiroSubagentListUpdateParams;
+        const resolved = s.subagents.apply(params.subagents);
+        for (const link of resolved) {
+          this.subagentLinks.record(link.sessionId, s.sessionId, link.toolCallId, link.stageName);
+        }
+        s.record({ kind: 'subagents_changed', subagents: s.subagents.list() });
+        return;
+      }
+
+      const notifSessionId = notificationSessionId(n);
+      // Belongs to this chat's own session (or carries none): record as today.
+      if (!notifSessionId || notifSessionId === s.sessionId) {
+        const payload = mapNotification(n);
+        if (!payload) return;
+        // The subagent tool call's start/finish brackets which stage names its
+        // children can match against - see SubagentTracker.
+        if (payload.kind === 'session_update') {
+          const call = subagentCallStages(payload.update as { sessionUpdate: string; [k: string]: unknown });
+          if (call) s.subagents.callStarted(call.toolCallId, call.stages);
+          const update = payload.update as { sessionUpdate: string; toolCallId?: string; status?: string };
+          if (
+            update.sessionUpdate === 'tool_call_update' &&
+            typeof update.toolCallId === 'string' &&
+            (update.status === 'completed' || update.status === 'failed')
+          ) {
+            s.subagents.callFinished(update.toolCallId);
+          }
+        }
+        s.record(payload);
+        return;
+      }
+
+      // Belongs to a subagent (child session). Its tool calls and messages are not
+      // recorded in the parent's event log - that's the bug this routing fixes. The
+      // live transcript for an open subagent view comes from its own file on demand;
+      // only its status/activity needs to be pushed live, and list_update already
+      // covers that.
     });
     proc.on('exit', (code: number | null, signal: string | null) => {
       // Only the session's current process should mutate its state. A process
@@ -777,6 +855,79 @@ export class SessionManager {
     const start = Math.max(0, Math.min(offset, transcript.length));
     const end = Math.max(start, Math.min(start + limit, transcript.length));
     return transcript.slice(start, end);
+  }
+
+  /**
+   * A chat's subagents: live ones from the tracker (status, activity, pending stages),
+   * joined with every child session found on disk (so one from a past, now-dormant run
+   * still lists, just without live activity). Keyed by session id so the two cannot
+   * disagree about which rows exist.
+   *
+   * An on-disk child the live tracker never saw (server restart, or the chat's process
+   * was evicted) has no toolCallId or real stage name of its own. Casper's own db fills
+   * both in from a link recorded the last time that child was seen live; a child with no
+   * such row (one that finished before this linking existed) falls back to matching its
+   * title against the parent's `subagent` tool calls - see subagentFallbackMatch.ts.
+   */
+  async getSubagents(chatId: string): Promise<SubagentSummary[]> {
+    const sessionId = this.sessionIdOf(chatId);
+    const s = this.sessions.get(sessionId);
+    const live = s ? s.subagents.list() : [];
+    const liveToolCalls = new Set(live.map((a) => a.toolCallId).filter((id): id is string => !!id));
+    // Pending rows (not yet started) come only from the tracker - a stage that never
+    // started has no file on disk to find.
+    const pending = s
+      ? [...liveToolCalls].flatMap((id) => s.subagents.listForCall(id).filter((a) => a.status === 'pending'))
+      : [];
+
+    const onDisk = await listChildSessions(sessionId);
+    const links = this.subagentLinks.forParent(sessionId);
+    // Only children neither live nor already linked need the fallback matcher - most
+    // calls here have nothing to fall back for, and the matcher needs the parent's full
+    // transcript, which is wasted work when every child is already accounted for.
+    const liveIds = new Set(live.map((a) => a.sessionId));
+    const unresolved = onDisk.filter((c) => !liveIds.has(c.sessionId) && !links.has(c.sessionId));
+    const fallback = unresolved.length
+      ? matchSubagentsFallback(subagentCallsIn(await hydrateTranscript(sessionId)), unresolved)
+      : [];
+    const fallbackByChild = new Map(fallback.map((m) => [m.sessionId, m]));
+
+    const byId = new Map<string, SubagentSummary>();
+    for (const child of onDisk) {
+      const link = links.get(child.sessionId) ?? fallbackByChild.get(child.sessionId);
+      byId.set(child.sessionId, {
+        sessionId: child.sessionId,
+        // A linked or fallback-matched child gets its real stage name; otherwise the
+        // title is the closest thing to one (kiro records no stage name of its own).
+        stageName: link?.stageName ?? (child.title || child.sessionId),
+        toolCallId: link?.toolCallId,
+        status: 'completed',
+        createdAt: child.createdAt,
+        updatedAt: child.updatedAt,
+      });
+    }
+    // Live entries win where both exist: they carry the real stage name and activity.
+    for (const a of live) byId.set(a.sessionId, a);
+    // Started subagents (on disk or live) ordered by when they started; pending ones
+    // (no createdAt yet) always last, in the order their stage was declared.
+    const startedThenPending = [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return [...startedThenPending, ...pending];
+  }
+
+  /** One subagent's own transcript, hydrated the same way a chat's is. */
+  async getSubagentDetail(chatId: string, childSessionId: string): Promise<SubagentDetailResponse> {
+    const parentSessionId = this.sessionIdOf(chatId);
+    const subagents = await this.getSubagents(chatId);
+    const summary = subagents.find((a) => a.sessionId === childSessionId);
+    if (!summary) throw new Error(`Unknown subagent: ${childSessionId}`);
+    // Confined to this chat's own children: a child's parent_session_id must match,
+    // so one chat can't be used to read another's subagent transcript by guessing ids.
+    const onDisk = await listChildSessions(parentSessionId);
+    if (!onDisk.some((c) => c.sessionId === childSessionId)) {
+      throw new Error(`Unknown subagent: ${childSessionId}`);
+    }
+    const transcript = showSummaryAsAnswer(await hydrateTranscript(childSessionId));
+    return { subagent: summary, transcript };
   }
 
   /** One projection, so a dormant session and a live one cannot disagree. */

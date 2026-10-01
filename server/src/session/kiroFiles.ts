@@ -33,6 +33,8 @@ interface KiroSessionJson {
   created_at: string;
   updated_at: string;
   title?: string;
+  parent_session_id?: string;
+  session_created_reason?: string;
   session_state?: {
     agent_name?: string;
     rts_model_state?: {
@@ -186,6 +188,47 @@ export async function readPersistedSession(
   } catch {
     return null;
   }
+}
+
+/** One child session, as recorded in its own file, with the title of its own task. */
+export interface ChildSession extends PersistedSession {
+  parentSessionId: string;
+}
+
+/**
+ * Every session on disk whose `parent_session_id` is this one: a chat's subagents, read
+ * independently of whether the chat's process is live. kiro tags these
+ * `session_created_reason: "subagent"`, but the parent link alone is enough to find them.
+ *
+ * Scans the whole sessions directory - there is no index from parent to children - which is
+ * fine for how often this is asked (opening or refreshing the subagent list) and how big the
+ * directory realistically gets (one file pair per session ever started).
+ */
+export async function listChildSessions(parentSessionId: string): Promise<ChildSession[]> {
+  if (!isValidSessionId(parentSessionId)) return [];
+  let names: string[];
+  try {
+    names = await fs.readdir(config.kiroSessionsDir);
+  } catch {
+    return [];
+  }
+  const out: ChildSession[] = [];
+  await Promise.all(
+    names
+      .filter((n) => n.endsWith('.json'))
+      .map(async (n) => {
+        try {
+          const raw = await fs.readFile(path.join(config.kiroSessionsDir, n), 'utf8');
+          const j = JSON.parse(raw) as KiroSessionJson;
+          if (j.parent_session_id === parentSessionId) {
+            out.push({ ...summarize(j), parentSessionId });
+          }
+        } catch {
+          /* unreadable or malformed file; skip it */
+        }
+      }),
+  );
+  return out;
 }
 
 /**

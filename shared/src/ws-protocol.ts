@@ -14,7 +14,7 @@ import type {
   SessionUpdate,
   StopReason,
 } from './acp.js';
-import type { MessageAttachment } from './rest-dto.js';
+import type { MessageAttachment, SubagentSummary } from './rest-dto.js';
 
 // ---------------------------------------------------------------------------
 // Buffered events - the payloads stored in the EventStore and replayed
@@ -35,6 +35,16 @@ export interface MetadataEvent {
 export interface CompactionEvent {
   kind: 'compaction';
   params: KiroCompactionStatusParams;
+}
+
+/**
+ * The chat's subagents changed - a new one started, one's activity or status moved on,
+ * or one finished. Carries the full list rather than a delta: there are at most a handful
+ * per chat, and a delta would need its own merge logic on the client for no real saving.
+ */
+export interface SubagentsChangedEvent {
+  kind: 'subagents_changed';
+  subagents: SubagentSummary[];
 }
 
 // Synthetic lifecycle events injected by the server.
@@ -66,6 +76,7 @@ export type CasperEventPayload =
   | SessionUpdateEvent
   | MetadataEvent
   | CompactionEvent
+  | SubagentsChangedEvent
   | TurnStartedEvent
   | TurnEndedEvent
   | TurnErrorEvent
