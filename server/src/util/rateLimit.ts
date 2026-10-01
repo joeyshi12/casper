@@ -1,11 +1,8 @@
 /**
  * Counts failed attempts per key within a sliding window, so the login endpoint
- * can't be brute-forced at wire speed.
- *
- * In-memory on purpose: a shared secret guarding one user's machine doesn't justify
- * a dependency or a table, and a restart clearing the counters is not a meaningful
- * weakness when the window is minutes long. Only failures count - succeeding
- * shouldn't push you toward a lockout.
+ * can't be brute-forced at wire speed. In-memory on purpose: a shared secret
+ * guarding one user's machine doesn't justify a dependency or a table. Only
+ * failures count - succeeding shouldn't push you toward a lockout.
  */
 type LimitDecision = { allowed: true } | { allowed: false; retryAfterSeconds: number };
 

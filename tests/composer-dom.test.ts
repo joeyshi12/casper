@@ -1,9 +1,5 @@
-// Run with: npm test
-//
-// The composer's attach button used to be disabled for a draft, because uploads were keyed by
-// kiro's session id and a draft has none. A chat id exists from the moment the draft opens, so
-// the button has to work there - and a unit test of the upload path would not have caught the
-// disabled attribute that actually blocked it.
+// The attach button must stay usable in a draft: a chat id exists from the moment the
+// draft opens, even though it has no kiro session id yet, and uploads are keyed by chat id.
 
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';

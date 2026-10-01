@@ -46,12 +46,10 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   return (text ? JSON.parse(text) : {}) as T;
 }
 
-/** Log in with the shared secret. On success the server sets the session cookie. */
 export function login(token: string): Promise<{ ok: boolean }> {
   return req<{ ok: boolean }>('POST', '/api/login', { token });
 }
 
-/** Log out this device: revokes its session server-side and clears the cookie. */
 export function logout(): Promise<{ ok: boolean }> {
   return req<{ ok: boolean }>('POST', '/api/logout');
 }
@@ -68,51 +66,37 @@ export const api = {
   createChat: (body: CreateChatRequest) =>
     req<ChatDetail>('POST', '/api/chats', body),
   getChat: (id: string) => req<ChatDetail>('GET', `/api/chats/${id}`),
-  /** Fetch an older page of transcript items: [offset, offset+limit). */
   transcriptPage: (id: string, offset: number, limit: number) =>
     req<TranscriptPageResponse>(
       'GET',
       `/api/chats/${id}/transcript?offset=${offset}&limit=${limit}`,
     ),
-  /** A chat's subagents (child sessions spawned by its `subagent` tool calls). */
   subagents: (id: string) => req<SubagentListResponse>('GET', `/api/chats/${id}/subagents`),
-  /** One subagent's own transcript, fetched only once its row is opened. */
   subagentDetail: (id: string, subagentId: string) =>
     req<SubagentDetailResponse>('GET', `/api/chats/${id}/subagents/${subagentId}`),
   deleteChat: (id: string) => req<{ ok: boolean }>('DELETE', `/api/chats/${id}`),
   renameChat: (id: string, title: string) =>
     req<{ ok: boolean }>('POST', `/api/chats/${id}/rename`, { title }),
-  /** Re-point a session at a different working directory. */
   setChatCwd: (id: string, cwd: string) =>
     req<{ ok: boolean; cwd: string }>('POST', `/api/chats/${id}/cwd`, { cwd }),
-  /**
-   * Restart the session's kiro process so its `.kiro` directory, agent definition
-   * and MCP servers are detected again. Answers with the refreshed detail.
-   */
   reloadChat: (id: string) =>
     req<ChatDetail>('POST', `/api/chats/${id}/reload`),
-  /** List files/directories in a session's workspace. */
   tree: (id: string, relativePath = '') =>
     req<TreeResponse>(
       'GET',
       `/api/chats/${id}/tree?path=${encodeURIComponent(relativePath)}`,
     ),
-  /** Trigger a file download from a session's workspace. */
   downloadUrl: (id: string, filePath: string) =>
     filePath.startsWith('/')
       ? `/api/fs/file?download=1&path=${encodeURIComponent(filePath)}`
       : `/api/chats/${id}/download?path=${encodeURIComponent(filePath)}`,
-  /**
-   * Preview URL for a file. An absolute path goes to the filesystem route: uploads live
-   * under the data directory, outside any session's cwd, so the workspace route cannot
-   * reach them.
-   */
+  /** An absolute path goes to the filesystem route: uploads live under the data
+   *  directory, outside any session's cwd, so the workspace route cannot reach them. */
   previewUrl: (id: string, filePath: string) =>
     filePath.startsWith('/')
       ? `/api/fs/file?path=${encodeURIComponent(filePath)}`
       : `/api/chats/${id}/preview?path=${encodeURIComponent(filePath)}`,
-  /** Upload files for a session (stored under the data directory). */
-  /** Keyed by chat, not session: a draft uploads before it has one. */
+  /** Keyed by chat, not session id: a draft uploads before it has a session. */
   uploadFiles: async (chatId: string, files: File[]): Promise<UploadResponse> => {
     const form = new FormData();
     for (const f of files) form.append('files', f, f.name);

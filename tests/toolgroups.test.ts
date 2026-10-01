@@ -1,5 +1,3 @@
-// Run with: npm test
-//
 // The pure grouping function Transcript uses to fold a turn's thinking and tool calls into
 // one run, and the text helpers that label a call and summarise a run.
 

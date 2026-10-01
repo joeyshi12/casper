@@ -4,21 +4,14 @@ import { DatabaseSync } from 'node:sqlite';
 import { config } from '../config.js';
 
 /**
- * Casper's own persistence: one SQLite file for the state kiro doesn't keep.
+ * Casper's own persistence: one SQLite file for the state kiro doesn't keep. `chats`
+ * is the chat itself; `logins` holds device sessions; `message_attachments` records
+ * what was attached to each prompt; `subagent_links` records which parent tool call
+ * and stage name a child session belongs to. node:sqlite is built in, which is why
+ * the Node floor is 24.
  *
- * `chats` is the chat itself, keyed by the id the client mints: the session kiro later binds to
- * it, plus the title and working directory Casper layers over kiro's files; `logins` holds the
- * device sessions the auth cookie is checked against; `message_attachments` records what was
- * attached to each prompt; `subagent_links` records which parent tool call and stage name a
- * child session belongs to, learned live from `_kiro.dev/subagent/list_update` and otherwise
- * lost once the parent chat's process is gone.
- * node:sqlite is built in, which is why the Node floor is 24 rather than a native driver.
- *
- * Attachments are keyed by ordinal - the position of the user message within the session -
- * because that is the only identity both halves of the app can compute. A live message is
- * identified by Casper's event seq and a rebuilt one by kiro's message_id, and neither is
- * available to the other; Casper doesn't persist its own transcript, so history is
- * reconstructed from kiro's file, where position is all there is.
+ * Attachments are keyed by ordinal (the user message's position), the only identity
+ * a live message (event seq) and a rebuilt one (kiro's message_id) can agree on.
  */
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS chats (
@@ -55,13 +48,12 @@ CREATE INDEX IF NOT EXISTS subagent_links_parent ON subagent_links (parent_sessi
 
 let handle: DatabaseSync | undefined;
 
-/** The open database, opening it on first use. */
 export function db(): DatabaseSync {
   if (!handle) handle = open();
   return handle;
 }
 
-/** Close the handle. For tests that need to repoint casperDataDir. */
+/** For tests that need to repoint casperDataDir. */
 export function closeDb(): void {
   handle?.close();
   handle = undefined;
@@ -71,26 +63,21 @@ function open(): DatabaseSync {
   fs.mkdirSync(config.casperDataDir, { recursive: true, mode: 0o700 });
   const file = path.join(config.casperDataDir, 'casper.db');
   const d = new DatabaseSync(file);
-  // WAL so a reader never blocks the writer, and it survives an unclean shutdown
-  // better than a rewritten JSON file did. Writers still take an exclusive lock, so
-  // two processes on one file contend - which is why each test file points
-  // casperDataDir at its own directory rather than sharing this one.
+  // WAL so a reader never blocks the writer. Writers still take an exclusive lock,
+  // so each test file points casperDataDir elsewhere.
   d.exec('PRAGMA journal_mode = WAL');
   d.exec(SCHEMA);
-  // The logins table holds the hashes the auth cookie is checked against, so the
-  // file has no business being world-readable. sqlite creates it with the process
-  // umask, and mkdir's mode doesn't apply to an existing directory, so both are set
-  // explicitly and on every open - that also repairs a database created earlier.
+  // Set explicitly on every open: the logins table holds auth hashes, and this
+  // also repairs a database created before the restriction existed.
   restrict(config.casperDataDir, 0o700);
   for (const f of [file, `${file}-wal`, `${file}-shm`]) restrict(f, 0o600);
   return d;
 }
 
-/** Narrow a path's mode, ignoring a missing file or a filesystem that refuses. */
 function restrict(target: string, mode: number): void {
   try {
     if ((fs.statSync(target).mode & 0o777) !== mode) fs.chmodSync(target, mode);
   } catch {
-    // absent (the -wal only appears once written to) or not ours to change
+    // absent or not ours to change
   }
 }

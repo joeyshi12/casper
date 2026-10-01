@@ -21,8 +21,6 @@ import {
 
 interface FileTreeProps {
   chatId: string;
-  /** Collapse the panel. Used by the mobile close button, where the header
-   *  toggle is covered by the panel overlay. */
   onClose?: () => void;
 }
 
@@ -122,8 +120,8 @@ function TreeEntry({
     return () => onExpanded(entry.path, false);
   }, [entry.path, entry.type, folder.expanded, onExpanded]);
 
-  // The server reported this directory changed, so re-list it. Only this row
-  // reloads, which is why the rest of the tree keeps its expansion.
+  // Re-lists only this directory when the server reports it changed, so the rest
+  // of the tree keeps its expansion.
   useEffect(() => {
     if (!changed || !folder.expanded) return;
     let live = true;
@@ -141,7 +139,7 @@ function TreeEntry({
 
   const toggle = useCallback(async () => {
     if (entry.type !== 'directory') return;
-    if (folder.loading) return; // a fetch is already in flight
+    if (folder.loading) return;
 
     if (folder.expanded) {
       setFolder((f) => ({ ...f, expanded: false }));
@@ -225,8 +223,7 @@ function TreeEntry({
       style={{ paddingLeft: `${indent + 8}px` }}
       onClick={handleClick}
     >
-      {/* Empty disclosure gutter so file icons line up with folder icons at the
-          same depth (the chevron sits in this gutter, to the left of the icon). */}
+      {/* Empty gutter so file icons line up with folder icons at the same depth. */}
       <span className="ftree-chevron ftree-chevron-spacer" aria-hidden="true" />
       <span className="ftree-icon"><FileTypeIcon name={entry.name} /></span>
       <span className="ftree-name">{entry.name}</span>
@@ -237,7 +234,6 @@ function TreeEntry({
   );
 }
 
-/** Workspace file tree panel with lazy folder expansion, preview, and download. */
 export function FileTree({ chatId, onClose }: FileTreeProps) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [cwd, setCwd] = useState('');
@@ -250,15 +246,14 @@ export function FileTree({ chatId, onClose }: FileTreeProps) {
   const expandedRef = useRef<Set<string>>(new Set());
   const setChats = useStore((s) => s.setChats);
   const openFilePreview = useStore((s) => s.openFilePreview);
-  // Repointing disposes the kiro child, so the server refuses it mid-turn and
-  // mid-compaction. Don't offer it either.
+  // Repointing disposes the kiro child; the server refuses mid-turn and mid-compaction.
   const busy = useStore(
     (s) => s.observability.turnStatus !== 'idle' || s.observability.compacting,
   );
   const summaryCwd = sessions.find((s) => s.chatId === chatId)?.cwd;
 
-  // Watch the root plus every expanded directory: exactly what the tree can show,
-  // so the server holds a handful of watches instead of the whole workspace.
+  // Watches the root plus every expanded directory, so the server holds a handful
+  // of watches instead of the whole workspace.
   const publish = useCallback(() => {
     setWatchedPaths(['', ...expandedRef.current]);
   }, [setWatchedPaths]);
@@ -274,16 +269,13 @@ export function FileTree({ chatId, onClose }: FileTreeProps) {
     [publish],
   );
 
-  // This component mounts when the panel opens, so the set is declared then and
-  // dropped when it closes.
   useEffect(() => {
     publish();
     return () => setWatchedPaths([]);
   }, [publish, setWatchedPaths]);
 
-  // A background re-list happens because the directory changed on disk, so it must
-  // not disturb what is on screen: no placeholder, and the rows stay mounted, which
-  // is what keeps folders open.
+  // Must not disturb what's on screen during a background re-list (directory
+  // changed on disk): no placeholder, rows stay mounted, folders stay open.
   const refresh = useCallback(
     async (background = false) => {
       if (!background) setLoading(true);
@@ -305,13 +297,11 @@ export function FileTree({ chatId, onClose }: FileTreeProps) {
     refresh();
   }, [refresh]);
 
-  // The top level, on the same signal a folder row uses.
+  // Same signal a folder row uses, for the top level.
   useEffect(() => {
     if (rootChanged) void refresh(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootChanged]);
-
-
 
   return (
     <div className="ftree-panel">
@@ -376,8 +366,8 @@ export function FileTree({ chatId, onClose }: FileTreeProps) {
       {changingFolder && (
         <ChangeFolderSheet
           chatId={chatId}
-          // The tree request fails when the folder is gone, so fall back to the
-          // cwd from the session list to prefill the input.
+          // The tree request can fail when the folder is gone; fall back to the
+          // session list's cwd to prefill the input.
           currentCwd={cwd || summaryCwd}
           onChanged={(next) => {
             setChats(

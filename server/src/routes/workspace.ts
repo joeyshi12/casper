@@ -22,13 +22,8 @@ export function registerWorkspaceRoutes(
   app: FastifyInstance,
   manager: ChatCwdSource,
 ): void {
-  /**
-   * GET /api/chats/:chatId/tree?path=<relative>&depth=1
-   *
-   * Lists files and directories in the session's workspace.
-   * The `path` parameter is relative to the session's cwd.
-   * Returns immediate children only (lazy loading; expand on demand).
-   */
+  /** Lists files and directories in the session's workspace, immediate children
+   *  only. `path` is relative to the session's cwd. */
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
     '/api/chats/:id/tree',
     async (req, reply) => {
@@ -69,11 +64,11 @@ export function registerWorkspaceRoutes(
             modifiedAt: stat.mtime.toISOString(),
           });
         } catch {
-          // Skip files we can't stat (e.g. broken symlinks).
+          // Can't stat it (e.g. broken symlink); skip.
         }
       }
 
-      // Sort: directories first, then alphabetical within each group.
+      // Directories first, then alphabetical within each group.
       entries.sort((a, b) => {
         if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
         return a.name.localeCompare(b.name);
@@ -84,12 +79,7 @@ export function registerWorkspaceRoutes(
     },
   );
 
-  /**
-   * GET /api/chats/:chatId/download?path=<relative>
-   *
-   * Downloads a file from the session's workspace.
-   * The `path` parameter is relative to the session's cwd.
-   */
+  /** Downloads a file from the session's workspace. `path` is relative to the cwd. */
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
     '/api/chats/:id/download',
     async (req, reply) => {
@@ -119,13 +109,8 @@ export function registerWorkspaceRoutes(
     },
   );
 
-  /**
-   * GET /api/chats/:chatId/preview?path=<relative>
-   *
-   * Returns the file content for inline preview. Text files are returned as
-   * UTF-8 text; images are returned with their MIME type for inline display.
-   * Large files (>1 MB for text, >20 MB for images) are rejected.
-   */
+  /** Returns the file content for inline preview, text as UTF-8, images with their
+   *  MIME type. Large files (>1 MB text, >20 MB images) are rejected. */
   app.get<{ Params: { id: string }; Querystring: { path?: string; raw?: string } }>(
     '/api/chats/:id/preview',
     async (req, reply) => {

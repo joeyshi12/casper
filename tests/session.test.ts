@@ -1,5 +1,4 @@
 // Session state: the folds, the event store, replay and the SQLite stores.
-// Run with: npm test
 
 import { describe, it, before, beforeEach, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,15 +6,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { EventEmitter } from 'node:events';
-import type {
-  CasperEvent,
-  CasperEventPayload,
-  DirListing,
-  ChatDetail,
-  ChatSummary,
-} from '@casper/shared';
-import { config, parseConfigDoc, pickInt, pickString } from '../server/src/config.js';
+import type { CasperEventPayload, ChatSummary } from '@casper/shared';
+import { config } from '../server/src/config.js';
 import { TurnState } from '../server/src/session/TurnState.js';
 import { SessionManager, Session } from '../server/src/session/SessionManager.js';
 import { EventStore } from '../server/src/session/EventStore.js';
@@ -34,18 +26,16 @@ import {
   isManagedWorkspace,
   removeChatDir,
 } from '../server/src/session/chats.js';
-import { titleFromPrompt, sanitizeTitle } from '@casper/shared';
+import { titleFromPrompt } from '@casper/shared';
 
-// Fixtures go in temp directories, never the developer's real ~/.kiro. Set
-// before any suite runs; node's test runner gives each file its own process, so
-// this cannot leak into another file's config.
+// Fixtures go in temp directories, never the developer's real ~/.kiro. Set before any
+// suite runs; each test file is its own process, so this cannot leak into another file.
 const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-kiro-sessions-'));
 const sessionsCwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-session-cwd-')));
 (config as { kiroSessionsDir: string }).kiroSessionsDir = sessionsDir;
 
-// Each test file gets its own data directory. The runner gives each file its own process,
-// so anything sharing one casper.db contends for its write lock - "database is locked" on a
-// loaded CI box. Set before the first db() call, which is what opens it.
+// Each test file gets its own data directory, since sharing one casper.db across files
+// contends for its write lock. Set before the first db() call, which is what opens it.
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-data-session-'));
 (config as { casperDataDir: string }).casperDataDir = dataDir;
 closeDb();
@@ -103,7 +93,6 @@ describe('TurnState: the observability fold', () => {
     assert.equal(t.get().compacting, false);
   });
 
-  // A crash mid-turn must not leave a REST refetch reporting a stuck 'running'.
   it('resets turnStatus when the process exits', () => {
     const t = new TurnState();
     t.apply(started);
@@ -111,8 +100,7 @@ describe('TurnState: the observability fold', () => {
     assert.equal(t.get().turnStatus, 'idle');
   });
 
-  // Only a completed/failed notification clears it, and a killed process sends neither.
-  // Left set, the flag disables the composer for the life of the server.
+  // Only a completed/failed notification clears compacting; a killed process sends neither.
   it('clears compacting when the process exits, which nothing else would', () => {
     const t = new TurnState();
     t.apply(compaction('started'));
@@ -122,10 +110,9 @@ describe('TurnState: the observability fold', () => {
 });
 
 describe('EventStore.getSince + replay gating', () => {
-  // kiro replays the whole conversation as notifications during session/load;
-  // those must be dropped while Session.replaying is set (the transcript is
-  // already hydrated from disk), and turn lifecycle events must reach turnState.
-  // Driven through createSession so the wiring under test is the real one.
+  // kiro replays the whole conversation as notifications during session/load; those must
+  // be dropped while Session.replaying is set, since the transcript is already hydrated
+  // from disk, while turn lifecycle events still have to reach turnState.
   let mgr: SessionManager;
   let store: EventStore;
   let session: Session;
@@ -148,7 +135,6 @@ describe('EventStore.getSince + replay gating', () => {
     assert.equal(session.sessionId, 'replay-regression-test');
   });
 
-  // Empty-buffer cursor semantics (run first, before any events are appended).
   it('empty buffer accepts a fresh cursor', () => {
     const r = store.getSince(0);
     assert.ok(!r.gap);
@@ -195,10 +181,9 @@ describe('EventStore.getSince + replay gating', () => {
 });
 
 describe('re-open mid-turn must not drop the prompt', () => {
-  // The head a reconnecting client is given: kiro only writes a turn to its
-  // jsonl once the turn completes, so an in-flight one is missing from the
-  // hydrated transcript and has to be replayed from the event store. Read
-  // through getDetail, which is how a client actually asks.
+  // The head given to a reconnecting client: kiro only writes a turn to its jsonl once it
+  // completes, so an in-flight one is missing from the hydrated transcript and has to be
+  // replayed from the event store. Read through getDetail, which is how a client asks.
   let mgr: SessionManager;
   let session: Session;
   let chatId: string;
@@ -305,8 +290,7 @@ describe('hydrateTranscript: inline tool-result images are not shipped', () => {
                 status: 'success',
                 content: [
                   { kind: 'text', data: { text: 'kept' } },
-                  // How kiro persists a screenshot: raw bytes as a JSON number array.
-                  { kind: 'image', data: { format: 'png', source: { kind: 'bytes', data: [1, 2, 3] } } },
+                { kind: 'image', data: { format: 'png', source: { kind: 'bytes', data: [1, 2, 3] } } },
                 ],
               },
             },
@@ -433,15 +417,14 @@ describe('hydrateTranscript: attachments land on the right message by position',
     assert.equal(text, 'second', 'the machine-facing line never reaches the bubble');
   });
 
-  // The writer and the reader must count the same thing. Counting *rendered* messages while
-  // hydration counted *Prompt entries* meant an attachment-only prompt was seen by one and
-  // not the other, and every later attachment was filed one message too early.
+  // The writer and the reader must count the same thing: counting rendered messages while
+  // hydration counts Prompt entries would file an attachment-only prompt, and everything
+  // after it, one message too early.
   it('counts a prompt that carried only an attachment', async () => {
     const box = path.join(config.kiroSessionsDir, 'ordinal-count-test.jsonl');
     fs.writeFileSync(
       box,
       [
-        // No text of its own: just the machine-facing line, which strips to nothing.
         JSON.stringify(prompt('Attached files: /up/a.zip\n')),
         JSON.stringify(prompt('second')),
       ].join('\n'),
@@ -465,7 +448,6 @@ describe('hydrateTranscript: attachments land on the right message by position',
     );
     try {
       const zip = { path: '/up/a.zip', name: 'a.zip', size: 1, kind: 'binary' as const };
-      // Written at the ordinal the first prompt would have taken.
       const items = await hydrateTranscript('ordinal-agree-test', new Map([[0, [zip]]]));
       const users = items.filter((it) => it.type === 'message' && it.message.role === 'user');
       assert.equal(users.length, 2);
@@ -686,26 +668,22 @@ describe('SQLite stores', () => {
 
 describe('default agent', () => {
   // Asking for an agent that does not exist is safe: kiro-cli acp falls back to
-  // kiro_default instead of failing, and reports the choice in session/new, which
-  // SessionManager adopts (s.agentId = res.modes.currentModeId). Verified against
-  // kiro 2.11: requesting a missing agent returned currentModeId kiro_default.
+  // kiro_default instead of failing (verified against kiro 2.11), and reports the choice
+  // in session/new, which SessionManager adopts as s.agentId.
   it('is the casper agent, which is the one carrying the widget tools', () => {
     assert.equal(config.defaultAgent, 'casper');
   });
 });
 
-// AGENTS.md: never write into ~/.casper from a test. Importing a route module used to break
-// that - auth.ts built a LoginStore at module scope, which prunes on construction, so the
-// database opened as an import side effect before any test could redirect it. Schema changes
-// then landed in the developer's real casper.db.
+// AGENTS.md: never write into ~/.casper from a test. Importing a route module must not open
+// the database as a side effect, since that would run before a test can redirect casperDataDir
+// and could touch the developer's real casper.db.
 describe('importing a module does not touch the data directory', () => {
   it('opens no database until something asks for one', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-import-'));
     (config as { casperDataDir: string }).casperDataDir = dir;
     closeDb();
 
-    // The module whose import used to do it, plus the manager whose constructor did later,
-    // when a one-off migration was called from there.
     await import('../server/src/routes/auth.js');
     await import('../server/src/session/SessionManager.js');
 
@@ -879,8 +857,8 @@ describe('naming a session after its first prompt', () => {
   });
 });
 
-// These reach SessionManager through its public surface only. Before the spawn
-// seam existed they were unreachable without spawning a real kiro-cli.
+// These reach SessionManager through its public surface only, via the spawn seam, with
+// no real kiro-cli process.
 describe('process lifecycle', () => {
   const managerWith = (spawn: () => FakeProcess) =>
     new SessionManager(noopLogger(), { spawn });
@@ -1273,9 +1251,8 @@ describe('reloading a session re-detects its setup', () => {
     }
   });
 
-  // A message sent while the process is being replaced used to be handed the process
-  // the reload was about to dispose, which killed the turn mid-flight. It must wait
-  // for the replacement instead.
+  // A message sent while the process is being replaced must wait for the replacement,
+  // not the process the reload is about to dispose, or it kills the turn mid-flight.
   describe('a message sent mid-reload', () => {
     /** A manager whose first process holds its shutdown open until released. */
     const gatedManager = (spawned: FakeProcess[]) => {
@@ -1314,7 +1291,7 @@ describe('reloading a session re-detects its setup', () => {
         persist('reloadable');
 
         const reload = mgr.reloadChat('reloadable');
-        // Hold it at shutdown: this is the window the prompt used to slip into.
+        // Hold it at shutdown: the window a prompt could otherwise slip into.
         await waitFor('the reload to reach shutdown', () =>
           spawned[0]!.calls.includes('disposeAndWait'),
         );
@@ -1384,9 +1361,9 @@ describe('reloading a session re-detects its setup', () => {
       }
     });
 
-    // The other direction. A prompt on a dormant session spends seconds in ensureProc
-    // before it has a process; a reload entering that gap used to see no turn, drain the
-    // spawn, and dispose the very child the prompt was about to be sent to.
+    // The other direction: a prompt on a dormant session spends time in ensureProc before
+    // it has a process. A reload entering that gap must not drain the spawn and dispose
+    // the very child the prompt was about to be sent to.
     it('is refused when a prompt is still spawning its process', async () => {
       const spawned: FakeProcess[] = [];
       let releaseInit!: () => void;
@@ -1421,8 +1398,8 @@ describe('reloading a session re-detects its setup', () => {
         const prompt = mgr.runPrompt('reloadable', [{ type: 'text', text: 'hi' }]);
         await waitFor('the respawn to begin', () => spawned.length === 2);
 
-        // The timer is a hang detector, not a wait: before the fix the reload drained
-        // s.spawning and never returned while initialize was held.
+        // The timer is a hang detector, not a wait: if reloadChat drained s.spawning it
+        // would never return while initialize is held.
         const outcome = await Promise.race([
           mgr.reloadChat('reloadable').then(
             () => 'reloaded',
@@ -1501,8 +1478,8 @@ describe('session summary: one projection over kiro’s file and live state', ()
     }
   });
 
-  // The bug this projection removes: the list applied fallbacks from kiro's file
-  // and the detail did not, so the same session read two ways disagreed.
+  // The list and the detail must apply the same fallbacks from kiro's file, or the same
+  // session read two ways disagrees.
   it('list and detail agree for a live session', async () => {
     writeSessionFile('agreeing-1');
     const mgr = new SessionManager(noopLogger(), {

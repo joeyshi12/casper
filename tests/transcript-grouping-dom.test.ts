@@ -1,13 +1,11 @@
-// Run with: npm test
-//
-// Proves the grouping and the live streaming thought are actually wired into the rendered
-// transcript, not just correct as pure functions. Follows the harness in
-// tests/transcript-dom.test.ts: a real DOM via jsdom, the real component, driven by state.
+// Proves the grouping and the live streaming thought are wired into the rendered transcript,
+// not just correct as pure functions. Follows the harness in tests/transcript-dom.test.ts: a
+// real DOM via jsdom, the real component, driven by state.
 
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { JSDOM } from 'jsdom';
 import type { TranscriptItem } from '@casper/shared';
+import { installDomGlobals } from './helpers.js';
 
 type Any = any;
 
@@ -31,34 +29,10 @@ const thought = (id: string, text = 'weighing the options'): TranscriptItem =>
   ({ type: 'message', message: { id, role: 'thinking', text } }) as unknown as TranscriptItem;
 
 before(async () => {
-  const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', {
-    pretendToBeVisual: true,
-    url: 'https://casper.test/',
-  });
-  const w = dom.window as Any;
-  w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-
-  const g = globalThis as Any;
-  for (const key of [
-    'window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event',
-    'MouseEvent', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame',
-    'matchMedia', 'DocumentFragment',
-  ]) {
-    g[key] = w[key];
-  }
-  g.IS_REACT_ACT_ENVIRONMENT = true;
-
-  const react = await import('react');
-  // tsx compiles JSX with the classic runtime here - run from the repo root it never reads
-  // web/tsconfig.json, so the components' JSX becomes React.createElement calls with no
-  // React import in scope. Supply it as a global.
-  g.React = react.default ?? react;
-  ({ createElement, act } = react);
+  ({ host, react: { createElement, act } } = await installDomGlobals());
   ({ createRoot } = await import('react-dom/client'));
   ({ Transcript } = await import('../web/src/components/chat/Transcript.js'));
   ({ useStore } = await import('../web/src/state/store.js'));
-
-  host = w.document.getElementById('host');
 });
 
 after(() => {

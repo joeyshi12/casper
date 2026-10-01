@@ -184,7 +184,7 @@ export function Spinner({ size = 28, className }: IconProps) {
   );
 }
 
-/** Plus icon - used on the new-session control. */
+/** Up arrow - send message. */
 export function ArrowUpIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -261,10 +261,6 @@ export function SearchIcon({ size = 20, className }: IconProps) {
     </svg>
   );
 }
-
-// ---------------------------------------------------------------------------
-// File tree icons
-// ---------------------------------------------------------------------------
 
 export function FolderIcon({ size = 16, className }: IconProps) {
   return (
@@ -521,7 +517,6 @@ export function FilesIcon({ size = 16, className }: IconProps) {
   );
 }
 
-/** Paperclip - attach files. */
 /** Compress inward - compact the conversation. */
 export function CompressIcon({ size = 18, className }: IconProps) {
   return (

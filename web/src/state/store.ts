@@ -22,80 +22,55 @@ import { classifyTurnFailure } from '../util/turnFailure.js';
 import { uuid } from '../util/uuid.js';
 import type { ConnStatus } from '../api/SessionSocket.js';
 
-/** A rendered tool call in the transcript (shared shape). */
 export type ToolCallView = TranscriptToolCall;
 
-/** A locally-sent user message awaiting server acknowledgement. */
 interface PendingMessage {
   id: string;
   text: string;
-  /** Shown on the optimistic bubble, so an attachment is visible before the server echo. */
   attachments?: MessageAttachment[];
   /** Exactly what was sent, so a retry re-sends it rather than rebuilding from the text. */
   content: PromptContentBlock[];
   status: 'sending' | 'failed';
-  /** Why the send failed, when the server or socket told us. */
   error?: string;
 }
 
-/** A condition that outlives a single turn (bad credentials, missing binary), so
- *  it stays pinned above the composer until it's resolved or dismissed. */
 export interface ChatNotice {
   title: string;
   fix?: string;
-  /** The raw server message, kept so the notice can offer the real text. */
   detail: string;
 }
 
 interface CasperState {
-  // Session list
   chats: ChatSummary[];
   models: ModelInfo[];
-  agents: AgentMode[]; // global agent list (from /api/agents) - always populated
-  defaultAgentId: string; // server-configured default (DEFAULT_AGENT) for new chats
+  agents: AgentMode[];
+  defaultAgentId: string;
 
-  // Active session
   activeId: string | null;
-  /** The chat that owns the uploads directory; minted for a draft, then adopted. */
   chatId: string | null;
-  /** Session whose detail is currently being fetched (opening/switching), so
-   *  the pane can show a loading state instead of the previous session's stale
-   *  content while a slow transcript hydrates. Null once loadDetail lands. */
+  /** Session whose detail is being fetched; null once loadDetail lands. */
   loadingChatId: string | null;
   modes: AgentMode[];
   currentModeId?: string;
   currentModelId?: string;
   items: TranscriptItem[];
-  /** Highest event seq already folded into items, so a replayed or duplicated
-   *  event can't append a second copy of the same message or tool call. */
+  /** Highest event seq already folded into items, so a replayed event can't
+   *  append a second copy of the same message or tool call. */
   appliedSeq: number;
-  /** Count of older transcript items not yet loaded (before the loaded window),
-   *  for lazy load-on-scroll-up. More items exist while this is > 0. */
   remainingOlder: number;
   observability: ObservabilitySnapshot;
-  /** The active chat's subagents (child sessions spawned by its `subagent` tool calls),
-   *  from GET .../subagents and kept live by the subagents_changed event. Not keyed per
-   *  tool call - a SubagentToolCall row filters this list down to its own toolCallId. */
   subagents: SubagentSummary[];
-  /** Bumped per directory when the server reports it changed, so open folders reload. */
   fsVersion: Record<string, number>;
-  /** Directories the file panel is showing, sent to the server as its watch set. */
   watchedPaths: string[];
-  streamingText: string; // in-flight assistant chunk not yet committed
-  streamingThought: string; // in-flight reasoning chunk not yet committed
-  pending: PendingMessage[]; // user messages sent locally, awaiting server echo
+  streamingText: string;
+  streamingThought: string;
+  pending: PendingMessage[];
   chatNotice: ChatNotice | null;
-  /** Socket state for the active session, so the pane can say what it is doing. */
   connStatus: ConnStatus;
-  /** Why creating a session failed, shown on the chat pane with a retry. */
   createError: string | null;
-  /** The session whose kiro process is being restarted, if any. */
   reloadingId: string | null;
-  /** File the user asked to look at, relative to the workspace. Set by the file tree
-   *  and by a read/write tool call in the transcript; null when nothing is open. */
   previewPath: string | null;
 
-  // actions
   bumpFsPath: (path: string) => void;
   setWatchedPaths: (paths: string[]) => void;
   setChats: (s: ChatSummary[]) => void;
@@ -105,24 +80,18 @@ interface CasperState {
   loadDetail: (d: ChatDetail, opts?: { keepPending?: boolean }) => void;
   prependItems: (older: TranscriptItem[]) => void;
   clearActive: () => void;
-  /** Start a new chat's identity, before it has a session. */
   newChatId: () => string;
   applyEvent: (e: CasperEvent) => void;
   addPending: (pending: Omit<PendingMessage, 'status'>) => void;
   markPendingFailed: (id: string, error?: string) => void;
   dismissChatNotice: () => void;
-  /** Pin a condition above the composer, for a failure with no turn to attach to. */
   setChatNotice: (notice: ChatNotice) => void;
   setConnStatus: (status: ConnStatus) => void;
   setCreateError: (message: string | null) => void;
   setReloadingId: (id: string | null) => void;
   openFilePreview: (path: string) => void;
   closeFilePreview: () => void;
-  /** Replace the active chat's subagent list, e.g. after GET .../subagents. */
   setSubagents: (subagents: SubagentSummary[]) => void;
-  // Optimistic transitions. Here rather than at the call site because applyEvent
-  // owns the same fields when the server's echo arrives, and a transition split
-  // across two modules is one nobody can read in one place.
   markCancelling: () => void;
   setCurrentModel: (modelId: string) => void;
   setCurrentAgent: (modeId: string) => void;
@@ -164,8 +133,6 @@ export const useStore = create<CasperState>((set, get) => ({
   closeFilePreview: () => set({ previewPath: null }),
   setSubagents: (subagents) => set({ subagents }),
 
-  // Optimistic feedback: the Stop button flips to "Stopping…" until the server
-  // confirms with turn_ended / turn_error, which reset to idle.
   markCancelling: () =>
     set((s) =>
       s.observability.turnStatus === 'running'
@@ -175,8 +142,6 @@ export const useStore = create<CasperState>((set, get) => ({
 
   setCurrentModel: (currentModelId) => set({ currentModelId }),
 
-  // Optimistic in both the picker (currentModeId) and the sidebar row (agentId),
-  // so neither waits for the next listChats.
   setCurrentAgent: (modeId) =>
     set((s) => ({
       currentModeId: modeId,
@@ -187,8 +152,6 @@ export const useStore = create<CasperState>((set, get) => ({
         : s.chats,
     })),
 
-  // No-op when already in that state, so the safety-net clear cannot undo a real
-  // completion or cost a render for nothing.
   setCompacting: (compacting) =>
     set((s) =>
       s.observability.compacting === compacting
@@ -224,30 +187,21 @@ export const useStore = create<CasperState>((set, get) => ({
       activeId: d.summary.chatId,
       chatId: d.summary.chatId,
       loadingChatId: null,
-      // The detail knows this session's title before the next list fetch does.
       chats: upsertChat(s.chats, d.summary),
       modes: d.modes,
       currentModeId: d.currentModeId,
       currentModelId: d.summary.modelId,
       observability: d.observability,
       items: d.transcript,
-      // The fetched transcript already contains every event up to head, so
-      // anything replayed at or below it is a duplicate.
       appliedSeq: d.head,
       remainingOlder: Math.max(0, d.transcriptTotal - d.transcript.length),
       streamingText: '',
       streamingThought: '',
-      // Switching chats drops optimistic bubbles, but adopting the session a draft
-      // just created must keep the message that created it.
       pending: opts?.keepPending ? s.pending : [],
       chatNotice: null,
-      // A new chat's own subagent list hasn't been fetched yet; the previous chat's
-      // would otherwise flash under the new chat's subagent tool call for a moment.
       subagents: [],
     })),
 
-  // Prepend an older page (loaded on scroll-up). remainingOlder shrinks by the
-  // number actually returned so it converges to 0 when the head is reached.
   prependItems: (older) =>
     set((s) => ({
       items: [...older, ...s.items],
@@ -282,8 +236,6 @@ export const useStore = create<CasperState>((set, get) => ({
   dismissChatNotice: () => set({ chatNotice: null }),
   setChatNotice: (chatNotice) => set({ chatNotice }),
 
-  // An object, not positional args: a caller that forgets one is a type error rather than
-  // a silently dropped field.
   addPending: (pending) =>
     set((s) => ({ pending: [...s.pending, { ...pending, status: 'sending' }] })),
   markPendingFailed: (id, error) =>
@@ -297,10 +249,8 @@ export const useStore = create<CasperState>((set, get) => ({
     const state = get();
     const p = e.payload;
 
-    // Events are strictly ordered per session, so anything at or below the
-    // high-water mark has already been folded in. Replays overlap by design
-    // and a dropped connection can re-deliver, so drop duplicates here rather
-    // than trusting every transport path to be exactly-once.
+    // Events are strictly ordered per session; a dropped connection can
+    // re-deliver, so drop anything at or below the high-water mark.
     if (e.seq <= state.appliedSeq) return;
     set({ appliedSeq: e.seq });
 
@@ -311,12 +261,8 @@ export const useStore = create<CasperState>((set, get) => ({
           .map((b) => b.text)
           .join('');
         const text = stripAttachmentsLine(rawText);
-        // Drop the oldest optimistic bubble still marked 'sending' - turns are
-        // serialized server-side, so this turn_started is that send's echo.
+        // Turns are serialized server-side, so this echoes the oldest pending send.
         const sendingIdx = state.pending.findIndex((pm) => pm.status === 'sending');
-        // Float this session to the top of the sidebar right away. The server
-        // orders by updatedAt, which only changes once kiro persists the turn,
-        // so bump it optimistically now; turn_ended reconciles from the server.
         const bumpedAt = new Date(e.ts).toISOString();
         const chats = bumpChatToTop(state.chats, e.chatId, bumpedAt);
         set({
@@ -399,8 +345,6 @@ export const useStore = create<CasperState>((set, get) => ({
       case 'turn_ended': {
         set({
           items: commitStreaming(state, `s-${e.seq}`, e.ts),
-          // A turn got through, so whatever was blocking the session isn't
-          // blocking it any more.
           chatNotice: null,
           streamingText: '',
           streamingThought: '',
@@ -416,8 +360,6 @@ export const useStore = create<CasperState>((set, get) => ({
             ...commitStreaming(state, `s-${e.seq}`, e.ts),
             { type: 'turn_error', id: `err-${e.seq}`, message: p.message, timestamp: e.ts },
           ],
-          // Conditions that outlive the turn get pinned above the composer too,
-          // since the next send will hit the same wall.
           chatNotice: failure.sessionWide
             ? { title: failure.title, fix: failure.fix, detail: p.message }
             : state.chatNotice,
@@ -447,9 +389,6 @@ export const useStore = create<CasperState>((set, get) => ({
         const summary = p.params.summary ?? '';
         set({
           observability: { ...state.observability, compacting: !done },
-          // On completion, drop a durable divider into the transcript so the
-          // user sees what kiro condensed the history into (and why context
-          // dropped). Reloads reconstruct the same item from the .jsonl.
           items:
             done && summary.trim()
               ? [
@@ -462,8 +401,8 @@ export const useStore = create<CasperState>((set, get) => ({
       }
 
       case 'process_exited':
-        // compacting too: only a completed/failed notification clears it, which a dead
-        // process never sends, and while set it disables the composer.
+        // Also clears compacting: a dead process never sends the completion that
+        // normally would, and while set it disables the composer.
         set({
           observability: { ...state.observability, turnStatus: 'idle', compacting: false },
         });
@@ -472,11 +411,8 @@ export const useStore = create<CasperState>((set, get) => ({
   },
 }));
 
-/**
- * Commit any in-flight streaming reasoning + assistant text as transcript
- * entries. `baseId` must be unique per commit (seq-derived) so React keys stay
- * stable and it never reuses a DOM node from a prior commit.
- */
+/* baseId must be unique per commit (seq-derived) so React keys stay stable and
+   never reuse a DOM node from a prior commit. */
 function commitStreaming(
   state: CasperState,
   baseId: string,
@@ -486,8 +422,8 @@ function commitStreaming(
   if (state.streamingThought.trim()) {
     next.push({
       type: 'message',
-      // Trimmed: the block renders pre-wrap, so a separator chunk that arrives after the
-      // previous commit would otherwise open this one with blank lines.
+      // Trimmed: this renders pre-wrap, so a late chunk would otherwise open
+      // the next commit with blank lines.
       message: {
         id: `t-${baseId}`,
         role: 'thinking',

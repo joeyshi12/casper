@@ -1,32 +1,27 @@
-/* Dracula theme (https://draculatheme.com). Dark blue-gray surfaces with a
-   bright #f8f8f2 foreground and vivid purple/cyan/pink/green accents - high
-   contrast by design. Token names are kept so the whole app re-skins from these. */
+/* Dracula theme (https://draculatheme.com). Token names are kept so the whole
+   app re-skins from these. */
 
 :root {
-  /* base surfaces (darkest -> lightest) */
-  --n-abyss: #21222c; /* app shell / deepest */
-  --n0: #282a36; /* main surface (Dracula background) */
-  --n1: #343746; /* cards, inputs */
-  --n2: #44475a; /* hover / borders (Dracula current line) */
-  --n3: #565872; /* faint lines, disabled */
+  --n-abyss: #21222c;
+  --n0: #282a36;
+  --n1: #343746;
+  --n2: #44475a;
+  --n3: #565872;
 
-  /* text */
-  --n4: #6272a4; /* muted text (Dracula comment) */
-  --n5: #f8f8f2; /* body text (Dracula foreground) */
-  --n6: #ffffff; /* strong text */
+  --n4: #6272a4;
+  --n5: #f8f8f2;
+  --n6: #ffffff;
 
-  /* primary UI accents */
-  --frost-teal: #8be9fd; /* cyan */
-  --frost: #bd93f9; /* primary accent (Dracula purple) */
-  --frost-blue: #8be9fd; /* cyan - links / hover */
-  --frost-deep: #6272a4; /* muted blue */
+  --frost-teal: #8be9fd;
+  --frost: #bd93f9;
+  --frost-blue: #8be9fd;
+  --frost-deep: #6272a4;
 
-  /* states */
-  --aurora-red: #ff5555; /* error / stop */
-  --aurora-orange: #ffb86c; /* running / warning */
-  --aurora-yellow: #f1fa8c; /* credits */
-  --aurora-green: #50fa7b; /* success / done */
-  --aurora-purple: #ff79c6; /* accents (Dracula pink) */
+  --aurora-red: #ff5555;
+  --aurora-orange: #ffb86c;
+  --aurora-yellow: #f1fa8c;
+  --aurora-green: #50fa7b;
+  --aurora-purple: #ff79c6;
 
   --font-display: 'Space Grotesk', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
@@ -40,22 +35,15 @@
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 
-  /* Fixed layout metrics - used to keep everything aligned. */
   --header-h: 56px;
   --gutter: 16px;
 
-  /* Slack after the last message, so it clears the notice banner floating above the
-     composer: the banner's tallest wrap plus the 10px it sits above it. */
+  /* 96px = tallest notice-banner wrap plus the 10px it floats above the composer. */
   --transcript-end-slack: 96px;
 
-  /* Reading width for the conversation. Long lines are hard to track across, so
-     the transcript and the composer share this cap and sit centred in whatever
-     space the chat column has. */
   --chat-max: 720px;
-  /* Horizontal inset that produces that cap: normal gutter until the column is
-     wider than --chat-max, then whatever it takes to centre the content. The
-     percentage resolves against the containing block, so this collapses to
-     --gutter on narrow screens and when the file panel is open. */
+  /* Resolves against the containing block, so this collapses to --gutter on
+     narrow screens and when the file panel is open. */
   --chat-inset: max(var(--gutter), (100% - var(--chat-max)) / 2);
 }
 
@@ -79,9 +67,8 @@ body {
   font-size: 15px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
-  /* Allow the browser's vertical pull-to-refresh (overscroll at the top of the
-     transcript chains up to the root). Keep horizontal contained so a sideways
-     swipe never triggers browser back/forward navigation. */
+  /* Horizontal pull-to-refresh chains to the root; vertical stays contained so
+     a sideways swipe never triggers browser back/forward navigation. */
   overscroll-behavior-x: contain;
   overscroll-behavior-y: auto;
 }
@@ -130,8 +117,8 @@ a {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
-  /* The loading spinner is functional, not decorative - freezing it removes
-     the only sign that a session is opening, which reduced motion shouldn't do. */
+  /* The spinner is functional, not decorative: freezing it removes the only
+     sign a session is opening. */
   .spinner {
     animation-duration: 0.8s !important;
     animation-iteration-count: infinite !important;

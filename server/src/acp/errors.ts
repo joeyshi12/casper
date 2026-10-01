@@ -4,11 +4,10 @@ import type { JsonRpcError } from '@casper/shared';
 const MAX_DETAIL = 2000;
 
 /**
- * Flatten a JSON-RPC error into something a person can act on.
- *
- * kiro answers a failed session/prompt with "Internal error" and puts the real cause in
- * `data`, e.g. "No session found with id", so lead with `data` and keep the generic
- * classification in parentheses behind it.
+ * Flattens a JSON-RPC error into something a person can act on. kiro answers a failed
+ * session/prompt with "Internal error" and puts the real cause in `data`, e.g. "No
+ * session found with id", so lead with `data` and keep the generic classification
+ * in parentheses behind it.
  */
 export function describeError(error: JsonRpcError['error']): string {
   const detail = detailText(error.data);
@@ -22,8 +21,7 @@ function detailText(data: unknown): string {
   if (typeof data === 'string') return truncate(data.trim());
   if (typeof data === 'number' || typeof data === 'boolean') return String(data);
 
-  // Objects carry the detail under varying keys depending on the agent, so try
-  // the common ones before falling back to the whole shape.
+  // Objects carry the detail under varying keys depending on the agent.
   if (typeof data === 'object') {
     const rec = data as Record<string, unknown>;
     for (const key of ['message', 'error', 'detail', 'details', 'reason', 'cause']) {

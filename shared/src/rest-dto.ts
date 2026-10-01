@@ -1,13 +1,7 @@
-/**
- * REST DTOs - request/response shapes for the HTTP API.
- */
+/** REST DTOs: request/response shapes for the HTTP API. */
 
 import type { AgentMode, PromptContentBlock } from './acp.js';
 import type { ObservabilitySnapshot } from './observability.js';
-
-// ---------------------------------------------------------------------------
-// Models
-// ---------------------------------------------------------------------------
 
 /** Mapped from `kiro-cli chat --list-models -f json`. */
 export interface ModelInfo {
@@ -27,31 +21,21 @@ export interface ModelsResponse {
 
 export interface AgentsResponse {
   agents: AgentMode[];
-  /** Server-configured default agent (DEFAULT_AGENT); the new-session UI
-   *  initializes its picker to this. */
   defaultAgentId: string;
 }
-
-// ---------------------------------------------------------------------------
-// Chats
-// ---------------------------------------------------------------------------
 
 export type SessionLiveness = 'live' | 'dormant';
 
 export interface ChatSummary {
   chatId: string;
-  /** kiro's session behind this chat, absent until it has started one. */
   sessionId?: string;
   title: string;
   cwd: string;
   createdAt: string;
   updatedAt: string;
   liveness: SessionLiveness;
-  /** Current agent (mode) id, if known. */
   agentId?: string;
-  /** Current model id, if known. */
   modelId?: string;
-  /** Whether a turn is actively running server-side. */
   running: boolean;
   contextUsagePercentage?: number;
 }
@@ -64,46 +48,34 @@ export interface CreateChatRequest {
   cwd?: string;
   agentId?: string;
   modelId?: string;
-  /**
-   * Give the session a workspace of its own instead of a working directory the user
-   * picked: <data dir>/chats/<chat id>/workspace.
-   */
   freshWorkspace?: boolean;
-  /** The client's chat id. The server generates one if it is absent or malformed. */
+  /** The server generates one if absent or malformed. */
   chatId?: string;
-  /**
-   * Name the session as it is created. The client knows the first prompt before the
-   * session exists, so passing it here means the row is never listed as untitled.
-   */
+  /** Names the session as it is created, so the row is never listed as untitled
+   *  while the client waits on the first prompt. */
   title?: string;
 }
 
 /** One file attached to a prompt, recorded per message rather than parsed from the text. */
 export interface MessageAttachment {
-  /** Absolute path under the data directory, and the identity within a message. */
   path: string;
   name: string;
   size: number;
   kind: UploadKind;
 }
 
-/** A message entry in a session transcript. */
 export interface TranscriptMessage {
   id: string;
   role: 'user' | 'assistant' | 'thinking';
-  /** Concatenated text content. */
   text: string;
   timestamp?: number;
-  /** What was attached to this message, images and everything else alike. */
   attachments?: MessageAttachment[];
 }
 
-/** A tool-call entry in a session transcript (matches the live tool_call view). */
+/** A tool-call entry in a session transcript. */
 export interface TranscriptToolCall {
   id: string;
-  /** The canonical kiro tool name (e.g. shell/write/read/grep/todo_list). From
-   *  _meta.kiro.toolName live, or the persisted tool name on hydrate. Drives
-   *  which renderer/label is used, consistently across both. */
+  /** Canonical kiro tool name (shell/write/read/grep/todo_list). */
   name?: string;
   title: string;
   kind?: string;
@@ -113,10 +85,8 @@ export interface TranscriptToolCall {
   content: unknown[];
 }
 
-/** A transcript entry: a message, an inline tool call, a compaction marker, or a
- *  failed turn. A failure is its own type rather than an assistant message so it
- *  isn't attributed to the model, and so its raw output can be rendered as-is
- *  instead of going through the markdown renderer. */
+/** A failed turn is its own type rather than an assistant message, so it isn't
+ *  attributed to the model and renders as raw output, not through markdown. */
 export type TranscriptItem =
   | { type: 'message'; message: TranscriptMessage }
   | { type: 'tool_call'; tool: TranscriptToolCall }
@@ -127,34 +97,21 @@ export interface ChatDetail {
   summary: ChatSummary;
   modes: AgentMode[];
   currentModeId?: string;
-  /** The most recent page of transcript items (see transcriptTotal). Older
-   *  items are fetched on demand via GET /api/chats/:chatId/transcript. */
   transcript: TranscriptItem[];
-  /** Total number of items in the full transcript, so the client knows whether
-   *  older pages remain to load. */
   transcriptTotal: number;
   observability: ObservabilitySnapshot;
-  /** Highest event seq currently in the server buffer (client's replay cursor start). */
   head: number;
 }
 
-/** A slice of an older transcript, returned by the paged transcript endpoint. */
 export interface TranscriptPageResponse {
   items: TranscriptItem[];
 }
 
-// ---------------------------------------------------------------------------
-// Subagents
-// ---------------------------------------------------------------------------
-
 /** One subagent (child session) spawned by a chat's `subagent` tool call. */
 export interface SubagentSummary {
-  /** The child kiro session id - also what GET .../subagents/:id reads by. */
   sessionId: string;
-  /** The stage name from the parent's `subagent` tool call. */
   stageName: string;
-  /** The parent's tool call this subagent belongs to, if still known. Absent for
-   *  one found only on disk (e.g. after a server restart lost the live link). */
+  /** Absent for one found only on disk after a restart lost the live link. */
   toolCallId?: string;
   status: 'pending' | 'working' | 'completed' | 'failed';
   /** One short phrase of what it's doing now, e.g. "Reading sprite-dom.ts" or "Done". */
@@ -167,7 +124,6 @@ export interface SubagentListResponse {
   subagents: SubagentSummary[];
 }
 
-/** A subagent's own transcript, hydrated the same way a chat's is. */
 export interface SubagentDetailResponse {
   subagent: SubagentSummary;
   transcript: TranscriptItem[];
@@ -181,7 +137,6 @@ export interface RenameChatRequest {
   title: string;
 }
 
-/** Re-point a session at a different working directory. */
 export interface SetCwdRequest {
   /** Absolute path, or relative to the server's DEFAULT_CWD. Created if absent. */
   cwd: string;
@@ -191,36 +146,27 @@ export interface SetModeRequest {
   modeId: string;
 }
 
-// Prompt (also available over WS; REST variant for fire-and-forget)
-
 export interface PromptRequest {
   prompt: PromptContentBlock[];
-  /** What was attached, for the transcript. The paths also go in the text, for the agent. */
   attachments?: MessageAttachment[];
 }
 
-// Directory suggestions for the working-directory input.
 export interface DirListing {
-  /** Absolute directory that was listed. */
   dir: string;
-  /** Absolute paths of matching subdirectories. */
   entries: string[];
-  /** Absolute path the input itself resolves to, which may not exist yet.
-   *  Resolved the same way session creation resolves it (against DEFAULT_CWD),
-   *  so the UI can show where a relative path will actually land. */
+  /** Resolved the same way session creation resolves it, against DEFAULT_CWD;
+   *  may not exist yet. */
   target: string;
-  /** What `target` currently is. 'missing' means creating a session there will
-   *  create the folder; 'file' means create will reject it. */
+  /** 'missing' means creating a session there will create the folder; 'file'
+   *  means create will reject it. */
   targetKind: 'directory' | 'file' | 'missing';
 }
 
-// A logged-in device (from GET /api/devices).
 export interface DeviceInfo {
   id: string;
   createdAt: string;
   lastSeenAt: string;
   userAgent?: string;
-  /** True for the device making the request. */
   current: boolean;
 }
 
@@ -235,42 +181,27 @@ export interface HealthResponse {
   uptimeMs: number;
 }
 
-// ---------------------------------------------------------------------------
-// Workspace file tree
-// ---------------------------------------------------------------------------
-
-/** A single entry (file or directory) in the workspace tree listing. */
 export interface FileEntry {
   name: string;
   /** Path relative to the session's cwd. */
   path: string;
   type: 'file' | 'directory';
-  /** Size in bytes (files only). */
   size?: number;
-  /** ISO timestamp of last modification. */
   modifiedAt?: string;
 }
 
-/** Response from GET /api/chats/:chatId/tree */
 export interface TreeResponse {
-  /** Absolute working directory of the session (for display). */
   cwd: string;
-  /** The subdirectory that was listed (relative to cwd, empty string = root). */
+  /** The subdirectory listed, relative to cwd; empty string means root. */
   relativeTo: string;
   entries: FileEntry[];
 }
 
-// ---------------------------------------------------------------------------
-// File uploads
-// ---------------------------------------------------------------------------
-
 /** How an uploaded file should be surfaced to the agent. */
 export type UploadKind = 'image' | 'text' | 'binary';
 
-/** Metadata for one stored upload (from POST /api/chats/:chatId/uploads). */
 export interface UploadedFile {
   name: string;
-  /** Absolute path, e.g. ~/.casper/chats/<chat id>/uploads/report.pdf */
   path: string;
   size: number;
   mimeType: string;

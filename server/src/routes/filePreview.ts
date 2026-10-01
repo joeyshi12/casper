@@ -18,7 +18,6 @@ function tooLargeForPreview(size: number, maxBytes: number): { error: string } {
   };
 }
 
-/** Render a canonical `hexdump -C` style view of a buffer. */
 function hexdump(buf: Buffer): string {
   const lines: string[] = [];
   for (let off = 0; off < buf.length; off += 16) {
@@ -40,14 +39,8 @@ function hexdump(buf: Buffer): string {
   return lines.join('\n');
 }
 
-/**
- * Serve one already-resolved file for inline preview.
- *
- * Shared by the workspace route, which resolves a path relative to a session's cwd, and the
- * filesystem route, which takes an absolute one - uploads live under the data directory,
- * outside any session's working directory, so a cwd-relative route cannot reach them.
- * Confinement is the caller's job and has happened before this is called.
- */
+/** Serves one already-resolved file for inline preview. Shared by the workspace
+ *  (cwd-relative) and filesystem (absolute) routes; confinement is the caller's job. */
 export async function sendFilePreview(
   req: FastifyRequest<{ Querystring: { raw?: string } }>,
   reply: FastifyReply,
@@ -58,14 +51,10 @@ export async function sendFilePreview(
   const mime = mimeForExt(ext);
   const isImage = mime.startsWith('image/');
   const isPdf = mime === 'application/pdf';
-  // Served raw so the panel can render it in an iframe rather than showing
-  // source. `raw=1` is required: without it a bare link to this endpoint
-  // would hand an agent-authored page the same origin as the API.
+  // raw=1 is required, or a bare link hands an agent-authored page the API's origin.
   const isHtml = mime === 'text/html' && req.query.raw === '1';
   const kind = classifyKind(realTarget);
 
-  // Binaries are only hexdumped (fixed head), so no size gate for them.
-  // Images and PDFs cap at 20 MB, text at 1 MB.
   if (isImage || isPdf) {
     if (stat.size > MAX_IMAGE_PREVIEW_BYTES) {
       reply.code(413);
@@ -78,9 +67,7 @@ export async function sendFilePreview(
     }
   }
 
-  // Raw HTML for the rendered preview. The CSP sandbox applies however the
-  // response is loaded - including direct navigation, where the iframe's own
-  // sandbox attribute wouldn't - so the page can never act as the user.
+  // The CSP sandbox applies to any load path, including direct navigation.
   if (isHtml) {
     if (stat.size > MAX_TEXT_PREVIEW_BYTES) {
       reply.code(413);
@@ -92,17 +79,8 @@ export async function sendFilePreview(
     return reply.send(createReadStream(realTarget));
   }
 
-  // Stream images and PDFs with Content-Disposition: inline so the browser
-  // renders them directly (in an <img> or the built-in PDF viewer).
   if (isImage || isPdf) {
-    // Transcript images re-render on every reload and every reconnect
-    // replay, so without a validator the browser refetches each one in full
-    // every time. The validator is
-    // size+mtime rather than a content hash to avoid reading the file.
-    //
-    // no-cache, not max-age: workspace files are mutable, and a freshness
-    // window serves a stale body without ever asking. Revalidating every
-    // time still costs only an empty 304 when nothing changed.
+    // size+mtime avoids hashing; no-cache since workspace files are mutable.
     const etag = `W/"${stat.size}-${stat.mtimeMs}"`;
     reply.header('Cache-Control', 'private, no-cache');
     reply.header('ETag', etag);
@@ -120,10 +98,8 @@ export async function sendFilePreview(
     return reply.send(createReadStream(realTarget));
   }
 
-  // For binary files, previewing raw bytes as text is useless - return a
-  // hexdump of the first chunk instead so the panel shows something sane.
-  // But the extension allowlist can't recognise dotfiles or extensionless
-  // files, so sniff the sampled bytes first: text is served as text.
+  // A hexdump instead of raw bytes; sniffed first since the extension allowlist
+  // can't recognise dotfiles or extensionless files.
   if (kind === 'binary') {
     let fh: Awaited<ReturnType<typeof fs.open>> | undefined;
     try {

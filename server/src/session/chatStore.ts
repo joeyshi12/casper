@@ -11,13 +11,11 @@ export interface ChatRow {
 }
 
 /**
- * A chat is a conversation Casper started. The row is Casper's own: kiro's session file holds
- * the transcript, and this holds the chat's identity plus the title and working directory
- * Casper layers over it. Anything in kiro's sessions directory without a row here - a subagent,
- * or a session started with kiro-cli - is not a chat and is not listed.
+ * A chat is a conversation Casper started. The row is Casper's own: kiro's session file
+ * holds the transcript, and this holds the chat's identity plus the title and cwd Casper
+ * layers over it. Anything in kiro's sessions directory without a row here isn't a chat.
  */
 export class ChatStore {
-  /** Every chat. Ordering is kiro's business, applied once the file is joined on. */
   all(): ChatRow[] {
     return (
       db()
@@ -43,10 +41,8 @@ export class ChatStore {
       .run(chatId);
   }
 
-  /**
-   * kiro names the session once it starts one; bind it to the chat that owns it. A session
-   * belongs to exactly one chat, so any earlier claim on it is released.
-   */
+  /** Binds the session kiro named once it started one. A session belongs to
+   *  exactly one chat, so any earlier claim on it is released. */
   bindSession(chatId: string, sessionId: string): void {
     db()
       .prepare('UPDATE chats SET session_id = NULL WHERE session_id = ? AND chat_id <> ?')
@@ -77,7 +73,7 @@ export class ChatStore {
     this.write(chatId, 'cwd', cwd);
   }
 
-  /** Record what was attached to one prompt. See db.ts for why the key is an ordinal. */
+  /** What was attached to one prompt, keyed by ordinal (see db.ts). */
   setAttachments(chatId: string, ordinal: number, files: MessageAttachment[]): void {
     if (files.length === 0) return;
     const stmt = db().prepare(

@@ -12,9 +12,9 @@ import {
 } from '../util/confinedFile.js';
 import { sendFilePreview } from './filePreview.js';
 
-// Suggests directory paths for the New Session working-directory input. Given a
-// partial path, it lists directories in the parent that match the last segment.
-// Relative input is resolved against DEFAULT_CWD, and confined to fileRoot.
+// Suggests directory paths for the New Session working-directory input, matching
+// the last segment of a partial path. Relative input resolves against DEFAULT_CWD,
+// confined to fileRoot.
 export function registerFsRoutes(app: FastifyInstance): void {
   app.get<{ Querystring: { path?: string } }>(
     '/api/fs/dirs',
@@ -22,25 +22,17 @@ export function registerFsRoutes(app: FastifyInstance): void {
       const input = (req.query.path ?? '').trim();
       const base = config.defaultCwd;
 
-      // Split into the directory to read and the prefix to filter on. A trailing
-      // slash means "list everything inside this dir".
+      // A trailing slash means "list everything inside this dir".
       const endsWithSep = input.endsWith('/');
       const resolved = input ? path.resolve(base, input) : base;
       const dir = endsWithSep || !input ? resolved : path.dirname(resolved);
       const prefix = endsWithSep || !input ? '' : path.basename(resolved);
 
-      // What the path being typed currently is. Reported so the sheet can say
-      // the folder will be created - or that the path is a file, which
-      // resolveCwd() in SessionManager rejects. Same DEFAULT_CWD base as create.
       const targetKind: DirListing['targetKind'] = await fs
         .stat(resolved)
         .then((s) => (s.isDirectory() ? ('directory' as const) : ('file' as const)))
         .catch(() => 'missing' as const);
 
-      // Confine the directory being listed so this can't be used to enumerate
-      // arbitrary filesystem locations. A path that resolves (through symlinks)
-      // outside the roots, or doesn't exist, yields no suggestions rather than
-      // leaking anything.
       const listing = await resolveAbsolutePath(dir, 'directory');
       if (!listing.ok) {
         if (listing.status === 403) return replyWith(reply, listing);
@@ -57,9 +49,7 @@ export function registerFsRoutes(app: FastifyInstance): void {
             return target?.kind === 'directory' ? d.name : null;
           }),
         );
-        // Dot-directories are listed, ordered after the rest. The cap is generous because
-        // ordering them last would otherwise starve them: 20 entries meant .kiro never
-        // appeared in a folder with 20 ordinary siblings. The client filters and scrolls.
+        // Dot-directories sort after the rest rather than being filtered out.
         const isDot = (name: string) => name.startsWith('.');
         entries = checks
           .filter((name): name is string => name !== null)
@@ -78,15 +68,8 @@ export function registerFsRoutes(app: FastifyInstance): void {
     },
   );
 
-  /**
-   * GET /api/fs/file?path=<absolute-path>
-   *
-   * Preview any file by absolute path, confined to the same roots as the rest of this
-   * module: config.fileRoot and the data directory. Uploads live under the data directory,
-   * outside every session's working directory, so the workspace preview route - which
-   * confines lexically to the cwd - cannot reach them. Serves whatever the file is: text as
-   * text, images and PDFs inline, binaries as a hexdump.
-   */
+  /** Previews any file by absolute path, confined to fileRoot and the data
+   *  directory, so it can reach uploads outside every workspace. */
   app.get<{ Querystring: { path?: string; raw?: string; download?: string } }>(
     '/api/fs/file',
     async (req, reply) => {
@@ -101,9 +84,6 @@ export function registerFsRoutes(app: FastifyInstance): void {
       }
       const resolved = await resolveAbsolutePath(filePath, 'file');
       if (!resolved.ok) return replyWith(reply, resolved);
-      // download=1 sends the bytes as a file rather than previewing them: the preview path
-      // is inline-only and caps text at 1 MB, so routing Download at it opened an upload in
-      // a tab instead of saving it.
       if (req.query.download === '1') {
         reply.header('Content-Type', 'application/octet-stream');
         reply.header(
@@ -116,5 +96,4 @@ export function registerFsRoutes(app: FastifyInstance): void {
       return sendFilePreview(req, reply, resolved.real, resolved.stat);
     },
   );
-
 }

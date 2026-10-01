@@ -10,10 +10,7 @@ import { confineToRoot } from '../util/paths.js';
 
 const HEARTBEAT_MS = 20_000;
 
-/**
- * The socket surface a connection uses. `ws`'s WebSocket satisfies it, and so
- * can a test double - which is the point.
- */
+/** The socket surface a connection uses; `ws`'s WebSocket satisfies it, and so can a test double. */
 export interface GatewaySocket {
   readonly readyState: number;
   readonly OPEN: number;
@@ -30,10 +27,8 @@ export function send(socket: GatewaySocket, msg: ServerMessage): void {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
 }
 
-/**
- * What a connection needs from SessionManager. Narrower than the class so a
- * test can drive a connection with a stub instead of a kiro process.
- */
+/** What a connection needs from SessionManager, narrower than the class so a test
+ *  can drive it with a stub. */
 export interface GatewayChats {
   ensureOpen(chatId: string): Promise<unknown>;
   getStore(chatId: string): EventStore | undefined;
@@ -50,14 +45,8 @@ export interface GatewayChats {
   execCommand(chatId: string, command: string, args?: string): Promise<void>;
 }
 
-/**
- * One client connection: replay the events after its cursor, then stream live
- * ones and answer control messages. Owns everything per-socket - cursor,
- * readiness, heartbeat, directory watchers and the control-message table - so
- * the state and the messages that mutate it stay in one module.
- *
- * Takes the socket rather than a Fastify request, so a test can drive it.
- */
+/** One client connection: replays events after its cursor, streams live ones, answers
+ *  control messages. Takes the socket rather than a Fastify request, so a test can drive it. */
 export function handleConnection(
   socket: GatewaySocket,
   manager: GatewayChats,
@@ -69,9 +58,7 @@ export function handleConnection(
   let alive = true;
   let ready = false;
 
-  // Watches the directories this client has open, so the file panel updates itself.
-  // Resolved per event rather than once: a session can be re-pointed at another
-  // working directory while the socket lives.
+  // Resolved per event since a session can be re-pointed to another cwd mid-socket.
   const watchers = createDirWatchers({
     resolve: async (relative) => {
       try {
@@ -90,8 +77,6 @@ export function handleConnection(
   };
 
   const attach = async () => {
-    // Open the session in memory WITHOUT spawning a kiro process - viewing is
-    // instant. A process is spawned lazily only when the user sends a prompt.
     try {
       await manager.ensureOpen(chatId);
     } catch (err) {
@@ -125,7 +110,6 @@ export function handleConnection(
 
   void attach();
 
-  // Every control action answers with the same ack shape, success or failure.
   const ack = async (action: string, run: () => Promise<void> | void): Promise<void> => {
     try {
       await run();
@@ -158,7 +142,7 @@ export function handleConnection(
     }
   };
 
-  // Heartbeat: drop dead sockets, but leave the process alone.
+  // Drops dead sockets without touching the process.
   const heartbeat = setInterval(() => {
     if (!alive) {
       socket.terminate();
@@ -179,8 +163,6 @@ export function handleConnection(
 
   socket.on('message', (raw: Buffer) => {
     alive = true;
-    // Ignore anything sent before attach() finished opening the session, so a
-    // prompt can't hit an unopened session and reject unhandled.
     if (!ready) return;
     let msg: ClientMessage;
     try {
@@ -199,10 +181,8 @@ export function handleConnection(
   });
 }
 
-// WebSocket gateway at /ws?chatId=&cursor=. Auth is the same-origin session
-// cookie sent on the upgrade request. On connect it replays buffered events
-// after the client's cursor, then streams live ones. Socket loss never touches
-// the child process, so the turn keeps running.
+// WebSocket gateway at /ws?chatId=&cursor=. Auth is the same-origin session cookie
+// on the upgrade request. Socket loss never touches the child process.
 export function registerWsGateway(app: FastifyInstance, manager: SessionManager): void {
   app.get('/ws', { websocket: true }, (socket: WebSocket, req) => {
     const query = req.query as { chatId?: string; cursor?: string };

@@ -1,7 +1,6 @@
 // The MCP server: protocol, guidelines composition, and the choice template.
-// Run with: npm test
 
-import { describe, it, before, beforeEach, after } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleMessage, DEFAULT_PROTOCOL_VERSION } from '../server/src/mcp/protocol.js';
 import { getGuidelines, MODULES } from '../server/src/mcp/guidelines.js';

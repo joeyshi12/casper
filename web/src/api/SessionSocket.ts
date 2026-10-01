@@ -22,22 +22,15 @@ export interface SessionSocketHandlers {
   /** Cursor is stale - caller should refetch the full session, then call reset(head). */
   onResync: () => void;
   onAck?: (action: string, ok: boolean, error?: string) => void;
-  /** A server-level error frame (bad request, session unavailable). Reported so
-   *  the user sees a reason instead of it only reaching the console. */
   onServerError?: (message: string) => void;
-  /** The server rejected the connection as unauthorized (expired/absent session). */
   onUnauthorized?: () => void;
-  /** A directory this client asked to watch changed on disk. */
   onFsChanged?: (path: string) => void;
 }
 
-// WebSocket close code the server uses for an unauthorized upgrade (policy
-// violation). Reconnecting can't fix this, so we stop and surface it instead.
+// 1008 (policy violation) is the server's close code for an unauthorized upgrade.
+// Reconnecting can't fix this, so stop and surface it instead.
 const WS_UNAUTHORIZED = 1008;
 
-// Resumable WebSocket client. Tracks the highest applied seq as its cursor; on
-// disconnect it reconnects with backoff and the server replays the gap. Also
-// reconnects when the tab becomes visible or the network returns.
 export class SessionSocket {
   private ws: WebSocket | null = null;
   private cursor = 0;
@@ -58,9 +51,9 @@ export class SessionSocket {
     document.addEventListener('visibilitychange', this.onVisibility);
   }
 
-  // Reconnect only when the socket is past saving. Leaving a live connect alone is
-  // what stops a waking phone, which fires 'online' and 'visibilitychange' together,
-  // opening two sockets.
+  /* Reconnect only when the socket is past saving. A waking phone fires 'online'
+     and 'visibilitychange' together; leaving a live connect alone avoids opening
+     two sockets. */
   private eager = () => {
     if (this.closedByUser) return;
     if (shouldReconnect(this.sample())) this.connect();
@@ -75,7 +68,6 @@ export class SessionSocket {
     };
   }
 
-  /** The only thing that notices a socket which neither opens nor closes. */
   private startWatchdog(): void {
     if (this.watchdog !== null) return;
     this.watchdog = window.setInterval(() => {
@@ -90,7 +82,6 @@ export class SessionSocket {
     if (document.visibilityState === 'visible') this.eager();
   };
 
-  /** Reset the replay cursor (after a full refetch triggered by resync). */
   reset(head: number): void {
     this.cursor = head;
   }
@@ -101,11 +92,10 @@ export class SessionSocket {
       this.reconnectTimer = null;
     }
 
-    // Drop any socket we already have before opening another: waking a phone fires 'online' and
-    // 'visibilitychange' together, and a dying socket's onclose schedules its own retry, so
-    // connect() can be re-entered while one is still live. Each connection carries its own replay
-    // cursor, so a leaked socket delivers every event twice. Null the handlers first, or the close
-    // we trigger here schedules yet another reconnect.
+    /* connect() can be re-entered while a socket is still live (waking a phone fires
+       'online' and 'visibilitychange' together; a dying socket's onclose also
+       schedules a retry). Null the handlers first, or this close schedules another
+       reconnect. */
     const stale = this.ws;
     if (stale) {
       this.ws = null;
@@ -119,12 +109,12 @@ export class SessionSocket {
     }
 
     this.connectingSince = Date.now();
-    this.lastMessageAt = Date.now(); // nothing to judge as silence until it opens
+    this.lastMessageAt = Date.now();
     this.startWatchdog();
     this.handlers.onStatus(this.cursor > 0 ? 'reconnecting' : 'connecting');
 
-    // No token in the URL: the same-origin session cookie authenticates the
-    // WS upgrade request automatically.
+    // The same-origin session cookie authenticates the WS upgrade automatically;
+    // no token needed in the URL.
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const url =
       `${proto}://${location.host}/ws?chatId=${encodeURIComponent(this.chatId)}` +
@@ -179,8 +169,6 @@ export class SessionSocket {
         this.handlers.onStatus('closed');
         return;
       }
-      // An auth rejection won't heal by retrying - stop the loop and tell the
-      // app so it can send the user back to the login screen.
       if (ev.code === WS_UNAUTHORIZED) {
         this.closedByUser = true;
         this.handlers.onStatus('closed');
@@ -205,7 +193,6 @@ export class SessionSocket {
     return false;
   }
 
-  /** Returns false if the socket wasn't open, so the caller can flag failure. */
   prompt(content: PromptContentBlock[], attachments?: MessageAttachment[]): boolean {
     return this.send({ type: 'prompt', content, attachments });
   }
@@ -218,7 +205,6 @@ export class SessionSocket {
   setModel(modelId: string): void {
     this.send({ type: 'set_model', modelId });
   }
-  /** Declare which directories the file panel is showing; replaces the previous set. */
   watchPaths(paths: string[]): void {
     this.send({ type: 'watch_paths', paths });
   }

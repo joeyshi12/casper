@@ -5,20 +5,14 @@ import { Command } from 'commander';
 import { configFilePath, dataDirPath } from '../paths.js';
 import { generateToken, printTokenBlock, readSettings, updateSettings } from './settings.js';
 
-// config.ts, and anything importing it, is loaded lazily inside the actions that need
-// it. It snapshots its settings at import, so bootstrap has to write a first-run token
-// before that happens - and loading the app would also open the database, which
-// `casper token` has no business doing.
+// config.ts is loaded lazily inside the actions that need it: it snapshots settings
+// at import, so bootstrap must write a first-run token first.
 
-// Replaced by the bundler with package.json's version; 'dev' when run from source.
 declare const __CASPER_VERSION__: string;
 const VERSION = typeof __CASPER_VERSION__ === 'string' ? __CASPER_VERSION__ : 'dev';
 
-/**
- * First run has no installer to lean on: npm has no hook worth using, since postinstall
- * scripts are widely disabled and shouldn't be writing to a user's home anyway. So the
- * things the shell installer did happen here, once, and only when actually missing.
- */
+/** First run has no installer to lean on, so the shell installer's work happens
+ *  here once, only when actually missing. */
 async function bootstrap(): Promise<void> {
   const file = configFilePath();
   const settings = readSettings(file);
@@ -55,10 +49,7 @@ function printToken(): void {
   process.stdout.write(`${token}\n`);
 }
 
-/**
- * Rotating the token has to clear device logins too, or browsers already signed in keep
- * working and "reset" means nothing. Sessions and titles are left alone.
- */
+/** Clears device logins too, or signed-in browsers keep working and "reset" means nothing. */
 async function resetToken(value: string | undefined): Promise<void> {
   const token = value && value !== '' ? value : generateToken();
   const file = configFilePath();
@@ -72,8 +63,7 @@ async function resetToken(value: string | undefined): Promise<void> {
     process.stdout.write('revoked all device sessions\n');
   }
 
-  // The token is only read at startup, so a running server keeps accepting the old one
-  // until it restarts.
+  // The token is only read at startup; a running server needs a restart to pick it up.
   const { serviceActive } = await import('./service.js');
   if (serviceActive()) {
     const { spawnSync } = await import('node:child_process');
@@ -93,10 +83,8 @@ export function buildProgram(): Command {
     .description('Web client for kiro-cli over the Agent Client Protocol')
     .version(VERSION, '-v, --version')
     .showHelpAfterError()
-    // Reject anything unrecognised rather than treating it as a positional. Without
-    // this, `casper reset-token --dry-run` silently adopted "--dry-run" as the new
-    // token and revoked every session - the destructive act the flag was meant to
-    // avoid.
+    // Rejects unrecognised flags rather than treating them as positional; otherwise
+    // `casper reset-token --dry-run` adopted "--dry-run" as the new token.
     .addHelpText('after', `\nSettings live in ${configFilePath()}.\nUpdate with: npm install -g @joeyshi12/casper`);
 
   program
@@ -132,7 +120,6 @@ export function buildProgram(): Command {
     .command('mcp')
     .description('run the generative-UI MCP server on stdio (kiro spawns this itself)')
     .action(async () => {
-      // No bootstrap: it prints, and stdout here belongs to the protocol.
       (await import('../mcp/server.js')).runMcpServer();
     });
 

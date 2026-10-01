@@ -4,18 +4,10 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { readSettings } from './settings.js';
 
-/**
- * The checks the shell installer ran as preflight, kept after it was deleted.
- *
- * These are the things that make Casper look broken for reasons outside itself -
- * kiro missing or not logged in, no token, an unreadable data directory - so it's
- * worth being able to ask.
- */
+// The checks the shell installer ran as preflight, kept after it was deleted.
 type Check = { ok: boolean; name: string; detail: string; fatal?: boolean };
 
-// Walk PATH rather than shelling out to `command -v`: kiroBin is user-supplied, and
-// handing it to a shell would both invite injection and trip node's deprecation
-// warning for shell + args.
+// Walks PATH instead of shelling out, since kiroBin is user-supplied.
 function which(bin: string): string | undefined {
   if (bin.includes('/')) return fs.existsSync(bin) ? bin : undefined;
   for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
@@ -31,11 +23,8 @@ function which(bin: string): string | undefined {
   return undefined;
 }
 
-/**
- * Whether the agent's MCP server points at something that exists. The recorded path
- * can rot: npm replaces the install directory on upgrade, and a hand-edited agent
- * file stops being updated, so it can name a version that is gone.
- */
+/** Whether the agent's MCP server points at something that exists; the recorded
+ *  path can rot after an npm upgrade or a hand-edit. */
 export function mcpWiring(
   agentJson: string,
   resolve: (bin: string) => string | undefined,
@@ -55,7 +44,7 @@ export function mcpWiring(
   if (!resolve(command)) {
     return { ok: false, detail: `${command || '(no command)'} not found - widgets are unavailable` };
   }
-  // A bundled install records the script; `casper mcp` names the CLI and has no path.
+  // A bundled install records the script; `casper mcp` names the CLI with no path.
   const script = args.find((a) => a.endsWith('.js'));
   if (script && !fs.existsSync(script)) {
     return { ok: false, detail: `${script} is gone - delete the agent file and restart to rewrite it` };

@@ -9,43 +9,33 @@ import { ConnDot } from '../common/ConnBanner.js';
 import { Spinner, FilesIcon, MenuIcon, RefreshIcon, WarningIcon, CloseIcon } from '../common/icons.js';
 
 interface Props {
-  /** A session being composed: no id yet, created by the first prompt. */
   isDraft: boolean;
   navOpen: boolean;
   onToggleNav: () => void;
 }
 
-/** The right-hand chat area. Shows an empty prompt when no session is open. */
 export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
-  // Session whose detail is being fetched, distinct from the loaded one so a stale transcript
-  // is not rendered while a slow hydrate is in flight.
   const loadingChatId = useStore((s) => s.loadingChatId);
   const connStatus = useStore((s) => s.connStatus);
   const createError = useStore((s) => s.createError);
   const title = useStore((s) => s.chats.find((x) => x.chatId === s.activeId)?.title);
-  // The hero belongs to an empty draft: sending hands over to the transcript at once, so the
-  // message shows while the session is still being created.
   const composing = useStore((st) => isDraft && st.pending.length === 0 && st.items.length === 0);
   const activeId = useStore((s) => s.activeId);
   const chatId = useStore((s) => s.chatId);
   const chatNotice = useStore((s) => s.chatNotice);
-  // A derived boolean, so this re-renders only when the answer for this session flips.
   const reloading = useStore((s) => s.reloadingId !== null && s.reloadingId === s.activeId);
-  // A restart mid-turn would lose the turn, so the control waits for it.
   const turnRunning = useStore((s) => s.observability.turnStatus === 'running');
   const dismissChatNotice = useStore((s) => s.dismissChatNotice);
   const [showTree, setShowTree] = useState(false);
 
-  // The panel belongs to the session it was opened in. Without this it survives a
-  // switch as component state, and a new session pops it open the moment the first
-  // prompt gives that session an id.
+  // Tied to the session: without this a switch keeps the panel open as component
+  // state, and a new session pops it open as soon as the first prompt gives it an id.
   useEffect(() => {
     setShowTree(false);
   }, [activeId]);
 
-  // Switching sessions: the detail is still being fetched. Checked before the main branch
-  // so a slow hydrate doesn't leave the previous session's transcript on screen under a new
-  // header, which reads as the click having done nothing.
+  // Checked before the main branch, so a slow hydrate doesn't leave the previous
+  // session's transcript on screen under the new header.
   if (loadingChatId) {
     return (
       <main className="chatpane">
@@ -66,8 +56,6 @@ export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
       </main>
     );
   }
-
-
 
   if (createError) {
     return (
@@ -116,7 +104,6 @@ export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
     </div>
   );
 
-  // Prompt, then a single bar: config on the left, live stats on the right.
   const composer = (
     <div className="composer-wrap">
       {notice}
@@ -128,8 +115,6 @@ export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
     </div>
   );
 
-  // A draft has no transcript, so the wordmark and the prompt sit together in the middle,
-  // the way a new chat reads before anything has been said.
   const draftBody = (
     <div className="chat-draft">
       <div className="draft-hero">
@@ -161,15 +146,12 @@ export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
           >
             <MenuIcon size={20} />
           </button>
-          {/* In a draft the hero below carries the name, so the bar stays empty. */}
           {!isDraft && (
             <span className="chat-title" title={title}>
               {title ?? 'Session'}
             </span>
           )}
-          {/* A draft has no socket yet, so a red "Offline" dot would be a lie. */}
           {!isDraft && <ConnDot status={connStatus} />}
-          {/* A draft has no process to restart yet. */}
           {!isDraft && (
             <button
               className="chat-head-btn chat-reload"
@@ -181,7 +163,6 @@ export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
               {reloading ? <Spinner size={18} /> : <RefreshIcon size={18} />}
             </button>
           )}
-          {/* A draft has no workspace yet, so there is nothing to browse. */}
           {!isDraft && (
             <button
               className={`chat-head-btn ftree-toggle ${showTree ? 'is-active' : ''}`}
@@ -201,12 +182,9 @@ export function ChatPane({ isDraft, navOpen, onToggleNav }: Props) {
       {activeId && (
         <aside className={`ftree-aside ${showTree ? 'is-open' : ''}`}>
           {showTree && <FileTree chatId={activeId} onClose={() => setShowTree(false)} />}
-          {/* Outside the panel: a tool call can open a preview with the panel closed. */}
           <FilePreview />
         </aside>
       )}
-      {/* Mobile: tapping outside the drawer closes it (the header toggle is
-          covered by the panel on small screens). */}
       {activeId && showTree && (
         <div
           className="ftree-backdrop"

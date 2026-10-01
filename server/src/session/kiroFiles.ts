@@ -10,11 +10,9 @@ import type { MessageAttachment } from '@casper/shared';
 import { config } from '../config.js';
 import { isValidSessionId } from '../util/paths.js';
 
-/**
- * Reads kiro-cli's own on-disk session persistence
- * (~/.kiro/sessions/cli/<id>.{json,jsonl}) so Casper can list and hydrate
- * DORMANT sessions without spawning a process.
- */
+// Reads kiro-cli's own on-disk session persistence
+// (~/.kiro/sessions/cli/<id>.{json,jsonl}) so Casper can list and hydrate
+// dormant sessions without spawning a process.
 
 interface KiroMetering {
   value: number;
@@ -47,10 +45,8 @@ interface KiroSessionJson {
   };
 }
 
-// A content block is always {kind, data}, but `data`'s shape depends on `kind` and kiro emits
-// kinds we don't model. A union with a `kind: string` catch-all doesn't work: checking
-// `kind === 'text'` leaves the catch-all in play, so `data` widens back to unknown and every
-// read needs a cast. Keep the block loose and narrow it with the runtime guards below.
+// A content block is always {kind, data}; kept loose and narrowed with runtime
+// guards, since a `kind: string` catch-all widens `data` back to unknown.
 interface KiroContentBlock {
   kind: string;
   data: unknown;
@@ -74,7 +70,7 @@ function isContentBlock(v: unknown): v is KiroContentBlock {
   return isRecord(v) && typeof v.kind === 'string';
 }
 
-/** The `data` of a `toolUse` block, or null if it isn't one (or lacks an id). */
+/** The `data` of a `toolUse` block, or null if it isn't one. */
 function toolUseData(b: KiroContentBlock): KiroToolUseData | null {
   if (b.kind !== 'toolUse' || !isRecord(b.data)) return null;
   const { toolUseId, name, input } = b.data;
@@ -94,10 +90,8 @@ interface KiroJsonlEntry {
   kind: string;
   data: {
     message_id?: string;
-    /** Unvalidated: parsed straight from the file, so narrow with contentBlocks(). */
     content?: unknown;
     meta?: { timestamp?: number };
-    /** Present on `Compaction` entries: the conversation summary. */
     summary?: string;
   };
 }
@@ -107,25 +101,20 @@ function contentBlocks(content: unknown): KiroContentBlock[] {
   return Array.isArray(content) ? content.filter(isContentBlock) : [];
 }
 
-// Extract plain text from a text/thinking content block.
 function blockText(c: KiroContentBlock): string {
   if (typeof c.data === 'string') return c.data;
   if (isRecord(c.data) && typeof c.data.text === 'string') return c.data.text;
   return '';
 }
 
-/**
- * The blocks of a persisted tool result worth sending: everything except inline images.
- *
- * kiro stores tool-result images as a raw byte array, costing several bytes of JSON per
- * image byte - one transcript page measured 5.1 MB against ~100 KB without them. Nothing
- * renders them anyway; images the user should see come from the file endpoints by path.
- */
+/** Tool-result blocks worth sending, minus inline images: kiro stores those as a
+ *  raw byte array (one page measured 5.1 MB vs ~100 KB without), and nothing
+ *  renders them anyway. */
 function renderableBlocks(content: unknown): KiroContentBlock[] {
   return contentBlocks(content).filter((b) => b.kind !== 'image');
 }
 
-/** What kiro's own session file knows. A chat's identity and overrides live in casper.db. */
+/** kiro's own session file. A chat's identity and overrides live in casper.db. */
 export interface PersistedSession {
   sessionId: string;
   title: string;
@@ -146,7 +135,6 @@ function summarize(j: KiroSessionJson): PersistedSession {
 
   return {
     sessionId: j.session_id,
-    // Left empty when kiro has not named it; resolveSessionTitle decides what to show.
     title: j.title?.trim() ?? '',
     cwd: j.cwd,
     createdAt: j.created_at,
@@ -157,11 +145,8 @@ function summarize(j: KiroSessionJson): PersistedSession {
   };
 }
 
-/** List all persisted sessions (as DORMANT summaries), newest first. */
-
-// Delete a session's on-disk files: kiro's <id>.{json,jsonl,history,lock} and its
-// per-session <id>/ directory (tasks, etc.). Missing paths are ignored. The .lock is kiro's
-// "active in another process" marker, which 2.19 writes.
+/** Deletes kiro's <id>.{json,jsonl,history,lock} and its per-session <id>/ dir.
+ *  .lock is kiro's "active in another process" marker. */
 export async function deletePersistedSession(sessionId: string): Promise<void> {
   if (!isValidSessionId(sessionId)) return;
   const targets = [
@@ -195,15 +180,6 @@ export interface ChildSession extends PersistedSession {
   parentSessionId: string;
 }
 
-/**
- * Every session on disk whose `parent_session_id` is this one: a chat's subagents, read
- * independently of whether the chat's process is live. kiro tags these
- * `session_created_reason: "subagent"`, but the parent link alone is enough to find them.
- *
- * Scans the whole sessions directory - there is no index from parent to children - which is
- * fine for how often this is asked (opening or refreshing the subagent list) and how big the
- * directory realistically gets (one file pair per session ever started).
- */
 export async function listChildSessions(parentSessionId: string): Promise<ChildSession[]> {
   if (!isValidSessionId(parentSessionId)) return [];
   let names: string[];
@@ -231,24 +207,13 @@ export async function listChildSessions(parentSessionId: string): Promise<ChildS
   return out;
 }
 
-/**
- * How many prompts kiro has recorded for this session, which is the ordinal the next one
- * will take. Counted here rather than by the caller so the number that attachments are
- * written under is produced by the same rule that hydrateTranscript reads them back by:
- * one per Prompt entry, whether or not that entry ends up rendered.
- */
+/** The ordinal the next prompt takes, counted the same way hydrateTranscript does. */
 export async function promptCount(sessionId: string): Promise<number> {
   const entries = await readJsonlEntries(sessionId);
   return entries.filter((e) => e.kind === 'Prompt').length;
 }
 
-/**
- * A session's jsonl as parsed entries, skipping blank and malformed lines.
- *
- * Both the attachment ordinal writer (promptCount) and its reader (hydrateTranscript) count
- * Prompt entries from this one list, because an ordinal only identifies the same message if
- * the two agree on what a line is.
- */
+/** A session's jsonl as parsed entries, skipping blank and malformed lines. */
 async function readJsonlEntries(sessionId: string): Promise<KiroJsonlEntry[]> {
   if (!isValidSessionId(sessionId)) return [];
   let raw: string;
@@ -270,15 +235,8 @@ async function readJsonlEntries(sessionId: string): Promise<KiroJsonlEntry[]> {
   return entries;
 }
 
-/**
- * Whether kiro has recorded any conversation for this session.
- *
- * Its event log is created empty at session/new and only gets entries as turns
- * complete, and a session with none cannot be loaded into a fresh process - kiro
- * answers "Session not found" and deletes both files when the process that made it
- * exits. So this is what says whether a session can be rebuilt. Verified against
- * kiro 2.11: 0 bytes before the first turn, non-empty after it.
- */
+/** Whether kiro has recorded any conversation for this session; a 0-byte jsonl means
+ *  no. Verified against kiro 2.11. */
 export async function hasRecordedTurns(sessionId: string): Promise<boolean> {
   if (!isValidSessionId(sessionId)) return false;
   try {
@@ -289,22 +247,15 @@ export async function hasRecordedTurns(sessionId: string): Promise<boolean> {
   }
 }
 
-/**
- * Hydrate the conversation transcript from kiro's <id>.jsonl event log, matching
- * the shape the live stream produces: user/thinking/assistant messages plus
- * reconstructed tool calls. Tool uses live in AssistantMessage content
- * (`toolUse`) and their results arrive in later `ToolResults` entries
- * (`toolResult`), matched back by toolUseId.
- */
+/** Hydrates the transcript from kiro's <id>.jsonl, matching the live stream's shape.
+ *  Tool uses live in AssistantMessage content; their results arrive in a later
+ *  ToolResults entry, matched back by toolUseId. */
 export async function hydrateTranscript(
   sessionId: string,
-  /** Recorded attachments, keyed by the ordinal of the user message they belong to. */
   attachments?: Map<number, MessageAttachment[]>,
 ): Promise<TranscriptItem[]> {
   const items: TranscriptItem[] = [];
-  // Counts Prompt entries as they are rebuilt, so it lines up with what runPrompt recorded.
   let userOrdinal = 0;
-  // Tool-call items awaiting their result, keyed by toolUseId.
   const toolsById = new Map<string, TranscriptToolCall>();
 
   for (const entry of await readJsonlEntries(sessionId)) {
@@ -316,14 +267,12 @@ export async function hydrateTranscript(
     const pushMsg = (msg: TranscriptMessage) => items.push({ type: 'message', message: msg });
 
     if (entry.kind === 'Prompt') {
-      // Attachments come from Casper's record, keyed by this message's position.
       const text = stripAttachmentsLine(textOf('text'));
       const attached = attachments?.get(userOrdinal);
       userOrdinal++;
       if (text.trim() || attached?.length)
         pushMsg({ id: `u-${baseId}`, role: 'user', text, timestamp: ts, attachments: attached });
     } else if (entry.kind === 'AssistantMessage') {
-      // Order within an assistant turn: reasoning, spoken text, then tool uses.
       const thinking = textOf('thinking');
       if (thinking.trim())
         pushMsg({ id: `t-${baseId}`, role: 'thinking', text: thinking.trim(), timestamp: ts });
@@ -334,7 +283,7 @@ export async function hydrateTranscript(
       for (const c of content) {
         const d = toolUseData(c);
         if (!d) continue;
-        // Completed by default; a later ToolResults entry may override the status.
+        // Completed by default; ToolResults may override it.
         const tool: TranscriptToolCall = {
           id: d.toolUseId,
           name: d.name,
@@ -356,8 +305,6 @@ export async function hydrateTranscript(
         tool.content = renderableBlocks(d.content);
       }
     } else if (entry.kind === 'Compaction') {
-      // kiro appends a Compaction entry (it does not rewrite prior entries) whose
-      // summary becomes the working context. Surface it as a durable divider.
       const summary = entry.data.summary ?? '';
       if (summary.trim())
         items.push({ type: 'compaction', id: `c-${baseId}`, summary, timestamp: ts });

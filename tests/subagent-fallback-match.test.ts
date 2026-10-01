@@ -1,5 +1,3 @@
-// Run with: npm test
-//
 // matchSubagentsFallback is a small pure function: given the `subagent` tool calls in a
 // parent's transcript and the on-disk children with no recorded link, it matches each
 // child to the stage whose expanded prompt its title is the start of. Fixtures below are

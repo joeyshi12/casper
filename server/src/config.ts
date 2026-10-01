@@ -13,12 +13,8 @@ function env(name: string, fallback: string): string {
 
 const home = os.homedir();
 
-/**
- * Where the built web app lives, resolved against this module rather than the
- * process cwd - a global install runs from wherever the user happens to be, so a
- * cwd-relative path found nothing. The published bundle sits beside its web/
- * directory; a workspace build leaves the app in web/dist.
- */
+/** Where the built web app lives, resolved against this module since a global
+ *  install runs from wherever the user happens to be. */
 function defaultWebDist(): string {
   const here = path.dirname(url.fileURLToPath(import.meta.url));
   const bundled = path.join(here, 'web');
@@ -42,13 +38,8 @@ const KNOWN_KEYS = new Set([
   'maxUploadBytes',
 ]);
 
-/**
- * Parse config-file text into settings, reporting rather than throwing.
- *
- * A broken config file must never stop the server starting - the user would have
- * no way to fix it through the UI. Anything unusable yields no settings, so every
- * value falls back to its default.
- */
+/** Parses config-file text into settings, reporting rather than throwing: a broken
+ *  file must never stop the server starting. */
 export function parseConfigDoc(raw: string, onWarn: (msg: string, detail?: unknown) => void = () => {}): Record<string, unknown> {
   let parsed: unknown;
   try {
@@ -73,7 +64,6 @@ function loadConfigFile(): Record<string, unknown> {
   try {
     raw = fs.readFileSync(file, 'utf8');
   } catch (err) {
-    // Absent is the normal case; anything else is worth saying out loud.
     if ((err as { code?: string }).code !== 'ENOENT') {
       logger.warn({ file, err }, 'config: unreadable, falling back to defaults');
     }
@@ -81,7 +71,7 @@ function loadConfigFile(): Record<string, unknown> {
   }
 
   const obj = parseConfigDoc(raw, (msg, detail) => logger.warn({ file, detail }, msg));
-  // A token in a world-readable file is worth flagging; it is a shared secret.
+  // A token in a world-readable file is a shared secret worth flagging.
   if (typeof obj.token === 'string' && obj.token !== '') {
     try {
       const mode = fs.statSync(file).mode & 0o077;
@@ -89,7 +79,7 @@ function loadConfigFile(): Record<string, unknown> {
         logger.warn({ file }, 'config: holds a token but is readable by others; chmod 600 it');
       }
     } catch {
-      /* stat failed; not worth failing startup over */
+      /* not worth failing startup over */
     }
   }
   return obj;
@@ -132,10 +122,8 @@ const setting = (envName: string, key: string, fallback: string): string =>
 const settingInt = (envName: string, key: string, fallback: number): number =>
   pickInt(process.env[envName], fileConfig[key], fallback);
 
-// Resolve kiro-cli to an absolute path. A server started outside an interactive
-// shell (systemd, bare node) may have a minimal PATH that omits ~/.toolbox/bin,
-// causing `spawn kiro-cli` to fail with ENOENT. Try an explicit path, then the
-// login shell's PATH, then common install locations.
+// Resolves kiro-cli to an absolute path: a minimal systemd/bare-node PATH may
+// omit ~/.toolbox/bin, so `spawn kiro-cli` would otherwise ENOENT.
 function resolveKiroBin(explicit: string, home: string): string {
   if (explicit.includes('/') && fs.existsSync(explicit)) return explicit;
 
@@ -163,31 +151,19 @@ function resolveKiroBin(explicit: string, home: string): string {
 export const config = {
   host: setting('HOST', 'host', '0.0.0.0'),
   port: settingInt('PORT', 'port', 4319),
-  /** Shared-secret token required to log in. Empty string disables auth (dev only). */
+  /** Shared secret for login. Empty disables auth (dev only). */
   token: setting('CASPER_TOKEN', 'token', ''),
-  /** Device-login lifetime in seconds; slid forward on activity. Default 7 days. */
+  /** Device-login lifetime in seconds, slid forward on activity. Default 7 days. */
   sessionTtlSeconds: settingInt('CASPER_SESSION_TTL_SECONDS', 'sessionTtlSeconds', 60 * 60 * 24 * 7),
   kiroBin: resolveKiroBin(setting('KIRO_BIN', 'kiroBin', 'kiro-cli'), home),
   defaultCwd: setting('DEFAULT_CWD', 'defaultCwd', process.cwd()),
   maxLiveSessions: settingInt('MAX_LIVE_SESSIONS', 'maxLiveSessions', 6),
-  /**
-   * The agent Casper installs, which is the one with the widget tools. Safe as a
-   * default even when it is missing: kiro-cli acp falls back to kiro_default rather
-   * than failing, and reports what it chose, which is what a session records.
-   */
+  /** The agent Casper installs, with the widget tools. Falls back to kiro_default
+   *  if missing rather than failing. */
   defaultAgent: setting('DEFAULT_AGENT', 'defaultAgent', 'casper'),
-  /**
-   * Filesystem root the file endpoints (/api/fs/dirs, /api/fs/file) are confined to; anything
-   * resolving outside it is rejected. Defaults to /, so browsing spans everything the process
-   * can read - set a narrower path to keep authenticated users out of system files such as /etc
-   * or SSH keys.
-   */
+  /** Filesystem root the file endpoints are confined to. Defaults to /; narrow it
+   *  to keep authenticated users out of system files such as /etc or SSH keys. */
   fileRoot: path.resolve(setting('CASPER_FILE_ROOT', 'fileRoot', '/')),
-  /**
-   * Directory where kiro-cli persists its own session files. Overridable for the
-   * same reason as every other path here: a non-default kiro home, a container,
-   * or a test that must not write into the real one.
-   */
   kiroSessionsDir: path.resolve(
     setting(
       'CASPER_KIRO_SESSIONS_DIR',
@@ -195,16 +171,10 @@ export const config = {
       path.join(home, '.kiro', 'sessions', 'cli'),
     ),
   ),
-  /** Where casper.db lives. Env-only: it says where data is, and the config
-   *  file isn't there. */
   casperDataDir: dataDirPath(),
-  /** Built web app to serve. Env-only: install layout, not a user preference. */
   webDist: env('CASPER_WEB_DIST', defaultWebDist()),
-  /** Per-session in-memory event ring buffer size. */
   eventBufferSize: settingInt('EVENT_BUFFER_SIZE', 'eventBufferSize', 5000),
-  /** Max size (bytes) for a single uploaded file. Default 100 MB. */
   maxUploadBytes: settingInt('CASPER_MAX_UPLOAD_BYTES', 'maxUploadBytes', 100 * 1024 * 1024),
-  /** Absolute path of the settings file, for diagnostics. */
   configFile: configFilePath(),
 } as const;
 

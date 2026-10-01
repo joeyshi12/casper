@@ -1,15 +1,11 @@
-/* Casper layout and components (Dracula). Desktop shows a persistent sidebar
-   next to the chat; mobile shows one pane at a time. Import after theme.css. */
+/* Import after theme.css. */
 
-/* Layout split */
 .layout {
   display: flex;
   height: 100%;
   overflow: hidden;
 }
 
-/* Shown while an existing token is being validated, so the login page never
-   flashes before the app loads. */
 .app-splash {
   height: 100%;
   background: var(--n-abyss);
@@ -22,10 +18,8 @@
   flex-direction: column;
   border-right: 1px solid var(--n1);
   background: var(--n0);
-  /* Collapses by width rather than display, so it can animate out like the file panel. */
   overflow: hidden;
-  /* visibility is discrete: on at the start of opening, off at the end of closing, so the
-     panel is visible for the whole animation either way. */
+  /* visibility must stay last: a step function, it must flip only at the end of close. */
   transition: width 0.2s ease, opacity 0.2s ease, border-color 0.2s ease, visibility 0.2s;
 }
 
@@ -37,8 +31,6 @@
   background: var(--n-abyss);
 }
 
-/* Mobile: sidebar is the home screen; opening a session swaps to the chat. */
-/* Collapsed: no width, so the chat takes the space, and nothing inside can be tabbed to. */
 .layout:not(.nav-open) .sidebar {
   width: 0;
   opacity: 0;
@@ -51,7 +43,6 @@
 }
 
 @media (max-width: 768px) {
-  /* Floats over the chat rather than pushing it aside: nothing to navigate back to. */
   .sidebar {
     position: fixed;
     z-index: 40;
@@ -60,7 +51,6 @@
     left: 0;
     width: min(86vw, 320px);
     box-shadow: 0 0 40px rgb(0 0 0 / 0.5);
-    /* Slides at full width, so the rows don't reflow while it moves. */
     transition: transform 0.2s ease, visibility 0.2s;
   }
   .layout:not(.nav-open) .sidebar {
@@ -71,7 +61,6 @@
   .layout.nav-open .sidebar {
     transform: translateX(0);
   }
-  /* Dismisses the drawer with a tap. Only here: a wide screen has nothing to dismiss. */
   .nav-scrim {
     display: block;
     position: fixed;
@@ -88,10 +77,8 @@
   }
 }
 
-/* Each word of streamed text mounts with this, so text arrives instead of popping in.
-   Open WebUI uses 100ms opacity-only (.fade-in-token in its app.css); the slight blur and
-   the longer 200ms read closer to Claude without being slow enough to lag the stream.
-   `both` holds the end state, so a word that has arrived costs nothing further. */
+/* 200ms with a slight blur, against Open WebUI's 100ms opacity-only fade: closer to Claude
+   without lagging the stream. `both` keeps the end state, so an arrived word costs nothing. */
 @keyframes fade-word {
   from {
     opacity: 0;
@@ -106,8 +93,6 @@
   display: inline;
   animation: fade-word 0.2s ease-out both;
 }
-/* A card that arrived during this turn rises into place, the way Open WebUI fades in its
-   status lines. Transform only, so nothing around it moves. */
 @keyframes card-in {
   from {
     opacity: 0;
@@ -121,8 +106,6 @@
 .toolline-wrap.is-arriving {
   animation: card-in 0.2s ease-out both;
 }
-/* Still working: the label's own colour sweeps across it, the way Open WebUI marks pending
-   text - busy without a spinner. */
 @keyframes label-shimmer {
   from {
     background-position: 120% 0;
@@ -132,7 +115,6 @@
   }
 }
 
-/* Sidebar */
 .sidebar-head {
   display: flex;
   align-items: center;
@@ -187,13 +169,10 @@
   border-radius: var(--r-md);
   transition: background 0.12s;
 }
-/* An open menu holds the hover state: it is portaled to body, so the pointer leaves the row. */
 .srow:hover,
 .srow.is-menu-open {
   background: var(--n1);
 }
-/* The active row gets a stronger fill than hover, so an adjacent hovered row
-   stays visually distinct instead of merging into one cramped block. */
 .srow.is-active {
   background: var(--n2);
 }
@@ -201,12 +180,10 @@
   flex: 1;
   min-width: 0;
   display: block;
-  /* An anchor now, so opt out of the global link colour and underline. */
   color: inherit;
   text-decoration: none;
   text-align: left;
-  /* Reserve room on the right so the title truncates before the ⋮ menu
-     instead of running the full width of the row. */
+  /* 34px right padding reserves room for the ⋮ menu so the title truncates before it. */
   padding: 10px 34px 10px 12px;
   background: none;
 }
@@ -245,12 +222,10 @@
   color: var(--frost);
   flex: none;
 }
-/* While a row is opening, the spinner stands in for its timestamp. */
 .srow-spinner ~ .srow-when {
   display: none;
 }
-/* Desktop keeps the timestamp and drops the spinner: the chat pane is right
-   there with its own loading state. Must follow the rules above to win. */
+/* Must follow the rules above: source order decides which wins at this width. */
 @media (min-width: 769px) {
   .srow-spinner {
     display: none;
@@ -259,8 +234,7 @@
     display: inline;
   }
 }
-/* Renaming in place: the row's own type and metrics, so its height never changes.
-   Padding is the row's 10px 12px less the border; the negative margin absorbs the ring. */
+/* Padding is the row's 10px 12px minus the border; negative margin absorbs the ring. */
 .srow-rename {
   flex: 1;
   min-width: 0;
@@ -276,7 +250,6 @@
   line-height: 1.35;
 }
 .srow-rename:focus {
-  /* The border is the focus affordance; the browser ring on top of it reads as two. */
   outline: none;
 }
 .srow-rename::selection {
@@ -297,11 +270,8 @@
 .srow.is-menu-open .srow-menu-btn {
   opacity: 1;
 }
-/* One step above the row it sits on, in both row states. The inherited .iconbtn hover
-   was --n1: identical to the row's own hover fill, so hovering the button changed
-   nothing, and darker than the active row's --n2, so it read as a hole. Source order
-   matters here - a hovered active row matches both, and the later rule should win.
-   An open menu keeps that fill without the pointer, which has moved to the menu. */
+/* Source order matters: a hovered active row matches both selectors below, and
+   the later rule must win. */
 .srow:hover .srow-menu-btn:hover,
 .srow:hover .srow-menu-btn:active,
 .srow.is-menu-open .srow-menu-btn {
@@ -312,7 +282,6 @@
 .srow.is-active.is-menu-open .srow-menu-btn {
   background: var(--n3);
 }
-/* Look only. The account menu positions itself here; a row's is portaled and placed by script. */
 .menu-list {
   position: absolute;
   top: 34px;
@@ -325,8 +294,7 @@
   border-radius: var(--r-md);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
 }
-/* Portaled to body, so it overlays instead of taking part in any layout. top/left
-   come from PopoverMenu, which also flips it above the trigger near the bottom. */
+/* top/left are set by PopoverMenu, which flips the panel above the trigger near the bottom. */
 .menu-list-floating {
   position: fixed;
   top: auto;
@@ -349,7 +317,6 @@
   color: var(--aurora-red);
 }
 
-/* Account menu (sidebar header) */
 .account-menu {
   position: relative;
 }
@@ -359,7 +326,6 @@
   right: auto;
 }
 
-/* Devices modal */
 .devices-head {
   display: flex;
   align-items: center;
@@ -424,7 +390,6 @@
   text-align: right;
 }
 
-/* Chat header */
 .chat-head {
   display: flex;
   align-items: center;
@@ -436,7 +401,6 @@
   border-bottom: 1px solid var(--n1);
   background: var(--n-abyss);
 }
-/* Shows and hides the session panel, at every width. */
 .navbtn {
   display: flex;
   align-items: center;
@@ -480,7 +444,6 @@
   color: var(--n5);
 }
 
-/* Search modal */
 .search-backdrop {
   position: fixed;
   inset: 0;
@@ -577,7 +540,6 @@
   flex-shrink: 0;
 }
 
-/* Chat blank */
 .chat-blank {
   flex: 1;
   display: flex;
@@ -619,7 +581,6 @@
   }
 }
 
-/* Connection status */
 .conndot {
   display: inline-flex;
   align-items: center;
@@ -660,7 +621,6 @@
   color: var(--aurora-red);
 }
 
-/* Buttons */
 .btn-primary {
   font-family: var(--font-body);
   font-weight: 600;
@@ -710,7 +670,6 @@
   filter: brightness(0.95);
 }
 
-/* Confirmation modal */
 .confirm-backdrop {
   position: fixed;
   inset: 0;
@@ -751,13 +710,12 @@
   gap: 8px;
 }
 
-/* Directory picker. Names elide at the FRONT, since the end is what distinguishes them. */
 .dirpick {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-/* No scroller: overshooting one fires the browser's back gesture. See DirectoryPicker. */
+/* No horizontal scroller here: overshooting one fires the browser's back gesture. */
 .dirpick-crumbs {
   flex: 1;
   min-width: 0;
@@ -769,8 +727,6 @@
   font-family: var(--font-mono);
   font-size: 12px;
 }
-/* Styled as a crumb, because it stands for crumbs. The count is in its accessible name. */
-/* Nudged down: lowercase text sits below its box centre, so a centred icon reads high. */
 .dirpick-more {
   display: inline-flex;
   align-items: center;
@@ -786,7 +742,6 @@
   flex: none;
   min-width: 0;
 }
-/* The current folder is rightmost, so it is what a narrow row clipped. Let it shrink. */
 .dirpick-crumb-wrap:last-child {
   flex: 0 1 auto;
 }
@@ -834,12 +789,10 @@
   font-size: 12px;
   transition: border-color 0.12s;
 }
-/* The border is the affordance, as on .composer-box. */
 .dirpick-input:focus {
   outline: none;
   border-color: var(--frost-deep);
 }
-/* Fixed height, never hidden: the sheet must not resize as you browse. */
 .dirpick-list {
   height: 196px;
   overflow-y: auto;
@@ -884,7 +837,6 @@
   direction: ltr;
   unicode-bidi: embed;
 }
-/* One fixed line for the notices, so their appearance moves nothing below. */
 .dirpick-status {
   display: flex;
   align-items: center;
@@ -903,8 +855,7 @@
 .dirpick-note.is-bad {
   color: var(--aurora-red);
 }
-/* Keyed to touch, not width: a small desktop window still has a mouse. Rows meet Apple's
-   44pt; crumbs take 32px, above the 24px WCAG 2.5.8 floor but below that recommendation. */
+/* 44px/32px floors from Apple's touch target guidance; both still clear WCAG 2.5.8 (24px). */
 @media (pointer: coarse) {
   .dirpick-opt {
     min-height: 44px;
@@ -922,13 +873,10 @@
   }
 }
 
-/* Dropdown */
 .dd {
   position: relative;
   min-width: 0;
 }
-/* Inside the composer the selectors are secondary to the message, so they stay
-   quiet until pointed at. */
 .composer-actions-right .dd-trigger {
   padding: 4px 6px;
   font-size: 13px;
@@ -976,8 +924,7 @@
   transform: rotate(180deg);
 }
 
-/* Floating options panel. Opens downward by default; in the bottom composer
-   bar it opens upward (see override below) so it isn't clipped off-screen. */
+/* Opens upward in the composer (see override below) so it isn't clipped off-screen. */
 .dd-panel {
   position: absolute;
   top: calc(100% + 6px);
@@ -994,9 +941,6 @@
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
   animation: dd-in 0.12s ease;
 }
-/* The selectors sit in the bottom-right corner, so their menus open up and to
-   the left - anchored to the trigger's right edge rather than its left, which
-   would push them off the pane. */
 .composer-actions-right .dd-panel {
   top: auto;
   bottom: calc(100% + 6px);
@@ -1041,7 +985,6 @@
   flex-shrink: 0;
 }
 
-/* Transcript */
 .transcript-wrap {
   position: relative;
   flex: 1;
@@ -1049,7 +992,6 @@
   min-height: 0;
   display: flex;
 }
-/* Floating jump-to-latest button, centered above the composer. */
 .scroll-to-bottom {
   position: absolute;
   bottom: 16px;
@@ -1070,9 +1012,8 @@
   transition: background 0.12s, color 0.12s, transform 0.12s;
   animation: fade-in 0.15s ease;
 }
-/* Overlay pill shown while loading older history. Absolutely positioned so it
-   does not add to the scroll content height (which would break scroll anchoring
-   during a prepend). */
+/* Absolutely positioned so it doesn't add to scroll height, which would break
+   scroll anchoring during a prepend. */
 .loading-older {
   position: absolute;
   top: 10px;
@@ -1101,8 +1042,6 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  /* Centred reading column; the scroll area itself stays full width so the
-     scrollbar and the wheel target remain at the pane edge. */
   padding: var(--gutter) var(--chat-inset) var(--transcript-end-slack);
   display: flex;
   flex-direction: column;
@@ -1113,8 +1052,7 @@
   display: none; /* WebKit/Blink */
 }
 
-/* Direct children are flex items and default to flex-shrink: 1, so a full
-   column compresses them (tool cards clip and flatten). Pin them all. */
+/* Flex children default to flex-shrink: 1, which would compress tool cards. Pin them. */
 .transcript > * {
   flex: 0 0 auto;
 }
@@ -1154,7 +1092,6 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
-/* Attached-image thumbnails in a user message. */
 .msg-attachments {
   display: flex;
   flex-wrap: wrap;
@@ -1163,7 +1100,6 @@
 .msg-attachments:not(:last-child) {
   margin-bottom: 8px;
 }
-/* Non-image attachments. */
 .msg-file {
   display: inline-flex;
   cursor: pointer;
@@ -1204,8 +1140,7 @@
   object-fit: cover;
   display: block;
 }
-/* Hold a box until the bytes arrive. An unsized <img> is zero-tall, which puts
-   every image in the transcript "in view" and defeats loading="lazy". */
+/* An unsized <img> is zero-tall, which puts it "in view" and defeats loading="lazy". */
 .msg-image:not([data-loaded]) {
   width: 220px;
   height: 220px;
@@ -1219,9 +1154,8 @@
   opacity: 0.55;
   border-color: var(--aurora-red);
 }
-/* Kept visible rather than revealed on hover: there is no hover on a phone and
-   the bubble is a div, so :focus-within never fired either - which left Retry
-   unreachable on touch. The reason belongs on screen anyway. */
+/* Kept visible rather than shown on hover: no hover on a phone, and the bubble
+   is a div so :focus-within never fires, which left Retry unreachable on touch. */
 .msg-failed {
   display: flex;
   flex-wrap: wrap;
@@ -1271,8 +1205,6 @@
   animation-delay: 0.32s;
 }
 
-/* A thinking message's text, shown in a tool-line row or a lone line's body: muted and
-   italic so it reads as reasoning rather than spoken output. */
 .thought-text {
   font-size: 14px;
   color: var(--n3);
@@ -1337,7 +1269,6 @@
   font-size: 13px;
   color: var(--n5);
 }
-/* In-progress indicator (not clickable). */
 .compaction-live .compaction-head {
   cursor: default;
 }
@@ -1349,9 +1280,6 @@
   color: var(--frost-deep);
 }
 
-/* Markdown */
-/* Failed turn: a system event, styled off the compaction divider above so the
-   two read as the same class of thing, in red rather than accent. */
 .sysnote {
   align-self: stretch;
   width: 100%;
@@ -1400,8 +1328,8 @@
   color: var(--n5);
   margin: 0 0 10px;
 }
-/* The server's own words, kept monospaced and scrollable: a stderr tail has its
-   own line breaks and would be mangled by prose wrapping or markdown. */
+/* Monospaced and scrollable: a stderr tail has its own line breaks that prose
+   wrapping or markdown would mangle. */
 .sysnote-raw {
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -1440,8 +1368,6 @@
   color: var(--aurora-red);
 }
 
-/* A blocking condition that outlives the turn (bad credentials, missing binary), or an
-   action that couldn't run. Floats above the composer, so it never shifts the transcript. */
 .notice-banner {
   position: absolute;
   bottom: calc(100% + 10px);
@@ -1496,10 +1422,6 @@
 .notice-x:hover {
   color: var(--n6);
 }
-/* Widgets: the frame carries no chrome, so the content sits in the conversation
-   rather than in a box. Height comes from the frame itself, over postMessage. */
-/* Templates are first-party, so they render as part of the app rather than in a
-   sandboxed frame: no isolation needed for markup we wrote. */
 .tpl-choice {
   margin: 12px 0;
 }
@@ -1683,7 +1605,6 @@
   font-weight: 500;
 }
 
-/* Code block */
 .codeblock {
   margin: 10px 0;
   border-radius: var(--r-md);
@@ -1733,7 +1654,6 @@
   white-space: pre;
 }
 
-/* Mermaid */
 .mermaid-block {
   margin: 12px 0;
   padding: 16px;
@@ -1751,8 +1671,6 @@
   height: auto;
 }
 
-/* Tool calls: one line of plain muted text that opens onto its tailored body. No card
-   border, no status dot, no monospace tool name - a call reads as a sentence. */
 .toolline-wrap {
   align-self: flex-start;
   max-width: 100%;
@@ -1763,7 +1681,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  /* Buttons keep the browser's side padding otherwise, which indents the line. */
+  /* Buttons have default side padding, which would indent the line otherwise. */
   padding: 0;
   max-width: 100%;
   min-height: 26px;
@@ -1790,8 +1708,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Still running: the text's own colour sweeps across it, the same shimmer the
-   thinking label uses - busy without a spinner. */
 .toolline-text.is-live {
   background: linear-gradient(
     100deg,
@@ -1817,8 +1733,7 @@
 .toolline-chevron.is-open {
   transform: none;
 }
-/* Expand/collapse height animation: grid 0fr -> 1fr animates to the content's
-   natural height without measuring it. */
+/* grid 0fr -> 1fr animates to the content's natural height without measuring it. */
 .collapse {
   display: grid;
   grid-template-rows: 0fr;
@@ -1846,7 +1761,6 @@
 }
 .toolcall-body {
   padding: 6px 0 10px;
-  /* One scroll area for the whole body: input and output scroll together. */
   max-height: 460px;
   overflow-y: auto;
 }
@@ -1859,7 +1773,6 @@
   max-height: none;
   overflow-y: visible;
 }
-/* The labels separate input from output, so code needs no box of its own. */
 .toolcall-body .toolcode {
   margin-top: 4px;
   padding: 0;
@@ -1871,7 +1784,6 @@
 .toolcall-body .toolcall-section:first-child .toolcall-label {
   margin-top: 0;
 }
-/* Inside a group's box, a call's body sits in the row without a second border. */
 .toolline-row .shell-panel,
 .toolline-row .websearch {
   border: none;
@@ -1880,8 +1792,6 @@
 .toolcall-section {
   margin-top: 11px;
 }
-/* Two or more consecutive calls collapsed into one line; open, they show as rows in one
-   lightly bordered box. */
 .toolline-box {
   margin-top: 2px;
   border: 1px solid var(--n2);
@@ -1898,8 +1808,6 @@
   padding: 0 0 10px;
 }
 
-/* The subagent list: one row per stage inside a subagent call's toolline-box, reusing its
-   border and row dividers. Each row opens in place onto that subagent's task and transcript. */
 .agent-row {
   display: flex;
   align-items: center;
@@ -1977,8 +1885,6 @@
   gap: 10px;
 }
 
-/* The file a read or write acted on, above its body. A button when the file is inside
-   the workspace and so has a preview to open, plain text when it is not. */
 .toolcall-file {
   display: flex;
   align-items: center;
@@ -2012,7 +1918,6 @@
   color: var(--n4);
   margin-bottom: 4px;
 }
-/* Chrome-free highlighted code (no bar/border/copy) for tool bodies. */
 .toolcode {
   margin-top: 10px;
   padding: 10px 12px;
@@ -2037,7 +1942,6 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
-/* shell: the command and its output in one bordered panel, each under a small label. */
 .shell-panel {
   border: 1px solid var(--n1);
   border-radius: var(--r-md);
@@ -2062,7 +1966,6 @@
   font-size: 11px;
   color: var(--aurora-red);
 }
-/* File-edit diff. */
 .diff-body {
   margin-top: 10px;
   padding: 6px 0;
@@ -2106,7 +2009,6 @@
 .diff-ctx {
   color: var(--n4);
 }
-/* grep results grouped by file. */
 .grep {
   margin-top: 10px;
   display: flex;
@@ -2138,7 +2040,6 @@
   word-break: break-word;
 }
 
-/* web_fetch / web_search / introspect renderers */
 .toolcall-meta {
   margin-top: 10px;
   display: flex;
@@ -2159,15 +2060,11 @@
   border-radius: var(--r-sm);
   padding: 1px 6px;
 }
-/* Rendered markdown body (fetched page / introspect docs) - scroll if long so
-   a huge page doesn't blow out the transcript. */
 .toolcall-doc {
   margin-top: 10px;
   max-height: 460px;
   overflow: auto;
 }
-/* web_search: one compact row per result in a bordered box, title on the left and its
-   site on the right. */
 .websearch {
   list-style: none;
   margin: 2px 0 0;
@@ -2202,7 +2099,6 @@ a.websearch-row:hover {
   font-size: 12px;
   color: var(--n3);
 }
-/* todo_list checklist. */
 .todo {
   margin-top: 10px;
   padding: 8px 10px;
@@ -2235,7 +2131,6 @@ a.websearch-row:hover {
   color: var(--n3);
   text-decoration: line-through;
 }
-/* Inline images from tool calls (e.g. charts, screenshots). */
 .toolcall-images {
   display: flex;
   flex-wrap: wrap;
@@ -2267,8 +2162,6 @@ a.websearch-row:hover {
 
 
 
-/* Composer */
-/* Prompt input, then the agent/model config row, then the live stats strip. */
 .composer-wrap {
   /* Containing block for the notice banner, which floats just above it. */
   position: relative;
@@ -2295,8 +2188,6 @@ a.websearch-row:hover {
   padding: 8px 8px 6px;
   transition: border-color 0.12s;
 }
-/* Controls sit inside the box under the text: add on the left, everything that
-   describes or sends the message on the right. */
 .composer-actions {
   display: flex;
   align-items: center;
@@ -2308,8 +2199,8 @@ a.websearch-row:hover {
   align-items: center;
   gap: 4px;
   min-width: 0;
-  /* The dropdown panels are absolutely positioned; an overflow container here
-     would clip them. */
+  /* overflow: visible, not hidden - the dropdown panels are absolutely
+     positioned and an overflow container here would clip them. */
   overflow: visible;
 }
 .composer-box:focus-within {
@@ -2353,7 +2244,6 @@ a.websearch-row:hover {
 .composer-input::placeholder {
   color: var(--n3);
 }
-/* Icon-only, so a square target rather than a text pill. */
 .composer-btn {
   display: flex;
   align-items: center;
@@ -2393,7 +2283,6 @@ a.websearch-row:hover {
 .composer-file-input {
   display: none;
 }
-/* Attachment thumbnails above the input. */
 .composer-attachments {
   display: flex;
   align-items: flex-start;
@@ -2405,8 +2294,6 @@ a.websearch-row:hover {
   position: relative;
   flex-shrink: 0;
 }
-/* Tall enough to recognise a screenshot, and contained rather than cropped so it
-   is the whole picture at a glance. */
 .composer-att-img {
   display: block;
   height: 112px;
@@ -2440,8 +2327,8 @@ a.websearch-row:hover {
   white-space: nowrap;
   min-width: 0;
 }
-/* Inside the thumbnail, not overlapping its edge: the strip scrolls horizontally,
-   which clips both axes, so anything outside the box loses its top. */
+/* The attachment strip scrolls horizontally and clips both axes, so this must
+   stay inside the thumbnail's edge or lose its top. */
 .composer-att-remove {
   position: absolute;
   top: 5px;
@@ -2470,14 +2357,12 @@ a.websearch-row:hover {
 .composer-att-remove:hover {
   background: var(--aurora-red);
 }
-/* No hover to reveal it with, so leave it showing. */
 @media (hover: none) {
   .composer-att-remove {
     opacity: 1;
   }
 }
 
-/* Gate */
 .gate {
   height: 100%;
   display: flex;
@@ -2536,7 +2421,6 @@ a.websearch-row:hover {
   font-family: var(--font-mono);
 }
 
-/* Sheet */
 .sheet-backdrop {
   position: fixed;
   inset: 0;
@@ -2549,8 +2433,6 @@ a.websearch-row:hover {
 .sheet {
   width: 100%;
   max-width: 440px;
-  /* Bounded, so a tall body scrolls inside the sheet instead of pushing its actions
-     off the bottom of a phone screen. */
   max-height: 100dvh;
   overflow-y: auto;
   background: var(--n0);
@@ -2584,9 +2466,6 @@ a.websearch-row:hover {
   margin-top: 8px;
 }
 
-/* Chat body: holds the scrolling transcript. */
-/* A draft: wordmark and prompt centred as one group, a little above middle, like a new chat
-   before anything has been said. */
 .chat-draft {
   flex: 1;
   min-height: 0;
@@ -2595,7 +2474,6 @@ a.websearch-row:hover {
   justify-content: center;
   align-items: center;
   gap: 30px;
-  /* Lifted above centre by the bottom padding, clamped so a short window still fits. */
   padding: 0 16px clamp(40px, 16vh, 180px);
   overflow-y: auto;
 }
@@ -2604,7 +2482,6 @@ a.websearch-row:hover {
   align-items: center;
   gap: 16px;
 }
-/* Sized against the viewport so it reads as a title on a laptop without crowding a phone. */
 .draft-logo {
   width: clamp(42px, 5vw, 60px);
   height: clamp(42px, 5vw, 60px);
@@ -2618,7 +2495,6 @@ a.websearch-row:hover {
   letter-spacing: -0.015em;
   color: var(--n6);
 }
-/* Free-standing here rather than a bar pinned to the bottom of the pane. */
 .chat-draft .composer-wrap {
   width: 100%;
   max-width: 720px;
@@ -2639,7 +2515,6 @@ a.websearch-row:hover {
   min-width: 0;
 }
 
-/* Active session with a file panel: chat column beside a full-height panel. */
 .chatpane-split {
   flex-direction: row;
   position: relative;
@@ -2652,10 +2527,7 @@ a.websearch-row:hover {
   flex-direction: column;
 }
 
-/* The icon buttons at the right of the chat header. One box for both, so their hover
-   areas match: sizing them separately left the file toggle intrinsic at ~36x29 and
-   reload fixed at 32x28, which reads as a misalignment on hover. box-sizing is set
-   here because this stylesheet has no global border-box rule. */
+/* box-sizing: border-box set here since this stylesheet has no global border-box rule. */
 .chat-head-btn {
   box-sizing: border-box;
   display: flex;
@@ -2679,7 +2551,7 @@ a.websearch-row:hover {
   cursor: default;
 }
 
-/* First of the pair, so its auto margin pushes both to the right edge. */
+/* margin-left: auto on the first of the pair pushes both to the right edge. */
 .chat-reload {
   margin-left: auto;
 }
@@ -2689,7 +2561,6 @@ a.websearch-row:hover {
   border-color: var(--n2);
 }
 
-/* File tree side panel (desktop: right column; mobile: overlay). */
 .ftree-aside {
   width: 0;
   flex-shrink: 0;
@@ -2732,7 +2603,6 @@ a.websearch-row:hover {
   }
 }
 
-/* File tree panel internals. */
 .ftree-panel {
   display: flex;
   flex-direction: column;
@@ -2754,8 +2624,6 @@ a.websearch-row:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Header action buttons (refresh, close): identical centered icon-boxes so
-   their glyphs line up vertically regardless of SVG vs text content. */
 .ftree-refresh,
 .ftree-close {
   display: inline-flex;
@@ -2785,7 +2653,6 @@ a.websearch-row:hover {
   background: none;
   color: var(--n4);
 }
-/* Dimmed tap-to-close layer behind the mobile file-tree drawer. */
 .ftree-backdrop {
   display: none;
 }
@@ -2815,7 +2682,6 @@ a.websearch-row:hover {
 .ftree-error {
   color: var(--aurora-red);
 }
-/* "Change folder…" action shown with a tree error (e.g. a deleted workspace). */
 .ftree-repoint {
   display: block;
   margin: 8px auto 0;
@@ -2829,7 +2695,6 @@ a.websearch-row:hover {
   background: var(--n2);
   color: var(--n6);
 }
-/* Inline validation error inside a sheet (e.g. rejected working directory). */
 .sheet-error {
   margin: 4px 0 0;
   font-size: 12px;
@@ -2837,7 +2702,6 @@ a.websearch-row:hover {
   word-break: break-word;
 }
 
-/* Tree rows. */
 .ftree-row {
   display: flex;
   align-items: center;
@@ -2922,10 +2786,8 @@ a.websearch-row:hover {
   flex-shrink: 0;
 }
 .ftree-children {
-  /* No extra spacing; indent is handled via inline padding. */
 }
 
-/* File preview modal. */
 .fpreview-backdrop {
   position: fixed;
   inset: 0;
@@ -2935,8 +2797,8 @@ a.websearch-row:hover {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  /* dvh tracks the visible viewport (mobile address bar) so the centered modal
-     never extends past the screen; vh is the fallback. */
+  /* dvh tracks the mobile browser's visible viewport so the modal never
+     extends past the screen; vh is the fallback for browsers without it. */
   height: 100vh;
   height: 100dvh;
   animation: fade-in 0.15s ease;
@@ -2945,9 +2807,6 @@ a.websearch-row:hover {
   display: flex;
   flex-direction: column;
   width: 100%;
-  /* Wider than the 720px conversation column: this shows code, diffs and rendered
-     pages, which the chat's reading measure is too narrow for. Fullscreen still
-     exists for the rest. */
   max-width: 1100px;
   max-height: 85vh;
   max-height: 85dvh;
@@ -3024,8 +2883,6 @@ a.websearch-row:hover {
   background: var(--n-abyss);
 }
 
-/* Rendered HTML. White background regardless of theme: the page brings its own
-   styling and most pages assume a light canvas. */
 .fpreview-loading {
   display: flex;
   align-items: center;
@@ -3035,14 +2892,10 @@ a.websearch-row:hover {
 }
 
 .fpreview-md {
-  /* Cap the measure so prose stays readable when the preview goes fullscreen. */
   max-width: 78ch;
   margin: 0 auto;
 }
 
-/* A rendered page and a PDF viewer both bring their own margins and chrome, so the modal
-   gives them the full body and no padding of its own. Scoped with :has so the source
-   view, which shows highlighted code in the same slot, keeps its padding. */
 .fpreview-body:has(> .fpreview-html, > .fpreview-pdf) {
   padding: 0;
 }
@@ -3058,10 +2911,9 @@ a.websearch-row:hover {
   background: #fff;
 }
 
-/* Fullscreen preview. A class rather than the Fullscreen API, which iOS Safari
-   won't grant to arbitrary elements. */
-/* The backdrop's 24px padding caps the modal, so drop it when going fullscreen. 100%
-   rather than 100vw, which overflows by the scrollbar width. */
+/* A class rather than the Fullscreen API, which iOS Safari won't grant to
+   arbitrary elements. */
+/* 100% not 100vw: 100vw overflows by the scrollbar width. */
 .fpreview-backdrop:has(.fpreview-full) {
   padding: 0;
 }
@@ -3080,7 +2932,6 @@ a.websearch-row:hover {
   min-height: 0;
 }
 
-/* Segmented rendered/source control, sitting at the left of the preview header. */
 .fpreview-seg {
   display: flex;
   align-items: center;
@@ -3110,7 +2961,6 @@ a.websearch-row:hover {
   color: var(--n7);
 }
 
-/* Filled, so the control reads as a position rather than a button to press. */
 .fpreview-seg-btn.is-active {
   background: var(--n3);
   color: var(--n9);
@@ -3146,7 +2996,6 @@ a.websearch-row:hover {
   }
 }
 
-/* Keyframes */
 @keyframes pulse {
   0%,
   100% {
@@ -3194,7 +3043,6 @@ a.websearch-row:hover {
 }
 
 
-/* Context-window usage: a ring in the composer controls, numbers behind a click. */
 .ctx {
   position: relative;
   display: flex;
@@ -3230,10 +3078,8 @@ a.websearch-row:hover {
   border: 1px solid var(--n2);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
 }
-/* On a phone the ring sits inboard of the selectors and the send button, so a
-   panel anchored to it runs off the left edge. Anchor to the controls row
-   instead - its right edge is the composer's - and let the panel shrink on very
-   narrow screens. */
+/* The ring sits inboard on a phone, so a panel anchored to it would run off
+   the left edge. Anchor to .composer-actions instead, whose right edge matches. */
 @media (max-width: 768px) {
   .composer-actions {
     position: relative;

@@ -1,13 +1,10 @@
 // Pure client logic: the store fold, tool rendering, diffing and call parsers.
-// Run with: npm test
 
-import { describe, it, before, beforeEach, after } from 'node:test';
+import { describe, it, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'node:path';
 import type {
   CasperEvent,
   CasperEventPayload,
-  DirListing,
   ChatDetail,
   ChatSummary,
 } from '@casper/shared';
@@ -19,7 +16,6 @@ import {
   type SessionApi,
 } from '../web/src/state/sessionController.js';
 import type { SessionSocketHandlers } from '../web/src/api/SessionSocket.js';
-import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
 import { lineDiff } from '../web/src/util/diff.js';
 import { matchPath } from 'react-router';
 import { CHAT_ROUTE, DRAFT_PATH, pathForChat } from '../web/src/util/route.js';
@@ -78,8 +74,8 @@ describe('attachments line (sent for the agent; stripped from the bubble)', () =
     assert.equal(stripAttachmentsLine('hello world'), 'hello world');
   });
 
-  // Regression: the composer terminates the line with '\n', so a transcript that joins
-  // prompt text blocks with '' still recovers the typed text rather than swallowing it.
+  // The composer terminates the line with '\n', so a transcript that joins prompt text
+  // blocks with '' must still recover the typed text rather than swallowing it.
   const joinedEmpty = [`${ATTACHMENTS_PREFIX}.casper/uploads/pasted.png\n`, 'look at this'].join('');
   it('attachments+text: typed text survives an empty-string join', () => {
     assert.equal(stripAttachmentsLine(joinedEmpty), 'look at this');
@@ -299,8 +295,8 @@ describe('store.applyEvent (streamed reasoning is trimmed when committed)', () =
     useStore.getState().clearActive();
   });
 
-  // A separator chunk arriving after the previous commit used to open the next block with
-  // blank lines, which show because .thought-text is pre-wrap.
+  // A separator chunk arriving after the previous commit must not open the next block
+  // with blank lines, which would show because .thought-text is pre-wrap.
   it('drops whitespace the stream carried in at the front', () => {
     useStore.getState().applyEvent(thought(1, '\n\n'));
     useStore.getState().applyEvent(thought(2, 'Checking the guard order.'));
@@ -376,7 +372,7 @@ describe('store.applyEvent (duplicate event suppression)', () => {
     useStore.getState().applyEvent(toolCall(2, 'tc-1'));
     assert.equal(useStore.getState().items.length, 2);
 
-    // A second socket replaying the same range, as a woken phone used to do.
+    // A second socket replaying the same range, as happens when a phone wakes.
     useStore.getState().applyEvent(userTurn(1, 'first'));
     useStore.getState().applyEvent(toolCall(2, 'tc-1'));
     assert.equal(useStore.getState().items.length, 2);
@@ -1175,7 +1171,7 @@ describe('session list', () => {
 
   it('never walks a row backwards in time', () => {
     // The list and a session's own detail learn about activity by different routes, so
-    // opening a session used to replace a fresh timestamp with an older one.
+    // opening a session must not replace a fresher timestamp with an older one.
     const listed = [row('b', 'test', '2026-01-02T09:00:00Z')];
     const stale = upsertChat(listed, row('b', 'test', '2026-01-02T08:00:00Z'));
     assert.equal(stale[0]!.updatedAt, '2026-01-02T09:00:00Z');
@@ -1277,8 +1273,6 @@ describe('choice outcome', () => {
   });
 });
 
-// None of this was reachable before the lifecycle moved out of Shell: it lived in
-// a component the test runner cannot import, behind refs nothing could observe.
 describe('session controller', () => {
   const detailFor = (id: string, head = 0): ChatDetail =>
     ({
@@ -1436,8 +1430,8 @@ describe('session controller', () => {
     assert.deepEqual(socket.calls, ['create:s9@4', 'connect']);
   });
 
-  // The bug this guards: switching away mid-fetch used to let the abandoned
-  // session's detail land and overwrite the one the user moved to.
+  // Switching away mid-fetch must not let the abandoned session's detail land and
+  // overwrite the one the user moved to.
   it('drops a detail that arrives after the user moved on', async () => {
     let releaseFirst: ((d: ChatDetail) => void) | undefined;
     const { controller } = build({
@@ -1585,8 +1579,8 @@ describe('session controller', () => {
     assert.equal(useStore.getState().pending.length, 1, 'and no duplicate bubble');
   });
 
-  // A retry used to rebuild the prompt from the bubble's text, which dropped the attachments
-  // line and any image blocks - so a retried message arrived without its files.
+  // A retry must send the original content blocks, not rebuild the prompt from the
+  // bubble's text, which would drop the attachments line and any image blocks.
   it('a retried send keeps the files and blocks it was sent with', async () => {
     const { controller, socket } = build();
     await controller.openChat('s1');
@@ -1607,8 +1601,7 @@ describe('session controller', () => {
     assert.deepEqual(socket.sent[0]!.attachments, [zip], 'and the same files');
   });
 
-  // A draft has no session id, so without an identity of its own it had nowhere to upload:
-  // the composer refused with "No active session to upload to".
+  // A draft needs an identity of its own before it sends, or it has nowhere to upload to.
   it('a draft has a chat id before it sends, and creates the session with it', async () => {
     let sentChatId: string | undefined;
     const { controller } = build({
@@ -1660,8 +1653,8 @@ describe('session controller', () => {
   });
 
   // The attachment metadata is threaded through four hops to reach the server. TypeScript
-  // allows a narrower function where a wider one is expected, so a handler that forgot the
-  // second parameter silently discarded it and still compiled.
+  // allows a narrower function where a wider one is expected, so a handler missing the
+  // second parameter would silently discard it and still compile.
   it('carries attachment metadata to the socket, not just the prompt text', async () => {
     const { controller, socket } = build();
     await controller.openChat('s1');
@@ -1712,8 +1705,8 @@ describe('session controller', () => {
     );
   });
 
-  // A reload belongs to one session. Held as a global flag it disabled the control on every
-  // other session, and a refusal that landed after switching blamed the wrong session.
+  // A reload belongs to one session: a global flag would disable the control on every
+  // other session, and a refusal landing after switching would blame the wrong one.
   it('leaves another session\'s reload control alone while one is restarting', async () => {
     let release!: (d: ChatDetail) => void;
     const { controller } = build({
@@ -1881,8 +1874,8 @@ describe('uuid (chat ids outside a secure context)', () => {
     assert.equal(uuid(), 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
   });
 
-  // Plain HTTP on a LAN address: randomUUID is secure-context only and so absent, which
-  // used to throw and leave the app unable to mint a chat id. getRandomValues is not gated.
+  // Plain HTTP on a LAN address: randomUUID is secure-context only and so absent there,
+  // but getRandomValues is not gated and must still work.
   it('falls back to getRandomValues when randomUUID is missing', () => {
     swapCrypto({ getRandomValues: (a: Uint8Array) => real.getRandomValues(a) });
 

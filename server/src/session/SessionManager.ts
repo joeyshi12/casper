@@ -51,15 +51,12 @@ import {
 import { ChatStore, type ChatRow } from './chatStore.js';
 import { SubagentLinkStore } from './subagentLinks.js';
 
-// Resolve a working directory for a new session as an absolute path (relative input against
-// DEFAULT_CWD), created if missing, rejected if it exists as a file. Confined to
-// config.fileRoot so a session - and the file endpoints scoped to it - can't reach arbitrary
-// locations such as /etc or SSH keys.
+// Resolves a cwd to an absolute path, creating it if missing. Confined to
+// config.fileRoot, which the file endpoints are also scoped to.
 function resolveCwd(input?: string): string {
   const raw = input?.trim();
   const abs = raw ? path.resolve(config.defaultCwd, raw) : config.defaultCwd;
 
-  // Confine to fileRoot. Blocks ../ traversal and out-of-root absolute paths.
   if (!isWithinRoot(config.fileRoot, abs)) {
     throw new Error(`Working directory is outside the allowed root: ${abs}`);
   }
@@ -79,11 +76,7 @@ function resolveCwd(input?: string): string {
   return abs;
 }
 
-/**
- * The process surface SessionManager drives. Wide because it genuinely uses all
- * of it, not because KiroProcess is shallow - and a seam this shape is what lets
- * eviction, capacity and session-id adoption be tested without spawning anything.
- */
+// Lets eviction, capacity and session-id adoption be tested without spawning anything.
 export interface ManagedProcess {
   on(event: 'notification', cb: (n: JsonRpcNotification) => void): unknown;
   on(event: 'exit', cb: (code: number | null, signal: string | null) => void): unknown;
@@ -106,13 +99,11 @@ export type SpawnProcess = (
 ) => ManagedProcess;
 
 export interface SessionManagerOptions {
-  /** Substitute the child process. Defaults to a real kiro-cli. */
   spawn?: SpawnProcess;
 }
 
-// A session's server-side state. The store, turn state, and metadata exist as
-// soon as it's opened; the kiro-cli child (`proc`) is spawned lazily, only when
-// an action needs it. Viewing a session never spawns a process.
+// Store, turn state and metadata exist as soon as a session is opened; the
+// kiro-cli child (`proc`) spawns lazily on first action.
 export class Session {
   readonly sessionId: string;
   readonly store: EventStore;
@@ -123,28 +114,19 @@ export class Session {
   modelId?: string;
   currentModeId?: string;
   availableModes: AgentMode[] = [];
-  /** Empty until something names it; resolveSessionTitle owns the fallback. */
   title = '';
   createdAt = new Date().toISOString();
   updatedAt = new Date().toISOString();
   lastActivity = Date.now();
   running = false;
-  // True once kiro has created or loaded this session id.
   private everLive = false;
 
   proc?: ManagedProcess;
-  // In-flight spawn, so concurrent actions share one process.
   spawning?: Promise<ManagedProcess>;
-  /**
-   * Set while this session's process is being replaced, and resolved when the
-   * replacement is ready. Claimed synchronously with the reload's guard, so an
-   * action arriving during one waits for the new process instead of acting on the
-   * one about to be disposed.
-   */
+  // An action during a reload waits on this instead of acting on the process
+  // about to be disposed.
   reloading?: Promise<void>;
-  // True while kiro is replaying history during session/load. The transcript is
-  // already hydrated from disk, so replayed notifications must not be appended
-  // to the live store (doing so floods the chat with duplicate tool calls).
+  // True while kiro replays history during session/load.
   replaying = false;
 
   constructor(sessionId: string, store: EventStore, cwd: string) {
@@ -160,15 +142,8 @@ export class Session {
     return this.everLive;
   }
 
-  /**
-   * Single append path: fold the event into the live snapshot AND persist/fan
-   * it out. Using this everywhere keeps turnState in sync with the event log,
-   * so a client that refetches mid-turn sees turnStatus 'running' rather than
-   * a stale 'idle'.
-   */
+  // Folds the event into the live snapshot and persists it in one call.
   record(payload: CasperEventPayload): CasperEvent {
-    // Any event is activity: without this, updatedAt stayed at whatever it was when
-    // the session was opened, and the detail reported a time older than the list.
     this.updatedAt = new Date().toISOString();
     this.turnState.apply(payload);
     return this.store.append(payload);
@@ -195,12 +170,6 @@ function notificationSessionId(n: JsonRpcNotification): string | undefined {
   return params?.sessionId;
 }
 
-/**
- * The declared stages of a `subagent` tool call, read off its rawInput. Returns null for
- * anything else - a plain tool call, or a `subagent` call kiro hasn't tagged with its
- * `_meta.kiro.toolName` yet (the `tool_call_chunk` preview on `_kiro.dev/session/update`,
- * which Casper already ignores as an unknown method).
- */
 function subagentCallStages(update: { sessionUpdate: string; [k: string]: unknown }): {
   toolCallId: string;
   stages: SubagentStageInput[];
@@ -217,27 +186,19 @@ function subagentCallStages(update: { sessionUpdate: string; [k: string]: unknow
   return { toolCallId, stages };
 }
 
-// How many transcript items to send on initial load / per older-page fetch.
-// A large session's full transcript is multiple MB; loading just the tail keeps
-// opening it fast, and the client fetches older pages on scroll-to-top.
+// Transcript items per page; a full transcript can be multiple MB.
 const TRANSCRIPT_PAGE_SIZE = 80;
 
-/** The later of two ISO timestamps: kiro's file and our own activity each move separately. */
 function newerOf(a: string | undefined, b: string): string {
   return a && a.localeCompare(b) > 0 ? a : b;
 }
 
-/** The first user message in a transcript, if it has one. */
 function firstPromptText(transcript: TranscriptItem[]): string | undefined {
   const first = transcript.find((it) => it.type === 'message' && it.message.role === 'user');
   return first?.type === 'message' ? first.message.text : undefined;
 }
 
-/**
- * A session kiro created or loaded, now with no file and no process, was deleted out from
- * under us. Left in memory it re-lists forever. One kiro never touched isn't a ghost: a
- * brand-new session has no file yet.
- */
+// A session once live with no file and no process was deleted externally.
 function isGhost(s: Session, hasFile: boolean): boolean {
   return !hasFile && s.hasBeenLive && !s.proc;
 }
@@ -254,10 +215,7 @@ export class SessionManager {
     this.spawnProcess = opts.spawn ?? ((o, l) => new KiroProcess(o, l));
   }
 
-  /**
-   * What a session is called, from every read path. The folder is skipped for a workspace of
-   * ours, whose name is a uuid.
-   */
+  /** What a session is called, from every read path. */
   private titleOf(
     chat: ChatRow,
     parts: { kiroTitle?: string; firstPrompt?: string; cwd: string },
@@ -277,21 +235,15 @@ export class SessionManager {
     if (s) s.title = clean || s.title;
   }
 
-  /**
-   * Re-point a session at a different working directory. Any live process was spawned with the
-   * old cwd, so it is disposed and the next turn respawns in the new one, transcript intact.
-   */
+  // A live process was spawned with the old cwd, so it's disposed and the next
+  // turn respawns.
   async setChatCwd(chatId: string, input: string): Promise<string> {
     const resolved = resolveCwd(input);
 
-    // Confirm the chat exists before recording an override for it.
     const s = await this.ensureOpen(chatId);
     await this.settleReload(s);
 
-    // Repointing disposes the child, so it is refused for the same reasons a reload is:
-    // mid-turn it kills the turn, and mid-compaction it loses the work and strands the
-    // compacting flag - the process_exited that would clear it never fires, because the
-    // exit handler ignores a process that is no longer the session's.
+    // Refused for the same reasons as a reload.
     if (s.running) {
       throw new Error('Cannot change the working directory while a turn is running');
     }
@@ -304,8 +256,6 @@ export class SessionManager {
     this.store.setCwd(chatId, resolved);
     if (s.cwd !== resolved) {
       s.cwd = resolved;
-      // The child was started in the old directory; drop it so the next prompt
-      // spawns a fresh process in the new one.
       s.proc?.dispose();
       s.proc = undefined;
       this.log.info({ chatId, cwd: resolved }, 'chat working directory changed');
@@ -313,24 +263,14 @@ export class SessionManager {
     return resolved;
   }
 
-  /**
-   * Restart the session's kiro child, so what kiro reads only at startup is read again: the
-   * agent definition, the workspace's `.kiro`, and the MCP servers kiro launches itself.
-   * Replacing the process is the only way - no ACP method does it, and `session/set_mode`
-   * leaves those MCP servers alone.
-   *
-   * The old child must be awaited out first: kiro flushes its session file on shutdown and
-   * the replacement reads that file to reload the conversation.
-   */
+  /** Restarts the session's kiro child so startup-only state (agent definition,
+   *  workspace `.kiro`, MCP servers) is read again. */
   async reloadChat(chatId: string): Promise<ChatDetail> {
     const s = await this.ensureOpen(chatId);
-    // Guard and claim in one tick: every await below yields, and a prompt arriving in one of
-    // those gaps would start a turn on the process this is about to dispose.
     if (s.running) {
       throw new Error('Cannot reload while a turn is running');
     }
-    // Compaction isn't a turn, so s.running says nothing about it, and replacing the process
-    // mid-compaction loses the work and leaves the flag set, disabling the composer.
+    // Compaction isn't a turn.
     if (s.turnState.get().compacting) {
       throw new Error('Cannot reload while the conversation is being compacted');
     }
@@ -345,45 +285,35 @@ export class SessionManager {
     try {
       return await this.replaceProcess(chatId, s);
     } finally {
-      // Cleared before waking anyone, so a waiter never sees a stale claim.
       s.reloading = undefined;
       ready();
     }
   }
 
-  /** The reload itself. Only ever called with the session's reload claim held. */
+  /** The reload itself, called with the session's reload claim held. */
   private async replaceProcess(chatId: string, s: Session): Promise<ChatDetail> {
     if (!(await hasRecordedTurns(s.sessionId))) {
       throw new Error(
         'kiro has not saved this session yet. Send a message first, then reload.',
       );
     }
-    // A spawn already in flight would otherwise be handed back below as the
-    // "reloaded" process, or race the one this starts.
     if (s.spawning) await s.spawning.catch(() => {});
 
     const old = s.proc;
     if (old) {
-      // Cleared before the wait so the exit handler sees a replaced process and
-      // records no process_exited: this restart is deliberate, not a crash.
+      // Cleared first so the exit handler doesn't record process_exited for a
+      // deliberate restart.
       s.proc = undefined;
       await old.disposeAndWait().catch(() => {});
     }
-    // Whatever the last process reported is now stale; the new one re-reports.
     s.availableModes = [];
     await this.ensureProc(s);
     s.lastActivity = Date.now();
-    // The agent list is read from kiro, not from the session, and reloading is
-    // exactly when a newly created agent should show up.
     invalidateAgents();
     this.log.info({ sessionId: s.sessionId, cwd: s.cwd }, 'session reloaded');
     return this.getDetail(chatId);
   }
 
-  /**
-   * Wait out a reload before touching the session's process. Without this an action
-   * can be handed the process that the reload is about to dispose.
-   */
   private async settleReload(s: Session): Promise<void> {
     if (s.reloading) await s.reloading;
   }
@@ -393,10 +323,6 @@ export class SessionManager {
     for (const s of this.sessions.values()) if (s.proc) n++;
     return n;
   }
-
-  // -------------------------------------------------------------------------
-  // Event subscription - works for any opened session, spawned or not.
-  // -------------------------------------------------------------------------
 
   onEvent(chatId: string, cb: (e: CasperEvent) => void): (() => void) | null {
     const s = this.sessions.get(this.store.sessionIdForChat(chatId) ?? '');
@@ -409,13 +335,13 @@ export class SessionManager {
     return this.sessions.get(this.store.sessionIdForChat(chatId) ?? '')?.store;
   }
 
-  /** A chat's working directory. Opens it in memory if needed. */
+  /** A chat's working directory, opened in memory if needed. */
   async getChatCwd(chatId: string): Promise<string> {
     const s = await this.ensureOpen(chatId);
     return s.cwd;
   }
 
-  /** Open a chat's session in memory (store + metadata) WITHOUT spawning a process. */
+  /** Opens a chat's session in memory without spawning a process. */
   async ensureOpen(chatId: string): Promise<Session> {
     const sessionId = this.sessionIdOf(chatId);
     const existing = this.sessions.get(sessionId);
@@ -424,13 +350,9 @@ export class SessionManager {
     const persisted = await readPersistedSession(sessionId);
     if (!persisted) throw new Error(`Unknown session: ${sessionId}`);
 
-    // kiro persists the cwd at creation; a re-pointed chat overrides it.
     const effectiveCwd = this.store.getCwd(chatId) ?? persisted.cwd;
 
-    // Confine the persisted cwd to fileRoot. A session created before this
-    // boundary existed - or one created directly by kiro-cli - could carry an
-    // out-of-root cwd; the workspace endpoints scope file access to it, so an
-    // unbounded cwd would re-open the arbitrary-read hole. Fail closed.
+    // A pre-boundary session could carry an out-of-root cwd. Fail closed.
     if (!isWithinRoot(config.fileRoot, effectiveCwd)) {
       throw new Error(
         `Session working directory is outside the allowed root: ${effectiveCwd}`,
@@ -445,27 +367,18 @@ export class SessionManager {
     s.modelId = persisted.modelId;
     s.createdAt = persisted.createdAt;
     s.updatedAt = persisted.updatedAt;
-    s.markLive(); // it exists on disk, so kiro can load it on demand
+    s.markLive();
     s.turnState.seed(persisted.contextUsagePercentage ?? 0);
     this.sessions.set(sessionId, s);
     return s;
   }
 
-  // -------------------------------------------------------------------------
-  // Lazy process spawning
-  // -------------------------------------------------------------------------
-
   private wire(s: Session, proc: ManagedProcess): void {
     proc.on('notification', (n: JsonRpcNotification) => {
-      // Drop kiro's history replay during session/load: the transcript is
-      // already hydrated from disk, so appending these would duplicate every
-      // past message and tool call into the live chat.
       if (s.replaying) return;
 
-      // _kiro.dev/subagent/list_update carries no sessionId of its own - it's a
-      // per-process broadcast. Casper spawns one kiro-cli child per chat, so every
-      // one of these belongs to this chat's own subagents, regardless of what else
-      // is live. Fold it into the tracker and push the result to clients.
+      // A per-process broadcast with no sessionId of its own; one kiro-cli
+      // child per chat means it's always this chat's.
       if (n.method === KIRO_NOTIFICATIONS.subagentListUpdate) {
         const params = n.params as KiroSubagentListUpdateParams;
         const resolved = s.subagents.apply(params.subagents);
@@ -477,12 +390,9 @@ export class SessionManager {
       }
 
       const notifSessionId = notificationSessionId(n);
-      // Belongs to this chat's own session (or carries none): record as today.
       if (!notifSessionId || notifSessionId === s.sessionId) {
         const payload = mapNotification(n);
         if (!payload) return;
-        // The subagent tool call's start/finish brackets which stage names its
-        // children can match against - see SubagentTracker.
         if (payload.kind === 'session_update') {
           const call = subagentCallStages(payload.update as { sessionUpdate: string; [k: string]: unknown });
           if (call) s.subagents.callStarted(call.toolCallId, call.stages);
@@ -499,16 +409,9 @@ export class SessionManager {
         return;
       }
 
-      // Belongs to a subagent (child session). Its tool calls and messages are not
-      // recorded in the parent's event log - that's the bug this routing fixes. The
-      // live transcript for an open subagent view comes from its own file on demand;
-      // only its status/activity needs to be pushed live, and list_update already
-      // covers that.
+      // A subagent's own notifications aren't recorded here.
     });
     proc.on('exit', (code: number | null, signal: string | null) => {
-      // Only the session's current process should mutate its state. A process
-      // that failed to initialize (never became s.proc) or was replaced after
-      // eviction must not record a spurious process_exited event.
       if (s.proc !== proc) return;
       s.record({ kind: 'process_exited', code, signal });
       s.proc = undefined;
@@ -516,7 +419,7 @@ export class SessionManager {
     });
   }
 
-  /** Get (or spawn + initialize + create/load) the kiro process for a session. */
+  /** Gets or spawns the kiro process for a session. */
   private async ensureProc(s: Session): Promise<ManagedProcess> {
     if (s.proc) return s.proc;
     if (s.spawning) return s.spawning;
@@ -530,9 +433,7 @@ export class SessionManager {
       this.wire(s, proc);
       await proc.initialize();
 
-      // Load the existing session if kiro already knows it, else create it.
-      // session/load makes kiro replay the whole conversation as notifications;
-      // gate them out of the store while it runs (see Session.replaying).
+      // session/load replays the conversation as notifications; gated out while it runs.
       let res: SessionNewResult;
       if (s.hasBeenLive) {
         s.replaying = true;
@@ -545,7 +446,7 @@ export class SessionManager {
         res = await proc.newSession({ cwd: s.cwd, mcpServers: [] });
       }
 
-      // A brand-new session gets kiro's generated id; adopt it if it differs.
+      // A brand-new session adopts kiro's generated id.
       if (!s.hasBeenLive && res.sessionId !== s.sessionId) {
         this.sessions.delete(s.sessionId);
         (s as { sessionId: string }).sessionId = res.sessionId;
@@ -588,11 +489,7 @@ export class SessionManager {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Creating / opening
-  // -------------------------------------------------------------------------
-
-  /** Create a new session. Spawns immediately so we get a real kiro sessionId. */
+  /** Creates a new session. Spawns immediately to get a real kiro sessionId. */
   async createChat(opts: {
     cwd?: string;
     agentId?: string;
@@ -601,10 +498,7 @@ export class SessionManager {
     title?: string;
     chatId?: string;
   }): Promise<ChatDetail> {
-    // The client's chat id, which already owns any files uploaded to this chat before it
-    // sent. Absent only if something other than the web app created the session.
     const chatId = isValidChatId(opts.chatId) ? opts.chatId : crypto.randomUUID();
-    // A workspace of its own is created before the spawn, so kiro starts in it directly.
     const cwd = opts.freshWorkspace ? createChatWorkspace(chatId) : resolveCwd(opts.cwd);
     // Temporary local id until kiro assigns the real one during ensureProc.
     const tempId = `pending-${Date.now()}-${Math.floor(this.sessions.size)}`;
@@ -618,16 +512,11 @@ export class SessionManager {
     try {
       await this.ensureProc(s); // adopts kiro's real sessionId
     } catch (err) {
-      // Spawn or handshake failed: drop the orphan so it can't leak or show up
-      // as a dead, unopenable row in the session list.
+      // Drop the orphan so it can't leak or show up as a dead, unopenable row.
       this.evict(s.sessionId);
       throw err;
     }
 
-
-    // Name the session before it is returned, so it is never listed as untitled: the
-    // caller's title if it has one - a draft knows its first prompt - otherwise the folder
-    // the user chose. Stored as a Casper title override; the user can rename.
     this.store.create(chatId);
     this.store.bindSession(chatId, s.sessionId);
 
@@ -640,23 +529,17 @@ export class SessionManager {
     return this.buildDetail(this.store.get(chatId)!, s, []);
   }
 
-  // -------------------------------------------------------------------------
-  // Actions - these spawn the process lazily.
-  // -------------------------------------------------------------------------
-
   async runPrompt(
     chatId: string,
     content: PromptContentBlock[],
     attachments?: MessageAttachment[],
   ): Promise<void> {
     const s = await this.ensureOpen(chatId);
-    // Held rather than rejected: a message typed while the process is being replaced
-    // should land on the new one, not bounce back at the user.
+    // A message typed mid-reload lands on the new process, not rejected.
     await this.settleReload(s);
     if (s.running) throw new Error('A turn is already running for this session');
-    // Claimed before the spawn rather than after it. Bringing a dormant session up takes
-    // seconds, and a reload entering that gap saw no turn, drained this spawn, and then
-    // disposed the very child this prompt was about to be sent to.
+    // Claimed before the spawn, so a reload can't drain it and dispose the
+    // child this prompt is for.
     s.running = true;
     s.lastActivity = Date.now();
 
@@ -664,14 +547,10 @@ export class SessionManager {
     try {
       proc = await this.ensureProc(s);
     } catch (err) {
-      // Nothing to run the turn on, so release the claim or the session looks busy
-      // forever and can never be reloaded either.
       s.running = false;
       throw err;
     }
-    // Named before the turn is announced, so a client reacting to turn_started already
-    // sees it. Only when nothing has named it yet: a title the user set, or one taken
-    // from a chosen working directory, is theirs to keep.
+    // Only when nothing has named it yet.
     if (!this.store.getTitle(chatId)) {
       const title = titleFromPrompt(content);
       if (title) {
@@ -680,10 +559,8 @@ export class SessionManager {
       }
     }
 
-    // Only counted when there is something to record, so an ordinary prompt pays nothing.
     let recorded: MessageAttachment[] | undefined;
     if (attachments?.length) {
-      // Counted over kiro's file, recorded against the chat that owns it.
       const ordinal = await promptCount(s.sessionId);
       this.store.setAttachments(chatId, ordinal, attachments);
       recorded = attachments;
@@ -696,9 +573,7 @@ export class SessionManager {
       .then((res) => s.record({ kind: 'turn_ended', stopReason: res.stopReason }))
       .catch((err: Error) => {
         this.log.error({ err, sessionId: s.sessionId }, 'prompt turn failed');
-        // If the failure didn't explain itself, kiro's own output usually has
-        // something. Only appended when it isn't already in the message, so a
-        // self-explaining error doesn't get the same text twice.
+        // Appends kiro's stderr tail only if not already in the message.
         const tail = proc.stderrTail();
         const message =
           tail && !err.message.includes(tail)
@@ -744,15 +619,8 @@ export class SessionManager {
     s.lastActivity = Date.now();
   }
 
-  // -------------------------------------------------------------------------
-  // Listing / detail - never spawns.
-  // -------------------------------------------------------------------------
-
-  /**
-   * The one place a ChatSummary is assembled: kiro's file and Casper's live state each hold
-   * part of the truth, so every read path projects them through here. `persisted` is absent for
-   * a session with no file yet, `live` for a dormant one, and callers guarantee one of them.
-   */
+  /** The one place a ChatSummary is assembled, since kiro's file and Casper's
+   *  live state each hold part of the truth. */
   private summaryOf(
     chat: ChatRow,
     live: Session | undefined,
@@ -760,21 +628,18 @@ export class SessionManager {
     transcript?: TranscriptItem[],
   ): ChatSummary {
     const snap = live?.turnState.get();
-    // A live session's cwd already carries the override, applied in ensureOpen.
     const cwd = live?.cwd ?? chat.cwd ?? persisted?.cwd ?? config.defaultCwd;
 
     return {
       chatId: chat.chatId,
       sessionId: live?.sessionId ?? chat.sessionId ?? undefined,
       title: this.titleOf(chat, {
-        // kiro's file is what kiro called it; the live copy is only a cache of it.
         kiroTitle: persisted?.title || live?.title,
         firstPrompt: transcript && firstPromptText(transcript),
         cwd,
       }),
       cwd,
       createdAt: persisted?.createdAt ?? live?.createdAt ?? new Date().toISOString(),
-      // kiro's file and our own activity move separately.
       updatedAt: live
         ? newerOf(persisted?.updatedAt, live.updatedAt)
         : (persisted?.updatedAt ?? new Date().toISOString()),
@@ -782,8 +647,7 @@ export class SessionManager {
       agentId: live?.agentId ?? persisted?.agentId,
       modelId: live?.modelId ?? persisted?.modelId,
       running: live?.running ?? false,
-      // A live snapshot starts at zero until the first turn reports, so a dormant
-      // session's value comes from kiro's file.
+      // A dormant session falls back to kiro's file.
       contextUsagePercentage:
         snap?.contextUsagePercentage || persisted?.contextUsagePercentage,
     };
@@ -803,7 +667,6 @@ export class SessionManager {
         this.evict(live.sessionId);
         return;
       }
-      // A chat whose session file is gone has nothing to open.
       if (!persisted && !live) return;
       out.push(this.summaryOf(row, live, persisted));
     });
@@ -822,8 +685,6 @@ export class SessionManager {
     if (!chat) throw new Error(`Unknown chat: ${chatId}`);
     const sessionId = chat.sessionId;
 
-    // Both reads in parallel: a live session needs the file too, so its summary gets the same
-    // fallbacks the list gives it and the two cannot disagree.
     const [transcript, persisted] = await Promise.all([
       sessionId
         ? hydrateTranscript(sessionId, this.store.attachmentsByChat(chatId))
@@ -832,17 +693,12 @@ export class SessionManager {
     ]);
 
     const s = sessionId ? this.sessions.get(sessionId) : undefined;
-    // listChats drops a chat with neither, so the two read paths agree rather than one of them
-    // fabricating a summary with a different timestamp on every call.
     if (!s && !persisted) throw new Error(`Unknown chat: ${chatId}`);
     return this.buildDetail(chat, s, transcript, persisted ?? undefined);
   }
 
-  /**
-   * A slice of the transcript for lazy "load older on scroll up". Re-hydrates
-   * from disk (fast: ~150ms even for a multi-MB session) and returns the
-   * requested window. offset/limit are clamped to the transcript bounds.
-   */
+  /** A transcript slice for lazy "load older on scroll up". offset/limit are
+   *  clamped to the transcript bounds. */
   async getTranscriptPage(
     chatId: string,
     offset: number,
@@ -858,33 +714,21 @@ export class SessionManager {
   }
 
   /**
-   * A chat's subagents: live ones from the tracker (status, activity, pending stages),
-   * joined with every child session found on disk (so one from a past, now-dormant run
-   * still lists, just without live activity). Keyed by session id so the two cannot
-   * disagree about which rows exist.
-   *
-   * An on-disk child the live tracker never saw (server restart, or the chat's process
-   * was evicted) has no toolCallId or real stage name of its own. Casper's own db fills
-   * both in from a link recorded the last time that child was seen live; a child with no
-   * such row (one that finished before this linking existed) falls back to matching its
-   * title against the parent's `subagent` tool calls - see subagentFallbackMatch.ts.
+   * A chat's subagents: live ones from the tracker, joined with children found on disk.
+   * A child the tracker never saw falls back to a recorded link or title matching
+   * (subagentFallbackMatch.ts).
    */
   async getSubagents(chatId: string): Promise<SubagentSummary[]> {
     const sessionId = this.sessionIdOf(chatId);
     const s = this.sessions.get(sessionId);
     const live = s ? s.subagents.list() : [];
     const liveToolCalls = new Set(live.map((a) => a.toolCallId).filter((id): id is string => !!id));
-    // Pending rows (not yet started) come only from the tracker - a stage that never
-    // started has no file on disk to find.
     const pending = s
       ? [...liveToolCalls].flatMap((id) => s.subagents.listForCall(id).filter((a) => a.status === 'pending'))
       : [];
 
     const onDisk = await listChildSessions(sessionId);
     const links = this.subagentLinks.forParent(sessionId);
-    // Only children neither live nor already linked need the fallback matcher - most
-    // calls here have nothing to fall back for, and the matcher needs the parent's full
-    // transcript, which is wasted work when every child is already accounted for.
     const liveIds = new Set(live.map((a) => a.sessionId));
     const unresolved = onDisk.filter((c) => !liveIds.has(c.sessionId) && !links.has(c.sessionId));
     const fallback = unresolved.length
@@ -897,8 +741,6 @@ export class SessionManager {
       const link = links.get(child.sessionId) ?? fallbackByChild.get(child.sessionId);
       byId.set(child.sessionId, {
         sessionId: child.sessionId,
-        // A linked or fallback-matched child gets its real stage name; otherwise the
-        // title is the closest thing to one (kiro records no stage name of its own).
         stageName: link?.stageName ?? (child.title || child.sessionId),
         toolCallId: link?.toolCallId,
         status: 'completed',
@@ -906,10 +748,7 @@ export class SessionManager {
         updatedAt: child.updatedAt,
       });
     }
-    // Live entries win where both exist: they carry the real stage name and activity.
     for (const a of live) byId.set(a.sessionId, a);
-    // Started subagents (on disk or live) ordered by when they started; pending ones
-    // (no createdAt yet) always last, in the order their stage was declared.
     const startedThenPending = [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     return [...startedThenPending, ...pending];
   }
@@ -920,8 +759,6 @@ export class SessionManager {
     const subagents = await this.getSubagents(chatId);
     const summary = subagents.find((a) => a.sessionId === childSessionId);
     if (!summary) throw new Error(`Unknown subagent: ${childSessionId}`);
-    // Confined to this chat's own children: a child's parent_session_id must match,
-    // so one chat can't be used to read another's subagent transcript by guessing ids.
     const onDisk = await listChildSessions(parentSessionId);
     if (!onDisk.some((c) => c.sessionId === childSessionId)) {
       throw new Error(`Unknown subagent: ${childSessionId}`);
@@ -941,7 +778,6 @@ export class SessionManager {
       summary: this.summaryOf(chat, s, persisted, transcript),
       modes: s?.availableModes ?? [],
       currentModeId: s?.currentModeId ?? persisted?.agentId,
-      // Only the tail is sent on load; replayHead/title use the full transcript.
       transcript: transcript.slice(-TRANSCRIPT_PAGE_SIZE),
       transcriptTotal: transcript.length,
       observability: s?.turnState.get() ?? {
@@ -953,9 +789,8 @@ export class SessionManager {
   }
 
   /**
-   * The cursor a reconnecting client starts from. Normally the store head, but kiro writes a turn
-   * to its jsonl only once it completes, so a hydrated transcript is missing one in flight:
-   * rewind to just before its turn_started and let the socket replay the whole turn.
+   * The cursor a reconnecting client starts from: the store head, unless the in-flight
+   * turn isn't in kiro's jsonl yet, in which case rewind to its turn_started.
    */
   private replayHead(s: Session, transcript: ChatDetail['transcript']): number {
     const head = s.store.head();
@@ -975,8 +810,7 @@ export class SessionManager {
         .map((b) => b.text)
         .join(''),
     ).trim();
-    // If the hydrated transcript already ends with this prompt, it's persisted
-    // - don't replay it (would duplicate the user message).
+    // Don't replay a prompt the hydrated transcript already ends with.
     for (let i = transcript.length - 1; i >= 0; i--) {
       const it = transcript[i]!;
       if (it.type === 'message' && it.message.role === 'user') {
@@ -987,10 +821,6 @@ export class SessionManager {
     return started.seq - 1;
   }
 
-  // -------------------------------------------------------------------------
-  // Teardown
-  // -------------------------------------------------------------------------
-
   evict(sessionId: string): void {
     const s = this.sessions.get(sessionId);
     if (!s) return;
@@ -999,28 +829,23 @@ export class SessionManager {
     s.store.dispose();
   }
 
-  // Permanently delete a session: evict it from memory, remove its on-disk
-  // files and the directory the chat owns, and drop any title override.
+  // Evicts from memory, removes on-disk files and the chat's directory.
   async deleteChat(chatId: string): Promise<void> {
     const sessionId = this.store.sessionIdForChat(chatId);
     const s = sessionId ? this.sessions.get(sessionId) : undefined;
-    // kiro flushes its session file on shutdown, so wait for the process to
-    // exit before deleting - otherwise its write recreates the files.
+    // kiro flushes its session file on shutdown; wait for exit or its write
+    // recreates the files.
     if (s?.proc) {
       await s.proc.disposeAndWait().catch(() => {});
       s.proc = undefined;
       s.running = false;
     }
     this.store.remove(chatId);
-    // The chat's uploads and workspace outlive its rows otherwise. After the process is
-    // gone, since the workspace may be its cwd.
     await removeChatDir(chatId);
     if (!sessionId) return;
     this.evict(sessionId);
     await deletePersistedSession(sessionId);
-    // kiro-cli spawns a wrapped kiro-cli-chat that flushes the session file on
-    // its own shutdown, which can land just after our delete. Sweep once more
-    // so a deleted session doesn't reappear.
+    // kiro-cli's wrapped child can flush just after our delete; sweep once more.
     setTimeout(() => void deletePersistedSession(sessionId).catch(() => {}), 2500).unref?.();
   }
 
