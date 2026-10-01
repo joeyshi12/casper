@@ -93,8 +93,8 @@ describe('the file heading on a tool call (rendered in a DOM)', () => {
       root.render(createElement(ToolCallCard, { tool }));
     });
     // The body is collapsed by default; the heading lives in it.
-    const header = host.querySelector('.toolcall-head') as HTMLElement | null;
-    if (header) act(() => header.click());
+    const line = host.querySelector('.toolline') as HTMLElement | null;
+    if (line) act(() => line.click());
   };
 
   const name = () => host.querySelector('.toolcall-file-name');
@@ -161,15 +161,21 @@ describe('the file heading on a tool call (rendered in a DOM)', () => {
   });
 });
 
-// An image read shows its image outside the fold, so there is nothing left for the fold to
-// hold. It used to keep a chevron that opened onto an empty, bordered strip.
-describe('a tool call with nothing to reveal offers no fold (rendered in a DOM)', () => {
+// An image read starts closed with its image inside the fold, and disappears when the
+// file no longer exists as an image.
+describe('image read tool calls (rendered in a DOM)', () => {
   let createElement: Any;
   let act: Any;
   let createRoot: Any;
   let ToolCallCard: Any;
   let host: HTMLElement;
   let root: Any;
+
+  // Each test uses its own path, since the existence check is cached per path.
+  let imagePath = '';
+  let headStatus = 200;
+  let headType = 'image/png';
+  const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
   const imageRead = (): ToolCallView =>
     ({
@@ -178,7 +184,7 @@ describe('a tool call with nothing to reveal offers no fold (rendered in a DOM)'
       name: 'read',
       status: 'completed',
       content: [],
-      input: { operations: [{ mode: 'Image', image_paths: ['/work/proj/mascot.png'] }] },
+      input: { operations: [{ mode: 'Image', image_paths: [imagePath] }] },
     }) as unknown as ToolCallView;
 
   const textRead = (): ToolCallView =>
@@ -219,34 +225,135 @@ describe('a tool call with nothing to reveal offers no fold (rendered in a DOM)'
     ({ createRoot } = await import('react-dom/client'));
     ({ ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js'));
     host = w.document.getElementById('host');
+    g.fetch = async () => ({ ok: headStatus < 400, headers: { get: () => headType } });
   });
 
-  it('shows the image, and no chevron or body to expand', () => {
+  let n = 0;
+  const freshPath = (status: number, type = 'image/png') => {
+    imagePath = `/work/proj/mascot-${n++}.png`;
+    headStatus = status;
+    headType = type;
+  };
+
+  it('starts closed, and opening it shows the image', async () => {
+    freshPath(200);
     render(imageRead());
-    assert.ok(host.querySelector('.toolcall-image'), 'the image renders');
-    assert.equal(host.querySelector('.toolcall-chevron'), null, 'no expand affordance');
-    assert.equal(host.querySelector('.toolcall-body'), null, 'no empty body strip');
+    await flush();
+    const line = host.querySelector('.toolline') as HTMLElement;
+    assert.equal(line.tagName, 'BUTTON');
+    assert.equal(line.getAttribute('aria-expanded'), 'false');
+    assert.equal(host.querySelector('.toolcall-image'), null, 'the image is inside the fold');
+    act(() => line.click());
+    assert.ok(host.querySelector('.toolcall-image'), 'opening shows the image');
   });
 
-  it('its header is not a button, so it cannot be toggled', () => {
+  it('is not rendered when the file no longer exists', async () => {
+    freshPath(404, 'application/json');
     render(imageRead());
-    const head = host.querySelector('.toolcall-head') as HTMLElement;
-    assert.equal(head.tagName, 'DIV', 'inert, since there is nothing to open');
-    act(() => head.click());
-    assert.equal(host.querySelector('.toolcall-body'), null, 'clicking still reveals nothing');
+    await flush();
+    assert.equal(host.querySelector('.toolline'), null);
+  });
+
+  it('is not rendered when the path now holds something other than an image', async () => {
+    freshPath(200, 'text/plain');
+    render(imageRead());
+    await flush();
+    assert.equal(host.querySelector('.toolline'), null);
   });
 
   it('a read with file text keeps its fold', () => {
     render(textRead());
-    const head = host.querySelector('.toolcall-head') as HTMLElement;
-    assert.equal(head.tagName, 'BUTTON');
-    assert.ok(host.querySelector('.toolcall-chevron'), 'the affordance is there');
-    assert.equal(head.getAttribute('aria-expanded'), 'false');
-    act(() => head.click());
+    const line = host.querySelector('.toolline') as HTMLElement;
+    assert.equal(line.tagName, 'BUTTON');
+    assert.ok(host.querySelector('.toolline-chevron'), 'the affordance is there');
+    assert.equal(line.getAttribute('aria-expanded'), 'false');
+    act(() => line.click());
     assert.ok(host.querySelector('.toolcall-body'), 'and it opens onto real content');
-    assert.equal(head.getAttribute('aria-expanded'), 'true');
+    assert.equal(line.getAttribute('aria-expanded'), 'true');
   });
 });
 
 /* The DOM globals and React internals here are untyped by nature. */
 type Any = any;
+
+describe('a todo list call whose list kiro has emptied (rendered in a DOM)', () => {
+  it('says all tasks are done instead of showing raw JSON', async () => {
+    const { JSDOM } = await import('jsdom');
+    const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', { url: 'https://casper.test/' });
+    const g = globalThis as Any;
+    const w = dom.window as Any;
+    for (const k of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent']) g[k] = w[k];
+    g.IS_REACT_ACT_ENVIRONMENT = true;
+    const react = await import('react');
+    g.React = react.default ?? react;
+    const { createRoot } = await import('react-dom/client');
+    const { ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js');
+    const host = w.document.getElementById('host');
+    const tool = {
+      id: 'todo-1',
+      name: 'todo_list',
+      title: 'todo_list',
+      status: 'completed',
+      input: { command: 'complete', completed_task_ids: ['3'] },
+      content: [{ type: 'content', content: { type: 'text', text: '{"tasks":[],"description":"","context":[],"modified_files":[]}' } }],
+    };
+    const root = createRoot(host);
+    react.act(() => root.render(react.createElement(ToolCallCard, { tool })));
+    react.act(() => (host.querySelector('.toolline') as HTMLElement).click());
+    assert.equal(host.querySelector('.todo-empty')?.textContent, 'All tasks done.');
+    assert.equal(host.querySelector('.toolcall-section'), null, 'no input/output dump');
+    react.act(() => root.unmount());
+  });
+});
+
+describe('shell and web search bodies (rendered in a DOM)', () => {
+  let react: Any;
+  let host: Any;
+  let root: Any;
+  const open = async (tool: object) => {
+    const { JSDOM } = await import('jsdom');
+    const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', { url: 'https://casper.test/' });
+    const g = globalThis as Any;
+    const w = dom.window as Any;
+    for (const k of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent']) g[k] = w[k];
+    g.IS_REACT_ACT_ENVIRONMENT = true;
+    react = await import('react');
+    g.React = react.default ?? react;
+    const { createRoot } = await import('react-dom/client');
+    const { ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js');
+    host = w.document.getElementById('host');
+    root = createRoot(host);
+    react.act(() => root.render(react.createElement(ToolCallCard, { tool })));
+  };
+  const click = () => react.act(() => (host.querySelector('.toolline') as HTMLElement).click());
+
+  it('a shell call opens to the command under "bash" and its output under "Output"', async () => {
+    await open({
+      id: 'sh', name: 'shell', title: 'shell', status: 'completed',
+      input: { command: 'date' },
+      content: [{ type: 'content', content: { type: 'text', text: '{"exit_status":"exit status: 0","stdout":"Thu Oct 1\\n","stderr":""}' } }],
+    });
+    click();
+    const labels = [...host.querySelectorAll('.shell-panel .shell-label')].map((l: Any) => l.textContent);
+    assert.deepEqual(labels, ['bash', 'Output']);
+    react.act(() => root.unmount());
+  });
+
+  it('a web search line shows its query, and opens to one row per result with its site', async () => {
+    await open({
+      id: 'ws', name: 'web_search', title: 'web_search', status: 'completed',
+      input: { query: 'MuseScore MCP server' },
+      // The shape kiro records: one json block holding the results.
+      content: [{ kind: 'json', data: { results: [
+        { title: 'MuseScore MCP Server', url: 'https://www.mcp.so/server/musescore' },
+        { title: 'iflow mcp musescore', url: 'https://pypi.org/project/x/' },
+      ] } }],
+    });
+    assert.equal(host.querySelector('.toolline-text').textContent, 'Searched the web');
+    assert.equal(host.querySelector('.toolline-detail').textContent, 'MuseScore MCP server');
+    click();
+    const sites = [...host.querySelectorAll('.websearch-site')].map((s: Any) => s.textContent);
+    assert.deepEqual(sites, ['mcp.so', 'pypi.org']);
+    react.act(() => root.unmount());
+  });
+});

@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../state/store.js';
 import { sessionController } from '../../state/sessionController.js';
 import type { MessageAttachment } from '@casper/shared';
@@ -7,7 +7,7 @@ import { formatSize } from '../../util/formatSize.js';
 import { FileIcon } from '../common/icons.js';
 
 import { MarkdownRenderer } from './MarkdownRenderer.js';
-import { ToolCallCard } from './ToolCallCard.js';
+import { ToolCallCard, ToolCallGroupCard, ThoughtLineCard, type RunRowInput } from './ToolCallCard.js';
 import { CompressIcon, Spinner, WarningIcon } from '../common/icons.js';
 import { lazyImageProps } from '../../util/lazyImage.js';
 import {
@@ -15,7 +15,12 @@ import {
   type ViewportFlags,
 } from '../../util/transcriptViewport.js';
 import { classifyTurnFailure } from '../../util/turnFailure.js';
-import { ChevronIcon } from '../common/icons.js';
+import {
+  groupToolCalls,
+  lastEntryJoinsStreamingThought,
+  type GroupedEntry,
+  type RunMember,
+} from '../../util/toolGroups.js';
 
 /** How long a running turn may be quiet before the dots come back. */
 const STALL_MS = 700;
@@ -112,6 +117,20 @@ export const Transcript = memo(function Transcript() {
   }
   const arrivedLive = (id: string) => !hydrated.current.ids.has(id);
 
+  // Runs of consecutive plain tool calls and thinking messages (no other message or
+  // widget between them) collapse into one group; everything else passes through
+  // unchanged. Memoized on items alone, so a streaming thought's growing text - which
+  // re-renders Transcript on every chunk - never recomputes this or the row arrays
+  // handed to each group, which would otherwise re-render every row in every group.
+  const grouped = useMemo(() => groupToolCalls(items), [items]);
+  const rowsByRun = useMemo(() => {
+    const map = new Map<GroupedEntry, RunRowInput[]>();
+    for (const entry of grouped) {
+      if (entry.type === 'run') map.set(entry, entry.members.map(runRowOf));
+    }
+    return map;
+  }, [grouped]);
+
   const [stalled, setStalled] = useState(false);
   useEffect(() => {
     setStalled(false);
@@ -182,10 +201,78 @@ export const Transcript = memo(function Transcript() {
         </div>
       )}
 
-      {items.map((item) =>
-        item.type === 'message' ? (
+      {grouped.map((entry, i) => {
+        // The live streaming thought, still arriving, joins the last entry's row set
+        // rather than appearing as its own block below it - see lastEntryJoinsStreamingThought.
+        // A pending (optimistically sent) message always renders after grouped, so a
+        // thought cannot join across one even though it isn't part of `items` yet.
+        const isLast = i === grouped.length - 1;
+        // The last group or tool line of a running turn shimmers until something else
+        // (the answer, a new message) follows it.
+        const active = isLast && turnStatus === 'running' && !streamingText && pending.length === 0;
+        const joiningThought =
+          isLast && streamingThought && pending.length === 0 && lastEntryJoinsStreamingThought(entry)
+            ? streamingThought
+            : undefined;
+
+        if (entry.type === 'run') {
+          // Keyed by the first member, so a row joining the run keeps it mounted and open.
+          const first = entry.members[0]!;
+          const key = first.type === 'tool' ? first.tool.id : first.item.message.id;
+          const arriving = entry.members.some(
+            (m) => m.type === 'tool' && arrivedLive(m.tool.id),
+          );
+          return (
+            <ToolCallGroupCard
+              key={key}
+              rows={rowsByRun.get(entry)!}
+              liveThought={joiningThought}
+              arriving={arriving}
+              active={active}
+            />
+          );
+        }
+        if (entry.type === 'tool') {
+          // A lone tool call with a live thought still streaming after it: show both as
+          // one run of two, rather than a tool line with a separate thought block below.
+          if (joiningThought !== undefined) {
+            return (
+              <ToolCallGroupCard
+                key={entry.tool.id}
+                rows={[runRowOf(entry)]}
+                liveThought={joiningThought}
+                arriving={arrivedLive(entry.tool.id)}
+                active={active}
+              />
+            );
+          }
+          return (
+            <ToolCallCard
+              key={entry.tool.id}
+              tool={entry.tool}
+              arriving={arrivedLive(entry.tool.id)}
+              active={active}
+            />
+          );
+        }
+        if (entry.type === 'thought') {
+          if (joiningThought !== undefined) {
+            return (
+              <ToolCallGroupCard
+                key={entry.item.message.id}
+                rows={[runRowOf(entry)]}
+                liveThought={joiningThought}
+              />
+            );
+          }
+          return <ThoughtLineCard key={entry.item.message.id} text={entry.text} />;
+        }
+        const item = entry.item;
+        return item.type === 'message' ? (
           item.message.role === 'thinking' ? (
-            <ThoughtBlock key={item.message.id} text={item.message.text} />
+            // groupToolCalls only puts a thinking message here when it isn't adjacent to
+            // a run or tool call - still rendered as a lone thought line.
+            <ThoughtLineCard key={item.message.id} text={item.message.text} />
           ) : (
             <div key={item.message.id} className={`msg msg-${item.message.role}`}>
               {item.message.role === 'assistant' ? (
@@ -207,13 +294,14 @@ export const Transcript = memo(function Transcript() {
             </div>
           )
         ) : item.type === 'tool_call' ? (
+          // A widget or choice call: groupToolCalls never puts these in a run.
           <ToolCallCard key={item.tool.id} tool={item.tool} arriving={arrivedLive(item.tool.id)} />
         ) : item.type === 'turn_error' ? (
           <TurnErrorBlock key={item.id} message={item.message} />
         ) : (
           <CompactionBlock key={item.id} summary={item.summary} />
-        ),
-      )}
+        );
+      })}
 
       {pending.map((pm) => (
         <div
@@ -235,7 +323,9 @@ export const Transcript = memo(function Transcript() {
         </div>
       ))}
 
-      {streamingThought && <ThoughtBlock text={streamingThought} live />}
+      {streamingThought && !lastEntryJoinsStreamingThought(grouped.at(-1)) && pending.length === 0 && (
+        <ThoughtLineCard text={streamingThought} live />
+      )}
 
       {streamingText && (
         <div className="msg msg-assistant">
@@ -291,29 +381,12 @@ export const Transcript = memo(function Transcript() {
 });
 
 /**
- * A collapsible reasoning block, dimmed and distinct from spoken output, and collapsed
- * whether or not it is still being written.
+ * The matching RunRowInput for a single run member, so a lone tool call or thought that
+ * gains a trailing live thought can be shown as a two-row run without duplicating the
+ * conversion logic that ToolCallGroupCard also uses for a run read off the transcript.
  */
-function ThoughtBlock({ text, live = false }: { text: string; live?: boolean }) {
-  // Collapsed even while being written: the shimmer says it is working.
-  const [open, setOpen] = useState(false);
-  return (
-    <div className={`thought ${live ? 'is-live' : ''}`}>
-      <button className="thought-head" onClick={() => setOpen((o) => !o)}>
-        <span className={`thought-chevron ${open ? 'is-open' : ''}`}>
-          <ChevronIcon size={13} />
-        </span>
-        <span className={`thought-label ${live ? 'is-live' : ''}`}>Thinking</span>
-      </button>
-      {open && (
-        <div className="thought-body">
-          {/* Plain text, not markdown: the body mounts whole, so a code fence in it would
-              render uncoloured and then recolour when the highlighter answers. */}
-          <div className="thought-text">{text}</div>
-        </div>
-      )}
-    </div>
-  );
+function runRowOf(member: RunMember): RunRowInput {
+  return member.type === 'tool' ? { kind: 'tool', tool: member.tool } : { kind: 'thought', text: member.text };
 }
 
 /**

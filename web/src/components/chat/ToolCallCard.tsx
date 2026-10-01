@@ -13,7 +13,8 @@ import {
   parseTodo,
   soleStringField,
   toolBlocks,
-  toolLabel,
+  toolPhrase,
+  runSummary,
 } from '../../util/toolRender.js';
 import { ChevronIcon } from '../common/icons.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
@@ -22,71 +23,9 @@ import { choiceCallOf } from '../../util/choiceCall.js';
 import { ChoiceTemplate } from './ChoiceTemplate.js';
 import { WidgetBlock } from './WidgetBlock.js';
 
-const STATUS_LABEL: Record<string, string> = {
-  pending: 'queued',
-  in_progress: 'running',
-  completed: 'done',
-  failed: 'failed',
-};
-
 const asObj = (v: unknown): Record<string, unknown> | null =>
   v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
-const base = (p: string): string => p.split('/').pop() || p;
-
-/** The first readable path from a `read` tool's operations. */
-function readPath(input: Record<string, unknown>): string | undefined {
-  const ops = Array.isArray(input.operations) ? input.operations : [];
-  for (const op of ops) {
-    const o = asObj(op);
-    if (o && typeof o.path === 'string') return o.path;
-    if (o && Array.isArray(o.image_paths) && typeof o.image_paths[0] === 'string') {
-      return o.image_paths[0];
-    }
-  }
-  return undefined;
-}
-
-/** Concise header subtitle: the agent's stated purpose (preferred), else a
- *  filename / pattern. Never the shell command - those are long 1-liners. */
-function summaryOf(tool: ToolCallView): { text: string; title?: string } | null {
-  const inp = asObj(tool.input);
-  if (!inp) return null;
-  const purpose = str(inp.__tool_use_purpose);
-  if (purpose) return { text: purpose };
-  switch (classifyTool(tool)) {
-    case 'write': {
-      const p = str(inp.path);
-      return p ? { text: base(p), title: p } : null;
-    }
-    case 'read': {
-      const p = readPath(inp);
-      return p ? { text: base(p), title: p } : null;
-    }
-    case 'grep': {
-      const p = str(inp.pattern);
-      return p ? { text: p } : null;
-    }
-    case 'websearch':
-    case 'introspect': {
-      const q = str(inp.query) ?? str(inp.doc_path);
-      return q ? { text: q } : null;
-    }
-    case 'webfetch': {
-      const u = str(inp.url);
-      if (!u) return null;
-      let host = u;
-      try {
-        host = new URL(u).hostname || u;
-      } catch {
-        // not a parseable URL; show it as-is
-      }
-      return { text: host, title: u };
-    }
-    default:
-      return null;
-  }
-}
 
 function extractImagePaths(input: unknown): string[] {
   const obj = asObj(input);
@@ -104,25 +43,75 @@ function extractImagePaths(input: unknown): string[] {
 const imageUrl = (absolutePath: string) =>
   `/api/fs/file?path=${encodeURIComponent(absolutePath)}`;
 
+// One check per path for the life of the page: whether the file still exists as an image.
+const imageChecks = new Map<string, Promise<boolean>>();
+function imageExists(path: string): Promise<boolean> {
+  let check = imageChecks.get(path);
+  if (!check) {
+    check = fetch(imageUrl(path), { method: 'HEAD' })
+      .then((r) => r.ok && (r.headers.get('content-type') ?? '').startsWith('image/'))
+      .catch(() => false);
+    imageChecks.set(path, check);
+  }
+  return check;
+}
+
+/**
+ * The image paths that still point at an image. Null until the checks finish, so the
+ * call renders as usual while they run.
+ */
+function useExistingImages(paths: string[]): string[] | null {
+  const key = paths.join('\n');
+  const [found, setFound] = useState<{ key: string; paths: string[] } | null>(null);
+  useEffect(() => {
+    if (!key) return;
+    let cancelled = false;
+    const list = key.split('\n');
+    void Promise.all(list.map(imageExists)).then((ok) => {
+      if (!cancelled) setFound({ key, paths: list.filter((_, i) => ok[i]) });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [key]);
+  if (!key) return [];
+  return found?.key === key ? found.paths : null;
+}
+
+/**
+ * A tool call's image paths and opening body together. `hidden` is true for an image read
+ * whose images are all gone and which has nothing else to show.
+ */
+function useToolContent(tool: ToolCallView): { images: string[]; body: ReactNode; hidden: boolean } {
+  const paths = extractImagePaths(tool.input);
+  const existing = useExistingImages(paths);
+  const images = existing ?? paths;
+  const body = renderBody(tool);
+  const hidden = paths.length > 0 && existing !== null && existing.length === 0 && body == null;
+  return { images, body, hidden };
+}
+
 /**
  * A tool invocation. Common tools get a tailored, syntax-highlighted body
  * (shell -> command + output, writes -> diff or full file, read -> file
  * contents, grep -> matches); anything else falls back to a generic
- * input/output view. Collapsed by default (failures start open) with an
+ * input/output view. Collapsed by default, failures included, with an
  * informative header so the transcript stays compact.
  */
 interface ToolCallCardProps {
   tool: ToolCallView;
   /** Arrived during this turn rather than with the transcript, so it fades in. */
   arriving?: boolean;
+  /** The last thing in a running turn, so more work may follow: its line shimmers. */
+  active?: boolean;
 }
 
 /**
- * A widget or template is the point of its own call, not a tool to inspect. Dispatched here
- * rather than inside the body, because the body holds state: a call that gains recognisable
- * input mid-stream would otherwise change how many hooks run and React would throw.
+ * A widget or a choice is the point of its own call, not a tool to inspect. Dispatched here rather than inside the body, because the body holds state: a
+ * call that gains recognisable input mid-stream would otherwise change how many hooks run
+ * and React would throw.
  */
-function ToolCallCardBody({ tool, arriving }: ToolCallCardProps) {
+function ToolCallCardBody({ tool, arriving, active }: ToolCallCardProps) {
   const widget = widgetCallOf(tool);
   if (widget) {
     if (tool.status === 'failed') {
@@ -137,76 +126,247 @@ function ToolCallCardBody({ tool, arriving }: ToolCallCardProps) {
   }
   const choice = choiceCallOf(tool);
   if (choice) return <ChoiceTemplate data={choice} toolId={tool.id} />;
-  return <GenericToolCall tool={tool} arriving={arriving} />;
+  return <GenericToolCall tool={tool} arriving={arriving} active={active} />;
 }
 
-function GenericToolCall({ tool, arriving = false }: ToolCallCardProps) {
-  const status = tool.status;
-  const [open, setOpen] = useState(status === 'failed');
-  const summary = summaryOf(tool);
-  const imagePaths = extractImagePaths(tool.input);
-  // An image-only read shows its image below the header and has nothing else to reveal, so
-  // it gets no chevron and no fold rather than one that opens onto an empty strip.
-  const body = renderBody(tool);
-  const hasBody = body != null;
+/** The images a read pulled in, shown inside the call's fold. */
+function ToolImages({ paths }: { paths: string[] }) {
+  if (paths.length === 0) return null;
+  return (
+    <div className="toolcall-images">
+      {paths.map((p) => (
+        <a
+          key={p}
+          href={imageUrl(p)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="toolcall-image-link"
+        >
+          <img
+            src={imageUrl(p)}
+            alt={p.split('/').pop() ?? 'image'}
+            className="toolcall-image"
+            {...lazyImageProps}
+          />
+        </a>
+      ))}
+    </div>
+  );
+}
 
-  const head = (
-    <>
-      <span className={`toolcall-dot dot-${status}`} />
-      <span className="toolcall-title">{toolLabel(tool)}</span>
-      {summary && (
-        <span className="toolcall-summary" title={summary.title ?? summary.text}>
-          {summary.text}
-        </span>
-      )}
-      <span className="toolcall-status">{STATUS_LABEL[status] ?? status}</span>
+/**
+ * One tool call: a plain line of text with a chevron, opening onto its tailored body. No
+ * card border, no status dot, no monospace tool name - the call reads as a sentence, not
+ * a log line. A failed call stays red whether its line is open or closed; a running one
+ * gets the shimmer on its text instead of a spinner.
+ */
+function GenericToolCall({ tool, arriving = false, active = false }: ToolCallCardProps) {
+  const status = tool.status;
+  const [open, setOpen] = useState(false);
+  const { images, body, hidden } = useToolContent(tool);
+  const hasBody = body != null || images.length > 0;
+  if (hidden) return null;
+
+  return (
+    <div className={`toolline-wrap ${arriving ? 'is-arriving' : ''}`}>
+      <ToolLine
+        text={toolPhrase(tool, status === 'in_progress')}
+        detail={searchQuery(tool)}
+        live={status === 'in_progress' || (active && status !== 'failed')}
+        failed={status === 'failed'}
+        open={open}
+        onToggle={hasBody ? () => setOpen((o) => !o) : undefined}
+      />
       {hasBody && (
-        <span className={`toolcall-chevron ${open ? 'is-open' : ''}`}>
-          <ChevronIcon size={14} />
+        <Collapse open={open}>
+          <div className="toolcall-body">
+            <ToolImages paths={images} />
+            {body}
+          </div>
+        </Collapse>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The plain-text line shared by a standalone tool call and each row inside a run's box:
+ * the phrase, a shimmer while live, red while failed, and a chevron that only appears
+ * when there is something to open.
+ */
+function ToolLine({
+  text,
+  detail,
+  live,
+  failed,
+  open,
+  onToggle,
+}: {
+  text: string;
+  /** Shown after the text in brighter type, e.g. a web search's query. */
+  detail?: string;
+  live: boolean;
+  failed: boolean;
+  open: boolean;
+  onToggle?: () => void;
+}) {
+  const content = (
+    <>
+      <span className={`toolline-text ${live ? 'is-live' : ''}`}>{text}</span>
+      {detail && <span className="toolline-detail">{detail}</span>}
+      {onToggle && (
+        <span className={`toolline-chevron ${open ? 'is-open' : ''}`}>
+          <ChevronIcon size={13} />
         </span>
       )}
     </>
   );
+  const className = `toolline ${failed ? 'is-failed' : ''}`;
+  return onToggle ? (
+    <button className={className} onClick={onToggle} aria-expanded={open}>
+      {content}
+    </button>
+  ) : (
+    <div className={className}>{content}</div>
+  );
+}
+
+/** One member of a run as its caller sees it: a tool call, or a thinking message's text. */
+export type RunRowInput =
+  | { kind: 'tool'; tool: ToolCallView }
+  | { kind: 'thought'; text: string };
+
+/**
+ * A run of two or more consecutive tool calls and thinking messages, collapsed into one
+ * closed line. Opening it reveals the members in order as rows in one lightly bordered
+ * box; each tool row opens in place onto that call's own body, exactly as it would
+ * standalone, and each thought row opens onto its muted italic text. Closed by default,
+ * including while something in it is still running - matching a lone tool line or a lone
+ * thought.
+ *
+ * `liveThought`, when given, is the streaming thought still arriving: it is appended as a
+ * trailing row of its own, and while it is present the group's line reads "Thinking" with
+ * the shimmer unless a tool call is also running (a tool call's own phrase wins, since it
+ * is the more specific thing happening right now).
+ */
+function ToolCallGroup({
+  rows,
+  liveThought,
+  arriving = false,
+  active = false,
+}: {
+  rows: RunRowInput[];
+  liveThought?: string;
+  arriving?: boolean;
+  /** The last thing in a running turn, so more rows may join: its line shimmers. */
+  active?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const tools = rows.flatMap((r) => (r.kind === 'tool' ? [r.tool] : []));
+  const liveTool = tools.find((t) => t.status === 'in_progress');
+  const text = liveTool
+    ? toolPhrase(liveTool, true)
+    : liveThought !== undefined
+      ? 'Thinking'
+      : runSummary(tools);
+  const live = !!liveTool || liveThought !== undefined || active;
 
   return (
-    <div className={`toolcall toolcall-${status} ${arriving ? 'is-arriving' : ''}`}>
-      {hasBody ? (
-        <button
-          className="toolcall-head"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-        >
-          {head}
-        </button>
-      ) : (
-        <div className="toolcall-head">{head}</div>
-      )}
-
-      {imagePaths.length > 0 && (
-        <div className="toolcall-images">
-          {imagePaths.map((p) => (
-            <a
-              key={p}
-              href={imageUrl(p)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="toolcall-image-link"
-            >
-              <img
-                src={imageUrl(p)}
-                alt={p.split('/').pop() ?? 'image'}
-                className="toolcall-image"
-                {...lazyImageProps}
-              />
-            </a>
-          ))}
+    <div className={`toolline-wrap ${arriving ? 'is-arriving' : ''}`}>
+      {/* Only the failed row inside is red: one failure does not mark the whole group. */}
+      <ToolLine text={text} live={live} failed={false} open={open} onToggle={() => setOpen((o) => !o)} />
+      {open && (
+        <div className="toolline-box">
+          {/* One keyed list, so the live thought keeps its row (and its open state) once
+              it is saved and becomes an ordinary thought row at the same index. */}
+          {[
+            ...rows.map((row, i) =>
+              row.kind === 'tool' ? (
+                <ToolCallRow key={row.tool.id} tool={row.tool} />
+              ) : (
+                <ThoughtRow key={`thought-${i}`} text={row.text} />
+              ),
+            ),
+            ...(liveThought !== undefined
+              ? [<ThoughtRow key={`thought-${rows.length}`} text={liveThought} live />]
+              : []),
+          ]}
         </div>
       )}
+    </div>
+  );
+}
 
+/** One row inside a run's box: the same line, its own open state, its own body. */
+function ToolCallRow({ tool }: { tool: ToolCallView }) {
+  const status = tool.status;
+  const [open, setOpen] = useState(false);
+  const { images, body, hidden } = useToolContent(tool);
+  const hasBody = body != null || images.length > 0;
+  if (hidden) return null;
+
+  return (
+    <div className="toolline-row">
+      <ToolLine
+        text={toolPhrase(tool, status === 'in_progress')}
+        detail={searchQuery(tool)}
+        live={status === 'in_progress'}
+        failed={status === 'failed'}
+        open={open}
+        onToggle={hasBody ? () => setOpen((o) => !o) : undefined}
+      />
       {hasBody && (
         <Collapse open={open}>
-          <div className="toolcall-body">{body}</div>
+          <div className="toolcall-body">
+            <ToolImages paths={images} />
+            {body}
+          </div>
         </Collapse>
+      )}
+    </div>
+  );
+}
+
+/** A thinking message's row, inside a run's box or on its own: the plain muted "Thinking"
+ *  line, opening onto the thought text in muted italic. Closed by default, including while
+ *  still streaming. */
+function ThoughtRow({ text, live = false }: { text: string; live?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="toolline-row">
+      <ToolLine text="Thinking" live={live} failed={false} open={open} onToggle={() => setOpen((o) => !o)} />
+      {open && (
+        <div className="toolcall-body">
+          <div className="thought-text">{text}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A lone thinking message, outside any run: the same plain muted line and chevron as a
+ * tool line, opening onto the thought text in muted italic. Closed by default, including
+ * while still streaming.
+ */
+function ThoughtLine({
+  text,
+  live = false,
+  arriving = false,
+}: {
+  text: string;
+  live?: boolean;
+  arriving?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`toolline-wrap ${arriving ? 'is-arriving' : ''}`}>
+      <ToolLine text="Thinking" live={live} failed={false} open={open} onToggle={() => setOpen((o) => !o)} />
+      {open && (
+        <div className="toolcall-body">
+          <div className="thought-text">{text}</div>
+        </div>
       )}
     </div>
   );
@@ -267,17 +427,27 @@ function renderShell(tool: ToolCallView): ReactNode {
   const exit = j ? String(j.exit_status ?? '') : '';
   const failed = exit !== '' && !/\b0$/.test(exit);
   return (
-    <>
-      {cmd && <Code code={cmd} lang="bash" />}
-      {stdout.trim() && <Code code={stdout} lang="text" />}
+    <div className="shell-panel">
+      {cmd && (
+        <>
+          <div className="shell-label">bash</div>
+          <Code code={cmd} lang="bash" />
+        </>
+      )}
+      {stdout.trim() && (
+        <>
+          <div className="shell-label">Output</div>
+          <Code code={stdout} lang="text" />
+        </>
+      )}
       {stderr.trim() && (
-        <div className="toolcall-section">
-          <div className="toolcall-label">stderr</div>
+        <>
+          <div className="shell-label">Errors</div>
           <Code code={stderr} lang="text" />
-        </div>
+        </>
       )}
       {failed && <div className="toolcall-exit">{exit}</div>}
-    </>
+    </div>
   );
 }
 
@@ -353,7 +523,7 @@ function renderRead(tool: ToolCallView): ReactNode {
   const ops = inp && Array.isArray(inp.operations) ? inp.operations : [];
   const text = outputText(toolBlocks(tool));
   if (!text.trim()) {
-    // Image-only read: the image renders in the card header, nothing more.
+    // Image-only read: the images are the whole body, shown by the caller.
     if (extractImagePaths(tool.input).length > 0) return null;
     // A read-kind tool without file text - show it generically rather than
     // leaving the body empty.
@@ -404,7 +574,9 @@ function renderGrep(tool: ToolCallView): ReactNode {
 
 function renderTodo(tool: ToolCallView): ReactNode {
   const tasks = parseTodo(toolBlocks(tool));
-  if (!tasks || tasks.length === 0) return renderGeneric(tool);
+  if (!tasks) return renderGeneric(tool);
+  // kiro empties the list once its last task is completed.
+  if (tasks.length === 0) return <div className="todo-empty">All tasks done.</div>;
   return (
     <div className="todo">
       {tasks.map((t, i) => (
@@ -433,7 +605,7 @@ function renderIntrospect(tool: ToolCallView): ReactNode {
     <>
       {query && (
         <div className="toolcall-section">
-          <div className="toolcall-label">query</div>
+          <div className="toolcall-label">Query</div>
           <Code code={query} lang="text" />
         </div>
       )}
@@ -472,7 +644,7 @@ function renderWebFetch(tool: ToolCallView): ReactNode {
       )}
       {terms && (
         <div className="toolcall-section">
-          <div className="toolcall-label">search terms</div>
+          <div className="toolcall-label">Search terms</div>
           <Code code={terms} lang="text" />
         </div>
       )}
@@ -523,32 +695,47 @@ function renderWebSearch(tool: ToolCallView): ReactNode {
   const blocks = toolBlocks(tool);
   const hits = searchHits(firstJsonData(blocks));
   if (!hits) return renderGeneric(tool);
-  const query = str(asObj(tool.input)?.query);
   return (
-    <>
-      {query && (
-        <div className="toolcall-section">
-          <div className="toolcall-label">query</div>
-          <Code code={query} lang="text" />
-        </div>
-      )}
-      <ol className="websearch">
-        {hits.map((h, i) => (
-          <li key={i} className="websearch-item">
+    <ul className="websearch">
+      {hits.map((h, i) => {
+        const site = hostOf(h.url);
+        const title = h.title ?? h.url ?? '(untitled)';
+        return (
+          <li key={i}>
             {h.url ? (
-              <a className="websearch-title" href={h.url} target="_blank" rel="noopener noreferrer">
-                {h.title ?? h.url}
+              <a className="websearch-row" href={h.url} target="_blank" rel="noopener noreferrer" title={h.url}>
+                <span className="websearch-title">{title}</span>
+                {site && <span className="websearch-site">{site}</span>}
               </a>
             ) : (
-              <span className="websearch-title">{h.title ?? '(untitled)'}</span>
+              <span className="websearch-row">
+                <span className="websearch-title">{title}</span>
+              </span>
             )}
-            {h.url && <div className="websearch-url">{h.url}</div>}
-            {h.snippet && <p className="websearch-snippet">{h.snippet}</p>}
           </li>
-        ))}
-      </ol>
-    </>
+        );
+      })}
+    </ul>
   );
+}
+
+/** A result's domain without "www.", or undefined when the URL can't be parsed. */
+function hostOf(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return undefined;
+  }
+}
+
+/** A web search's query, shown on its line. Only when the line uses the plain verb: an
+ *  agent-supplied purpose already says what was searched. */
+function searchQuery(tool: ToolCallView): string | undefined {
+  if (classifyTool(tool) !== 'websearch') return undefined;
+  const inp = asObj(tool.input);
+  if (str(inp?.__tool_use_purpose)) return undefined;
+  return str(inp?.query);
 }
 
 function renderGeneric(tool: ToolCallView): ReactNode {
@@ -570,13 +757,13 @@ function renderGeneric(tool: ToolCallView): ReactNode {
     <>
       {inputStr && inputStr !== '{}' && (
         <div className="toolcall-section">
-          <div className="toolcall-label">input</div>
+          <div className="toolcall-label">Input</div>
           <Code code={inputStr} lang={asObj(input) ? 'json' : 'text'} />
         </div>
       )}
       {outStr.trim() && (
         <div className="toolcall-section">
-          <div className="toolcall-label">output</div>
+          <div className="toolcall-label">Output</div>
           <Code code={outStr} lang={outLang} />
         </div>
       )}
@@ -626,3 +813,11 @@ function DiffView({ diff }: { diff: DiffLine[] }) {
  * only the tool object that changed, so the other cards' props stay identical.
  */
 export const ToolCallCard = memo(ToolCallCardBody);
+
+/** Memoized for the same reason as ToolCallCard: the box re-renders only when one of its
+ *  rows actually changes. `liveThought` is a plain string prop, so a growing streaming
+ *  thought re-renders only the group it belongs to, not any other row or card. */
+export const ToolCallGroupCard = memo(ToolCallGroup);
+
+/** Memoized for the same reason as ToolCallCard. */
+export const ThoughtLineCard = memo(ThoughtLine);

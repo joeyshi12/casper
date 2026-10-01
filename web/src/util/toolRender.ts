@@ -138,6 +138,134 @@ export function toolLabel(tool: { name?: string; title?: string; kind?: string; 
   return t && !/\s/.test(t) ? t : 'tool';
 }
 
+const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+const baseName = (p: string): string => p.split('/').pop() || p;
+
+/** The first readable path from a `read` tool's operations (file or image). */
+function readTarget(input: Block): string | undefined {
+  const ops = Array.isArray(input.operations) ? input.operations : [];
+  for (const op of ops) {
+    const o = isObj(op) ? op : null;
+    if (o && typeof o.path === 'string') return o.path;
+    if (o && Array.isArray(o.image_paths) && typeof o.image_paths[0] === 'string') {
+      return o.image_paths[0];
+    }
+  }
+  return undefined;
+}
+
+/** Past and present tense verbs for a tool kind, used when there is no target
+ *  to name ("Ran a command") and as the lead word when there is ("Read x.ts"). */
+const KIND_VERB: Record<ToolKind, [string, string]> = {
+  shell: ['Ran', 'Running'],
+  write: ['Wrote', 'Writing'],
+  read: ['Read', 'Reading'],
+  grep: ['Searched', 'Searching'],
+  todo: ['Updated the task list', 'Updating the task list'],
+  webfetch: ['Fetched', 'Fetching'],
+  websearch: ['Searched the web', 'Searching the web'],
+  introspect: ['Looked up', 'Looking up'],
+  generic: ['Ran a tool', 'Running a tool'],
+};
+
+export type ToolLike = { name?: string; title?: string; kind?: string; input?: unknown };
+
+/** The target a kind's verb acts on, e.g. a filename or a search pattern. Undefined
+ *  when the kind has no single target (shell, generic) or none was found. */
+function toolTarget(tool: ToolLike, kind: ToolKind): string | undefined {
+  const inp = isObj(tool.input) ? tool.input : null;
+  if (!inp) return undefined;
+  switch (kind) {
+    case 'write': {
+      const p = str(inp.path);
+      return p ? baseName(p) : undefined;
+    }
+    case 'read': {
+      const p = readTarget(inp);
+      return p ? baseName(p) : undefined;
+    }
+    case 'grep':
+      return str(inp.pattern);
+    case 'introspect':
+      return str(inp.query) ?? str(inp.doc_path);
+    case 'webfetch': {
+      const u = str(inp.url);
+      if (!u) return undefined;
+      try {
+        return new URL(u).hostname || u;
+      } catch {
+        return u;
+      }
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * One line of text for a tool call: the agent's own `__tool_use_purpose` when it gave one,
+ * else a plain phrase built from the tool kind and its target. Past tense when done, present
+ * tense ("Running a command") while the call is still in progress - the caller picks tense
+ * by passing `live`.
+ */
+export function toolPhrase(tool: ToolLike, live: boolean): string {
+  const inp = isObj(tool.input) ? tool.input : null;
+  const purpose = inp ? str(inp.__tool_use_purpose) : undefined;
+  if (purpose) return purpose;
+  const kind = classifyTool(tool);
+  const [past, present] = KIND_VERB[kind];
+  const target = toolTarget(tool, kind);
+  const verb = live ? present : past;
+  if (!target) {
+    // "Running"/"Ran" alone reads as a command specifically; the other kinds already
+    // say what they did ("Searching the web").
+    if (kind === 'shell') return live ? 'Running a command' : 'Ran a command';
+    return verb;
+  }
+  return `${verb} ${target}`;
+}
+
+/** Plain noun phrase for a kind with no target, used in a run's summary line
+ *  ("Ran a command, read 2 files"). Singular / plural(n). */
+const KIND_NOUN: Record<ToolKind, [string, (n: number) => string]> = {
+  shell: ['ran a command', (n) => `ran ${n} commands`],
+  write: ['wrote a file', (n) => `wrote ${n} files`],
+  read: ['read a file', (n) => `read ${n} files`],
+  grep: ['searched the code', (n) => `searched the code ${n} times`],
+  todo: ['updated the task list', (n) => `updated the task list ${n} times`],
+  webfetch: ['fetched a page', (n) => `fetched ${n} pages`],
+  websearch: ['searched the web', (n) => `searched the web ${n} times`],
+  introspect: ['looked something up', (n) => `looked up ${n} things`],
+  generic: ['ran a tool', (n) => `ran ${n} tools`],
+};
+
+/** The closed summary line for a run of two or more tool calls, grouped by kind and counted:
+ *  "Ran a command, read 2 files". Capitalised, in the kinds' first-seen order. */
+export function toolRunSummary(tools: ToolLike[]): string {
+  const order: ToolKind[] = [];
+  const counts = new Map<ToolKind, number>();
+  for (const tool of tools) {
+    const kind = classifyTool(tool);
+    if (!counts.has(kind)) order.push(kind);
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  const phrases = order.map((kind) => {
+    const n = counts.get(kind)!;
+    const [one, many] = KIND_NOUN[kind];
+    return n === 1 ? one : many(n);
+  });
+  const joined = phrases.join(', ');
+  return joined.charAt(0).toUpperCase() + joined.slice(1);
+}
+
+/** The closed summary line for a run that may mix thinking messages and tool calls.
+ *  Thinking adds nothing to the text once there is a tool call to describe - the tool
+ *  calls are the part worth naming. A run with no tool calls at all, only thoughts,
+ *  reads "Thought". */
+export function runSummary(tools: ToolLike[]): string {
+  return tools.length > 0 ? toolRunSummary(tools) : 'Thought';
+}
+
 /** Concatenated plain text from a tool call's content, across shapes:
  *  ACP {type:'content',content:{text}}, {type:'text',text}, persisted
  *  {kind:'text',data}. (JSON blocks are handled by firstJsonData.) */
