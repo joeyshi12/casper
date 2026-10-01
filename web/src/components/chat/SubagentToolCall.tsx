@@ -7,6 +7,7 @@ import { formatElapsed } from '../../util/duration.js';
 import { ChevronIcon } from '../common/icons.js';
 import { ToolCallCard, ToolCallGroupCard } from './ToolCallCard.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
+import { Collapse } from './Collapse.js';
 
 interface StageInput {
   name: string;
@@ -51,12 +52,12 @@ function SubagentToolCallBody({ tool }: { tool: ToolCallView }) {
     if (running) setOpen(true);
   }, [running]);
 
+  // Fetched on mount, not only when opened, so a call with nothing saved can be hidden.
   const [list, setList] = useState<'loading' | 'loaded' | 'failed'>('loading');
   useEffect(() => {
-    if (!open || !activeId) return;
+    if (!activeId) return;
     let alive = true;
-    api
-      .subagents(activeId)
+    fetchSubagents(activeId)
       .then((r) => {
         if (!alive) return;
         setSubagents(r.subagents);
@@ -73,6 +74,7 @@ function SubagentToolCallBody({ tool }: { tool: ToolCallView }) {
   const [openRow, setOpenRow] = useState<string | null>(null);
 
   const callRunning = tool.status === 'in_progress';
+  if (list === 'loaded' && subagents.length === 0 && !callRunning) return null;
   const text =
     subagents.length > 0
       ? pipelineLine(subagents, running)
@@ -99,7 +101,7 @@ function SubagentToolCallBody({ tool }: { tool: ToolCallView }) {
           <ChevronIcon size={13} />
         </span>
       </button>
-      {open && (
+      <Collapse open={open}>
         <div className="toolline-box">
           {subagents.length > 0 ? (
             subagents.map((a) => (
@@ -111,7 +113,7 @@ function SubagentToolCallBody({ tool }: { tool: ToolCallView }) {
                 onToggle={() => setOpenRow((cur) => (cur === a.sessionId ? null : a.sessionId))}
               />
             ))
-          ) : list === 'loading' && stages.length > 0 ? (
+          ) : list !== 'failed' && stages.length > 0 ? (
             stages.map((st) => (
               <div key={st.name} className="toolline-row">
                 <div className="agent-row">
@@ -124,20 +126,27 @@ function SubagentToolCallBody({ tool }: { tool: ToolCallView }) {
           ) : (
             <div className="toolline-row">
               <div className="agent-row">
-                <span className={`agent-what ${list === 'loading' ? 'is-live' : ''}`}>
-                  {list === 'loading'
-                    ? 'Loading'
-                    : list === 'failed'
-                      ? "Couldn't load the subagents."
-                      : 'No details were saved for these subagents.'}
+                <span className={`agent-what ${list === 'failed' ? '' : 'is-live'}`}>
+                  {list === 'failed' ? "Couldn't load the subagents." : 'Loading'}
                 </span>
               </div>
             </div>
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   );
+}
+
+// Several subagent calls in one chat share one request for the chat's list.
+const inflight = new Map<string, ReturnType<typeof api.subagents>>();
+function fetchSubagents(chatId: string): ReturnType<typeof api.subagents> {
+  let p = inflight.get(chatId);
+  if (!p) {
+    p = api.subagents(chatId).finally(() => inflight.delete(chatId));
+    inflight.set(chatId, p);
+  }
+  return p;
 }
 
 function rowActivity(a: SubagentSummary): string {
@@ -174,13 +183,13 @@ function SubagentRow({
         <span className={`agent-what ${live ? 'is-live' : ''}`}>{rowActivity(subagent)}</span>
         <span className="agent-time">{subagent.status === 'pending' ? '' : formatElapsed(elapsed)}</span>
       </button>
-      {open && (
+      <Collapse open={open}>
         <div className="agent-detail">
           {chatId && (
             <SubagentTranscript chatId={chatId} subagentId={subagent.sessionId} live={live} />
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }

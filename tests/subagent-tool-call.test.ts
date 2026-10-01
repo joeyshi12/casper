@@ -111,16 +111,12 @@ describe('the subagent tool call (rendered in a DOM)', () => {
     api.subagentDetail = originalDetail;
   });
 
-  it('does not fetch the list before the line is opened', () => {
+  it('fetches the list once on mount, while still closed', async () => {
+    const list = [summary({ status: 'completed' })];
+    api.subagents = async (chatId: string) => (subagentsCalls.push(chatId), { subagents: list });
     render(subagentTool('completed'));
-    assert.ok(pipelineLine(), 'the call renders as one line');
-    assert.deepEqual(subagentsCalls, [], 'closed by default once finished, so nothing is fetched yet');
-  });
-
-  it('clicking the line opens it and fetches the list', async () => {
-    render(subagentTool('completed'));
-    act(() => (pipelineLine() as HTMLElement).click());
     await flush();
+    assert.equal(pipelineLine()!.getAttribute('aria-expanded'), 'false', 'closed by default once finished');
     assert.deepEqual(subagentsCalls, ['chat-1']);
   });
 
@@ -171,12 +167,19 @@ describe('the subagent tool call (rendered in a DOM)', () => {
     assert.ok(rows()[0]!.textContent?.includes('Done'), 'the loaded status replaces it');
   });
 
-  it('says so when the list has nothing for this call', async () => {
+  it('is not shown when nothing was saved for a finished call', async () => {
     api.subagents = async () => ({ subagents: [] });
     render(subagentTool('completed'));
-    act(() => (pipelineLine() as HTMLElement).click());
     await flush();
-    assert.ok(host.textContent?.includes('No details were saved for these subagents.'));
+    assert.equal(pipelineLine() === null, true, 'the call line is not rendered');
+  });
+
+  it('stays shown while running, even before any subagent is listed', async () => {
+    api.subagents = async () => ({ subagents: [] });
+    render(subagentTool('in_progress'));
+    await flush();
+    assert.ok(pipelineLine());
+    assert.equal(rows().length, 2, 'one row per declared stage');
   });
 
   it('the pending row has no elapsed time shown', async () => {
@@ -193,6 +196,7 @@ describe('the subagent tool call (rendered in a DOM)', () => {
   });
 
   it('shows "Ran N subagents" once finished, and updates live from the subagents_changed event', async () => {
+    api.subagents = async () => ({ subagents: [summary({ status: 'completed' })] });
     render(subagentTool('completed'));
     await flush();
     assert.ok(pipelineLine()!.textContent?.startsWith('Ran'), 'past tense once the call is done');

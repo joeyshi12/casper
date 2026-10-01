@@ -264,3 +264,20 @@ describe('a failed call in a run (rendered in a DOM)', () => {
     assert.ok(failedRow.textContent?.includes('No such file or directory'), 'opening it shows the error');
   });
 });
+
+describe('folds open and close with the height animation (rendered in a DOM)', () => {
+  it('a group and a lone thought put their content inside a collapse', () => {
+    act(() => useStore.setState({ items: [toolItem('t1', 'shell'), toolItem('t2', 'read')] }));
+    act(() => (transcript().querySelector('.toolline') as HTMLElement).click());
+    assert.ok(transcript().querySelector('.collapse.is-open .toolline-box'), 'the group box is inside an open collapse');
+
+    act(() => useStore.setState({ items: [thought('th1', 'a reason')] }));
+    act(() => (transcript().querySelector('.toolline') as HTMLElement).click());
+    assert.ok(transcript().querySelector('.collapse.is-open .thought-text'));
+  });
+
+  it('a thought with no text is not shown', () => {
+    act(() => useStore.setState({ items: [thought('th1', '  ')] }));
+    assert.equal(transcript().querySelector('.toolline') === null, true, 'no Thinking line');
+  });
+});

@@ -1,4 +1,5 @@
-import { memo, useEffect, useState, type ReactNode, type TransitionEvent } from 'react';
+import { memo, useEffect, useState, type ReactNode } from 'react';
+import { Collapse } from './Collapse.js';
 import { useStore, type ToolCallView } from '../../state/store.js';
 import { workspaceRelative } from '../../util/workspacePath.js';
 import { highlightToHtml } from '../../util/highlighter.js';
@@ -231,7 +232,7 @@ function ToolCallGroup({
   return (
     <div className={`toolline-wrap ${arriving ? 'is-arriving' : ''}`}>
       <ToolLine text={text} live={live} failed={false} open={open} onToggle={() => setOpen((o) => !o)} />
-      {open && (
+      <Collapse open={open}>
         <div className="toolline-box">
           {[
             ...rows.map((row, i) =>
@@ -246,7 +247,7 @@ function ToolCallGroup({
               : []),
           ]}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }
@@ -282,14 +283,15 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
 
 function ThoughtRow({ text, live = false }: { text: string; live?: boolean }) {
   const [open, setOpen] = useState(false);
+  if (!live && !text.trim()) return null;
   return (
     <div className="toolline-row">
       <ToolLine text="Thinking" live={live} failed={false} open={open} onToggle={() => setOpen((o) => !o)} />
-      {open && (
+      <Collapse open={open}>
         <div className="toolcall-body">
           <div className="thought-text">{text}</div>
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }
@@ -304,31 +306,15 @@ function ThoughtLine({
   arriving?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  if (!live && !text.trim()) return null;
   return (
     <div className={`toolline-wrap ${arriving ? 'is-arriving' : ''}`}>
       <ToolLine text="Thinking" live={live} failed={false} open={open} onToggle={() => setOpen((o) => !o)} />
-      {open && (
+      <Collapse open={open}>
         <div className="toolcall-body">
           <div className="thought-text">{text}</div>
         </div>
-      )}
-    </div>
-  );
-}
-
-/* grid-rows 0fr -> 1fr animates to natural height without measuring. Body unmounts
-   only after the closing transition ends, so a closed card pays nothing to render. */
-function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
-  const [mounted, setMounted] = useState(open);
-  useEffect(() => {
-    if (open) setMounted(true);
-  }, [open]);
-  const onTransitionEnd = (e: TransitionEvent) => {
-    if (e.propertyName === 'grid-template-rows' && !open) setMounted(false);
-  };
-  return (
-    <div className={`collapse ${open ? 'is-open' : ''}`} onTransitionEnd={onTransitionEnd}>
-      <div className="collapse-inner">{mounted ? children : null}</div>
+      </Collapse>
     </div>
   );
 }
