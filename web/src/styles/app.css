@@ -118,7 +118,7 @@
     transform: none;
   }
 }
-.toolcall.is-arriving {
+.toolline-wrap.is-arriving {
   animation: card-in 0.2s ease-out both;
 }
 /* Still working: the label's own colour sweeps across it, the way Open WebUI marks pending
@@ -130,23 +130,6 @@
   to {
     background-position: -20% 0;
   }
-}
-.thought-label.is-live {
-  /* The band fades the letters out rather than brightening them, and its ends match the
-     resting colour, so the label does not jump when the animation stops. */
-  background: linear-gradient(
-    100deg,
-    var(--n3) 0%,
-    var(--n3) 35%,
-    color-mix(in srgb, var(--n3) 20%, transparent) 50%,
-    var(--n3) 65%,
-    var(--n3) 100%
-  );
-  background-size: 220% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  animation: label-shimmer 1.6s linear infinite;
 }
 
 /* Sidebar */
@@ -213,16 +196,6 @@
    stays visually distinct instead of merging into one cramped block. */
 .srow.is-active {
   background: var(--n2);
-}
-.srow.is-active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 9px;
-  bottom: 9px;
-  width: 2px;
-  border-radius: var(--r-pill);
-  background: var(--frost);
 }
 .srow-open {
   flex: 1;
@@ -1288,7 +1261,7 @@
   width: 6px;
   height: 6px;
   border-radius: var(--r-pill);
-  background: var(--aurora-orange);
+  background: var(--n4);
   animation: pulse 1.1s ease-in-out infinite;
 }
 .thinking-dot:nth-child(2) {
@@ -1298,47 +1271,12 @@
   animation-delay: 0.32s;
 }
 
-/* Reasoning ("thinking") block - dimmed, collapsible, distinct from output */
-.thought {
-  align-self: flex-start;
-  max-width: 100%;
-  width: 100%;
-  border-left: 2px solid var(--n2);
-  padding-left: 10px;
-}
-.thought.is-live {
-  border-left-color: var(--aurora-orange);
-}
-.thought-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--n3);
-  padding: 2px 0;
-}
-.thought-head:hover {
-  color: var(--n4);
-}
-.thought-chevron {
-  display: inline-flex;
-  transform: rotate(-90deg);
-  transition: transform 0.22s ease;
-}
-.thought-chevron.is-open {
-  transform: rotate(0deg);
-}
-.thought-body {
-  margin-top: 4px;
+/* A thinking message's text, shown in a tool-line row or a lone line's body: muted and
+   italic so it reads as reasoning rather than spoken output. */
+.thought-text {
   font-size: 14px;
-  /* Muted so reasoning recedes behind the actual output (--n5). --n3 is the
-     greyest text tone. */
   color: var(--n3);
   font-style: italic;
-}
-.thought-text {
   white-space: pre-wrap;
 }
 
@@ -1813,98 +1751,71 @@
   height: auto;
 }
 
-/* Tool calls */
-.toolcall {
+/* Tool calls: one line of plain muted text that opens onto its tailored body. No card
+   border, no status dot, no monospace tool name - a call reads as a sentence. */
+.toolline-wrap {
   align-self: flex-start;
   max-width: 100%;
   width: 100%;
-  border: 1px solid var(--n2);
-  border-radius: var(--r-md);
-  background: var(--n0);
-  overflow: hidden;
-  /* In the flex-column transcript, items default to flex-shrink: 1 and
-     min-height: auto. Under scroll pressure the algorithm shrinks this card
-     below its content and `overflow: hidden` clips the header, so the card
-     visually flattens more the further it scrolls. Refuse to shrink. */
   flex: 0 0 auto;
 }
-.toolcall-in_progress {
-  border-color: var(--aurora-orange);
-}
-.toolcall-failed {
-  border-color: var(--aurora-red);
-}
-.toolcall-head {
-  display: flex;
+.toolline {
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
-  /* min-height (not height) so the header is a floor that can't be compressed. */
-  min-height: 40px;
-  padding: 0 13px;
+  gap: 6px;
+  /* Buttons keep the browser's side padding otherwise, which indents the line. */
+  padding: 0;
+  max-width: 100%;
+  min-height: 26px;
+  font-size: 14px;
+  color: var(--n4);
   text-align: left;
 }
-.toolcall-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: var(--r-pill);
-  flex-shrink: 0;
-}
-.dot-pending {
-  background: var(--n3);
-}
-.dot-in_progress {
-  background: var(--aurora-orange);
-  animation: pulse 1.2s infinite;
-}
-.dot-completed {
-  background: var(--aurora-green);
-}
-.dot-failed {
-  background: var(--aurora-red);
-}
-.toolcall-title {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  /* Don't shrink: the label is short and must stay fully readable. The long
-     summary (flex: 1 1 auto) yields first, so it truncates instead of the
-     title. max-width caps a pathologically long tool name so it can't eat the
-     whole row, with ellipsis only past that cap. */
-  flex: 0 0 auto;
-  max-width: 45%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.toolline:hover {
   color: var(--n5);
 }
-/* Concise header subtitle: command / filename / grep pattern. */
-.toolcall-summary {
-  flex: 1 1 auto;
+.toolline.is-failed {
+  color: var(--aurora-red);
+}
+.toolline-detail {
   min-width: 0;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: var(--n5);
+}
+.toolline-text {
+  min-width: 0;
   white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--n4);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.toolcall-status {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--n3);
-  text-transform: lowercase;
-  margin-left: auto;
-  flex-shrink: 0;
+/* Still running: the text's own colour sweeps across it, the same shimmer the
+   thinking label uses - busy without a spinner. */
+.toolline-text.is-live {
+  background: linear-gradient(
+    100deg,
+    var(--n4) 0%,
+    var(--n4) 35%,
+    color-mix(in srgb, var(--n4) 20%, transparent) 50%,
+    var(--n4) 65%,
+    var(--n4) 100%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: label-shimmer 1.6s linear infinite;
 }
-.toolcall-chevron {
+.toolline-chevron {
   display: inline-flex;
-  color: var(--n3);
-  /* The icon points down; a closed row points at itself. */
+  flex-shrink: 0;
+  opacity: 0.7;
   transform: rotate(-90deg);
-  transition: transform 0.22s ease;
+  transition: transform 0.15s ease;
 }
-.toolcall-chevron.is-open {
-  transform: rotate(0deg);
+.toolline-chevron.is-open {
+  transform: none;
 }
 /* Expand/collapse height animation: grid 0fr -> 1fr animates to the content's
    natural height without measuring it. */
@@ -1921,22 +1832,71 @@
   overflow: hidden;
 }
 @media (prefers-reduced-motion: reduce) {
-  .toolcall-chevron,
+  .toolline-chevron,
+  .toolline-text.is-live,
   .collapse,
   .sidebar {
     transition: none;
+    animation: none;
   }
   .nav-scrim {
     animation: none;
   }
 }
 .toolcall-body {
-  padding: 0 13px 12px;
-  border-top: 1px solid var(--n2);
+  padding: 6px 0 10px;
+  /* One scroll area for the whole body: input and output scroll together. */
+  max-height: 460px;
+  overflow-y: auto;
+}
+.toolcall-body .toolcode,
+.toolcall-body .diff-body,
+.toolcall-body .grep,
+.toolcall-body .toolcall-doc,
+.toolcall-body .todo,
+.toolcall-body .websearch {
+  max-height: none;
+  overflow-y: visible;
+}
+/* The labels separate input from output, so code needs no box of its own. */
+.toolcall-body .toolcode {
+  margin-top: 4px;
+  padding: 0;
+  background: none;
+}
+.toolcall-body .toolcall-label {
+  margin-top: 10px;
+}
+.toolcall-body .toolcall-section:first-child .toolcall-label {
+  margin-top: 0;
+}
+/* Inside a group's box, a call's body sits in the row without a second border. */
+.toolline-row .shell-panel,
+.toolline-row .websearch {
+  border: none;
+  padding: 0;
 }
 .toolcall-section {
   margin-top: 11px;
 }
+/* Two or more consecutive calls collapsed into one line; open, they show as rows in one
+   lightly bordered box. */
+.toolline-box {
+  margin-top: 2px;
+  border: 1px solid var(--n2);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.toolline-row {
+  padding: 2px 12px;
+}
+.toolline-row + .toolline-row {
+  border-top: 1px solid var(--n2);
+}
+.toolline-row .toolcall-body {
+  padding: 0 0 10px;
+}
+
 
 /* The file a read or write acted on, above its body. A button when the file is inside
    the workspace and so has a preview to open, plain text when it is not. */
@@ -1969,12 +1929,9 @@
   cursor: default;
 }
 .toolcall-label {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--n3);
-  margin-bottom: 5px;
+  font-size: 12px;
+  color: var(--n4);
+  margin-bottom: 4px;
 }
 /* Chrome-free highlighted code (no bar/border/copy) for tool bodies. */
 .toolcode {
@@ -2000,6 +1957,25 @@
   color: var(--n5);
   white-space: pre-wrap;
   word-break: break-word;
+}
+/* shell: the command and its output in one bordered panel, each under a small label. */
+.shell-panel {
+  border: 1px solid var(--n1);
+  border-radius: var(--r-md);
+  padding: 10px 14px 12px;
+}
+.shell-label {
+  font-size: 12px;
+  color: var(--n4);
+  margin-top: 10px;
+}
+.shell-label:first-child {
+  margin-top: 0;
+}
+.shell-panel .toolcode {
+  margin-top: 4px;
+  padding: 0;
+  background: none;
 }
 .toolcall-exit {
   margin-top: 8px;
@@ -2098,11 +2074,8 @@
   word-break: break-all;
 }
 .toolcall-tag {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--n3);
+  font-size: 12px;
+  color: var(--n4);
   border: 1px solid var(--n-abyss);
   border-radius: var(--r-sm);
   padding: 1px 6px;
@@ -2114,38 +2087,41 @@
   max-height: 460px;
   overflow: auto;
 }
+/* web_search: one compact row per result in a bordered box, title on the left and its
+   site on the right. */
 .websearch {
-  margin: 10px 0 0;
-  padding: 0 0 0 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-height: 460px;
-  overflow: auto;
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 4px 12px;
+  border: 1px solid var(--n1);
+  border-radius: var(--r-md);
+  max-height: 280px;
+  overflow-y: auto;
 }
-.websearch-item {
+.websearch-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 2px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--n4);
+  text-decoration: none;
+}
+a.websearch-row:hover {
   color: var(--n5);
 }
 .websearch-title {
-  font-size: 13px;
-  color: var(--frost);
-  text-decoration: none;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.websearch-title:hover {
-  text-decoration: underline;
-}
-.websearch-url {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--n3);
-  word-break: break-all;
-  margin-top: 1px;
-}
-.websearch-snippet {
+.websearch-site {
+  flex-shrink: 0;
   font-size: 12px;
-  color: var(--n5);
-  margin: 4px 0 0;
-  line-height: 1.5;
+  color: var(--n3);
 }
 /* todo_list checklist. */
 .todo {
@@ -2155,6 +2131,10 @@
   border-radius: var(--r-sm);
   max-height: 460px;
   overflow-y: auto;
+}
+.todo-empty {
+  font-size: 14px;
+  color: var(--n4);
 }
 .todo-item {
   display: flex;
@@ -2181,8 +2161,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--n1);
+  margin-top: 6px;
+  padding: 0 0 4px;
 }
 .toolcall-image-link {
   display: block;
