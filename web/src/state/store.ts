@@ -10,6 +10,7 @@ import {
   type ObservabilitySnapshot,
   type ChatDetail,
   type ChatSummary,
+  type SubagentSummary,
   type ToolCallProgressUpdate,
   type ToolCallUpdate,
   type TranscriptItem,
@@ -72,6 +73,10 @@ interface CasperState {
    *  for lazy load-on-scroll-up. More items exist while this is > 0. */
   remainingOlder: number;
   observability: ObservabilitySnapshot;
+  /** The active chat's subagents (child sessions spawned by its `subagent` tool calls),
+   *  from GET .../subagents and kept live by the subagents_changed event. Not keyed per
+   *  tool call - a SubagentToolCall row filters this list down to its own toolCallId. */
+  subagents: SubagentSummary[];
   /** Bumped per directory when the server reports it changed, so open folders reload. */
   fsVersion: Record<string, number>;
   /** Directories the file panel is showing, sent to the server as its watch set. */
@@ -113,6 +118,8 @@ interface CasperState {
   setReloadingId: (id: string | null) => void;
   openFilePreview: (path: string) => void;
   closeFilePreview: () => void;
+  /** Replace the active chat's subagent list, e.g. after GET .../subagents. */
+  setSubagents: (subagents: SubagentSummary[]) => void;
   // Optimistic transitions. Here rather than at the call site because applyEvent
   // owns the same fields when the server's echo arrives, and a transition split
   // across two modules is one nobody can read in one place.
@@ -137,6 +144,7 @@ export const useStore = create<CasperState>((set, get) => ({
   appliedSeq: 0,
   remainingOlder: 0,
   observability: emptyObservabilitySnapshot(),
+  subagents: [],
   fsVersion: {},
   watchedPaths: [],
   streamingText: '',
@@ -154,6 +162,7 @@ export const useStore = create<CasperState>((set, get) => ({
 
   openFilePreview: (previewPath) => set({ previewPath }),
   closeFilePreview: () => set({ previewPath: null }),
+  setSubagents: (subagents) => set({ subagents }),
 
   // Optimistic feedback: the Stop button flips to "Stopping…" until the server
   // confirms with turn_ended / turn_error, which reset to idle.
@@ -232,6 +241,9 @@ export const useStore = create<CasperState>((set, get) => ({
       // just created must keep the message that created it.
       pending: opts?.keepPending ? s.pending : [],
       chatNotice: null,
+      // A new chat's own subagent list hasn't been fetched yet; the previous chat's
+      // would otherwise flash under the new chat's subagent tool call for a moment.
+      subagents: [],
     })),
 
   // Prepend an older page (loaded on scroll-up). remainingOlder shrinks by the
@@ -264,6 +276,7 @@ export const useStore = create<CasperState>((set, get) => ({
       currentModeId: undefined,
       currentModelId: undefined,
       previewPath: null,
+      subagents: [],
     }),
 
   dismissChatNotice: () => set({ chatNotice: null }),
@@ -414,6 +427,10 @@ export const useStore = create<CasperState>((set, get) => ({
         });
         break;
       }
+
+      case 'subagents_changed':
+        set({ subagents: p.subagents });
+        break;
 
       case 'metadata':
         set({

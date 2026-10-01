@@ -30,6 +30,8 @@ const choiceItem = (id: string): TranscriptItem =>
     options: [{ label: 'a', prompt: 'a' }, { label: 'b', prompt: 'b' }],
   });
 
+const subagentItem = (id: string): TranscriptItem => toolItem(id, 'subagent', { stages: [] });
+
 type RunEntry = { type: 'run'; members: { type: string; tool?: { id: string } }[] };
 
 describe('groupToolCalls', () => {
@@ -99,6 +101,12 @@ describe('groupToolCalls', () => {
 
   it('a choice template is never grouped and breaks a run around it', () => {
     const out = groupToolCalls([toolItem('t1', 'shell'), choiceItem('c1'), toolItem('t2', 'read')]);
+    assert.equal(out.length, 3);
+    assert.equal(out[1]!.type, 'other');
+  });
+
+  it('a subagent call is never grouped and breaks a run around it', () => {
+    const out = groupToolCalls([toolItem('t1', 'shell'), subagentItem('s1'), toolItem('t2', 'read')]);
     assert.equal(out.length, 3);
     assert.equal(out[1]!.type, 'other');
   });

@@ -20,8 +20,10 @@ import { ChevronIcon } from '../common/icons.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { prettyWidgetTitle, widgetCallOf } from '../../util/widgetCall.js';
 import { choiceCallOf } from '../../util/choiceCall.js';
+import { isSubagentCall } from '../../util/subagentCall.js';
 import { ChoiceTemplate } from './ChoiceTemplate.js';
 import { WidgetBlock } from './WidgetBlock.js';
+import { SubagentToolCall } from './SubagentToolCall.js';
 
 const asObj = (v: unknown): Record<string, unknown> | null =>
   v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
@@ -107,11 +109,13 @@ interface ToolCallCardProps {
 }
 
 /**
- * A widget or a choice is the point of its own call, not a tool to inspect. Dispatched here rather than inside the body, because the body holds state: a
+ * A widget, a choice, or the subagent list is the point of its own call, not a tool to
+ * inspect. Dispatched here rather than inside the body, because the body holds state: a
  * call that gains recognisable input mid-stream would otherwise change how many hooks run
  * and React would throw.
  */
 function ToolCallCardBody({ tool, arriving, active }: ToolCallCardProps) {
+  if (isSubagentCall(tool)) return <SubagentToolCall tool={tool} />;
   const widget = widgetCallOf(tool);
   if (widget) {
     if (tool.status === 'failed') {

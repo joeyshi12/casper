@@ -6,6 +6,8 @@ import type {
   ModelsResponse,
   ChatDetail,
   ChatListResponse,
+  SubagentDetailResponse,
+  SubagentListResponse,
   TranscriptPageResponse,
   TreeResponse,
   UploadResponse,
@@ -72,6 +74,11 @@ export const api = {
       'GET',
       `/api/chats/${id}/transcript?offset=${offset}&limit=${limit}`,
     ),
+  /** A chat's subagents (child sessions spawned by its `subagent` tool calls). */
+  subagents: (id: string) => req<SubagentListResponse>('GET', `/api/chats/${id}/subagents`),
+  /** One subagent's own transcript, fetched only once its row is opened. */
+  subagentDetail: (id: string, subagentId: string) =>
+    req<SubagentDetailResponse>('GET', `/api/chats/${id}/subagents/${subagentId}`),
   deleteChat: (id: string) => req<{ ok: boolean }>('DELETE', `/api/chats/${id}`),
   renameChat: (id: string, title: string) =>
     req<{ ok: boolean }>('POST', `/api/chats/${id}/rename`, { title }),
