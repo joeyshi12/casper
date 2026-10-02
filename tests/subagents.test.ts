@@ -395,3 +395,65 @@ describe('a subagent link survives a restart (a fresh SessionManager, same caspe
     freshMgr.disposeAll();
   });
 });
+
+describe('a title-matched subagent is saved, so the parent transcript is read once', () => {
+  let mgr: SessionManager;
+  let chatId: string;
+  let parentSessionId: string;
+
+  before(async () => {
+    mgr = new SessionManager(noopLogger(), { spawn: () => fakeKiroProcess({ sessionId: 'parent-fallback-test' }) });
+    const detail = await mgr.createChat({ cwd: sessionsCwd });
+    chatId = detail.summary.chatId;
+    parentSessionId = detail.summary.sessionId!;
+    // The parent's own record of the subagent call: the only place the stage name is.
+    fs.writeFileSync(
+      path.join(sessionsDir, `${parentSessionId}.jsonl`),
+      JSON.stringify({
+        version: 'v1',
+        kind: 'AssistantMessage',
+        data: {
+          message_id: 'p1',
+          content: [{ kind: 'toolUse', data: { toolUseId: 'fallback-call-1', name: 'subagent', input: {
+            task: 'Port the input layer.',
+            stages: [{ name: 'input_layer', prompt_template: '{task}\n\nPort scripts/input.gd.' }],
+          } } }],
+        },
+      }) + '\n',
+    );
+    fs.writeFileSync(
+      path.join(sessionsDir, 'fallback-child-1.json'),
+      JSON.stringify({
+        session_id: 'fallback-child-1',
+        title: 'Port the input layer.\n\nPort scripts/input.gd.',
+        cwd: sessionsCwd,
+        created_at: '2026-01-01T00:00:00.000Z',
+        updated_at: '2026-01-01T00:05:00.000Z',
+        parent_session_id: parentSessionId,
+        session_created_reason: 'subagent',
+      }),
+    );
+  });
+  after(() => {
+    mgr.disposeAll();
+    fs.rmSync(path.join(sessionsDir, 'fallback-child-1.json'), { force: true });
+    fs.rmSync(path.join(sessionsDir, `${parentSessionId}.jsonl`), { force: true });
+  });
+
+  it('still resolves the child after the parent transcript is gone', async () => {
+    const first = (await mgr.getSubagents(chatId)).find((s) => s.sessionId === 'fallback-child-1');
+    assert.equal(first?.toolCallId, 'fallback-call-1', 'matched by title the first time');
+
+    fs.rmSync(path.join(sessionsDir, `${parentSessionId}.jsonl`), { force: true });
+    const fresh = new SessionManager(noopLogger(), { spawn: () => fakeKiroProcess() });
+    const again = (await fresh.getSubagents(chatId)).find((s) => s.sessionId === 'fallback-child-1');
+    assert.equal(again?.toolCallId, 'fallback-call-1', 'the match came from the db, not a second read');
+    assert.equal(again?.stageName, 'input_layer');
+    fresh.disposeAll();
+  });
+
+  it('serves the transcript of a child without listing every subagent', async () => {
+    const res = await mgr.getSubagentDetail(chatId, 'fallback-child-1');
+    assert.equal(res.subagent.stageName, 'input_layer');
+  });
+});

@@ -180,6 +180,18 @@ export interface ChildSession extends PersistedSession {
   parentSessionId: string;
 }
 
+/** One child session of the given parent, or null if it is missing or belongs elsewhere. */
+export async function readChildSession(childSessionId: string, parentSessionId: string): Promise<ChildSession | null> {
+  if (!isValidSessionId(childSessionId)) return null;
+  try {
+    const raw = await fs.readFile(path.join(config.kiroSessionsDir, `${childSessionId}.json`), 'utf8');
+    const j = JSON.parse(raw) as KiroSessionJson;
+    return j.parent_session_id === parentSessionId ? { ...summarize(j), parentSessionId } : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function listChildSessions(parentSessionId: string): Promise<ChildSession[]> {
   if (!isValidSessionId(parentSessionId)) return [];
   let names: string[];

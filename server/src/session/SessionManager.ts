@@ -44,6 +44,7 @@ import {
   hasRecordedTurns,
   hydrateTranscript,
   listChildSessions,
+  readChildSession,
   promptCount,
   readPersistedSession,
   type PersistedSession,
@@ -208,6 +209,9 @@ export class SessionManager {
   private readonly log: Logger;
   private readonly store = new ChatStore();
   private readonly subagentLinks = new SubagentLinkStore();
+  // Children the title fallback already tried and could not match. Matching hydrates the
+  // whole parent transcript (145 MB in one chat), so each child is tried once per process.
+  private readonly unmatchedChildren = new Map<string, Set<string>>();
   private readonly spawnProcess: SpawnProcess;
 
   constructor(log: Logger, opts: SessionManagerOptions = {}) {
@@ -730,11 +734,18 @@ export class SessionManager {
     const onDisk = await listChildSessions(sessionId);
     const links = this.subagentLinks.forParent(sessionId);
     const liveIds = new Set(live.map((a) => a.sessionId));
-    const unresolved = onDisk.filter((c) => !liveIds.has(c.sessionId) && !links.has(c.sessionId));
+    const tried = this.unmatchedChildren.get(sessionId) ?? new Set<string>();
+    const unresolved = onDisk.filter(
+      (c) => !liveIds.has(c.sessionId) && !links.has(c.sessionId) && !tried.has(c.sessionId),
+    );
     const fallback = unresolved.length
       ? matchSubagentsFallback(subagentCallsIn(await hydrateTranscript(sessionId)), unresolved)
       : [];
     const fallbackByChild = new Map(fallback.map((m) => [m.sessionId, m]));
+    // Saved so the parent transcript is not read again for these children.
+    for (const m of fallback) this.subagentLinks.record(m.sessionId, sessionId, m.toolCallId, m.stageName);
+    for (const c of unresolved) if (!fallbackByChild.has(c.sessionId)) tried.add(c.sessionId);
+    this.unmatchedChildren.set(sessionId, tried);
 
     const byId = new Map<string, SubagentSummary>();
     for (const child of onDisk) {
@@ -754,15 +765,21 @@ export class SessionManager {
   }
 
   /** One subagent's own transcript, hydrated the same way a chat's is. */
+  // Polled while a subagent runs, so it reads only the child's own files.
   async getSubagentDetail(chatId: string, childSessionId: string): Promise<SubagentDetailResponse> {
     const parentSessionId = this.sessionIdOf(chatId);
-    const subagents = await this.getSubagents(chatId);
-    const summary = subagents.find((a) => a.sessionId === childSessionId);
-    if (!summary) throw new Error(`Unknown subagent: ${childSessionId}`);
-    const onDisk = await listChildSessions(parentSessionId);
-    if (!onDisk.some((c) => c.sessionId === childSessionId)) {
-      throw new Error(`Unknown subagent: ${childSessionId}`);
-    }
+    const child = await readChildSession(childSessionId, parentSessionId);
+    if (!child) throw new Error(`Unknown subagent: ${childSessionId}`);
+    const live = this.sessions.get(parentSessionId)?.subagents.list().find((a) => a.sessionId === childSessionId);
+    const link = this.subagentLinks.forParent(parentSessionId).get(childSessionId);
+    const summary: SubagentSummary = live ?? {
+      sessionId: childSessionId,
+      stageName: link?.stageName ?? (child.title || childSessionId),
+      toolCallId: link?.toolCallId,
+      status: 'completed',
+      createdAt: child.createdAt,
+      updatedAt: child.updatedAt,
+    };
     const transcript = showSummaryAsAnswer(await hydrateTranscript(childSessionId));
     return { subagent: summary, transcript };
   }
