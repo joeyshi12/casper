@@ -13,6 +13,10 @@ A web client for `kiro-cli`, over its Agent Client Protocol (ACP). Start a long
 Kiro task and it keeps running server-side; on reconnect the client replays
 exactly what it missed.
 
+<p align="center">
+<img src="https://raw.githubusercontent.com/joeyshi12/casper/main/assets/demo.gif" alt="Casper running a task: tool calls grouped into one line, then two subagents reviewing the change" width="100%"/>
+</p>
+
 ## Features
 
 - **Sessions** you can create, search, rename and delete. Live ones run in a
@@ -22,6 +26,8 @@ exactly what it missed.
   calls with their status, input and output.
 - **File browser** for the session's workspace, previewing text, images and PDFs.
   HTML renders as a live page, sandboxed, and either can go fullscreen.
+- **Subagents** listed under the call that started them, each opening to its own
+  transcript, read back from kiro's session files so they survive a reload.
 - **Widgets**: the agent calls a `show_widget` tool over MCP and the result renders
   inline as a live page. Charts, simulations, animated diagrams. Sandboxed, and they
   can send a message back.
