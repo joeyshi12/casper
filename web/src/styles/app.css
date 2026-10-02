@@ -1885,9 +1885,7 @@
   gap: 8px;
 }
 .agent-steps {
-  margin-top: 4px;
-  padding-left: 10px;
-  border-left: 2px solid var(--n1);
+  margin-top: 2px;
   display: flex;
   flex-direction: column;
 }
@@ -1914,13 +1912,26 @@
   padding: 0;
   font-size: 14px;
   text-align: left;
-  color: var(--n5);
+  color: var(--n4);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.agent-say:hover,
+.agent-say.is-open {
+  color: var(--n5);
+}
 .agent-say.is-open {
   white-space: pre-wrap;
+}
+/* About five lines of the answer, fading out when there is more. */
+.agent-answer.is-clamped {
+  max-height: 7.8em;
+  overflow: hidden;
+}
+.agent-answer.is-long {
+  -webkit-mask-image: linear-gradient(#000 60%, transparent);
+  mask-image: linear-gradient(#000 60%, transparent);
 }
 
 .toolcall-file {

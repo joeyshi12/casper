@@ -172,7 +172,7 @@ describe('the subagent tool call (rendered in a DOM)', () => {
   it('a finished row shows its answer, with the steps behind a closed totals line', async () => {
     await openRow('completed', longTranscript());
     assert.ok(host.querySelector('.agent-transcript .msg-assistant')?.textContent?.includes('The answer.'));
-    assert.match(stepsLine().textContent ?? '', /^21 messages and 20 tool calls over /);
+    assert.equal(stepsLine().textContent, '40 steps');
     assert.equal(stepsLine().getAttribute('aria-expanded'), 'false');
     assert.ok(!host.textContent?.includes('The long prompt.'), 'the prompt is not shown');
   });
@@ -180,7 +180,7 @@ describe('the subagent tool call (rendered in a DOM)', () => {
   it('a running row shows only the latest 6 steps, with totals so far', async () => {
     await openRow('working', longTranscript());
     assert.equal(host.querySelector('.agent-transcript .msg-assistant'), null, 'no answer yet');
-    assert.match(stepsLine().textContent ?? '', /^21 messages and 20 tool calls so far/);
+    assert.equal(stepsLine().textContent, '41 steps so far');
     assert.equal(stepsLine().getAttribute('aria-expanded'), 'true', 'the steps show at once');
     assert.equal(stepCount(), 6);
   });
@@ -188,7 +188,7 @@ describe('the subagent tool call (rendered in a DOM)', () => {
   it('"Show earlier" adds 40 older steps inside a scrolling box', async () => {
     await openRow('working', longTranscript());
     const earlier = host.querySelector('.agent-earlier') as HTMLElement;
-    assert.equal(earlier.textContent, 'Show 35 earlier of 35');
+    assert.equal(earlier.textContent, 'Show earlier');
     act(() => earlier.click());
     assert.equal(stepCount(), 41);
     assert.ok(host.querySelector('.agent-steps.is-paged'), 'capped so the row does not grow');
@@ -212,7 +212,7 @@ describe('the subagent tool call (rendered in a DOM)', () => {
     assert.ok(rows()[0]!.querySelector('.agent-what.is-live'), 'each row says it is loading');
     finish({ subagents: [summary({ status: 'completed' }), summary({ sessionId: 'child-2', stageName: 'map_web', status: 'completed' })] });
     await flush();
-    assert.ok(rows()[0]!.textContent?.includes('Done'), 'the loaded status replaces it');
+    assert.equal(rows()[0]!.querySelector('.agent-what.is-live'), null, 'the loaded status replaces it');
   });
 
   it('is not shown when nothing was saved for a finished call', async () => {
