@@ -167,11 +167,11 @@ describe('the subagent tool call (rendered in a DOM)', () => {
     await flush();
   };
   const stepsLine = () => [...host.querySelectorAll('.agent-transcript > div > .toolline')][0] as HTMLElement;
-  const stepCount = () => host.querySelectorAll('.agent-steps > .toolline-wrap, .agent-steps > .agent-say').length;
+  const stepCount = () => host.querySelectorAll('.agent-steps > .toolline-wrap, .agent-steps > .msg').length;
 
   it('a finished row shows its answer, with the steps behind a closed totals line', async () => {
     await openRow('completed', longTranscript());
-    assert.ok(host.querySelector('.agent-transcript .msg-assistant')?.textContent?.includes('The answer.'));
+    assert.ok(host.querySelector('.agent-transcript > .msg-assistant')?.textContent?.includes('The answer.'));
     assert.match(stepsLine().textContent ?? '', /^21 messages and 20 tool calls over /);
     assert.equal(stepsLine().getAttribute('aria-expanded'), 'false');
     assert.ok(!host.textContent?.includes('The long prompt.'), 'the prompt is not shown');
@@ -179,7 +179,7 @@ describe('the subagent tool call (rendered in a DOM)', () => {
 
   it('a running row shows only the latest 6 steps, with totals so far', async () => {
     await openRow('working', longTranscript());
-    assert.equal(host.querySelector('.agent-transcript .msg-assistant'), null, 'no answer yet');
+    assert.equal(host.querySelector('.agent-transcript > .msg-assistant') === null, true, 'no answer yet');
     assert.match(stepsLine().textContent ?? '', /^21 messages and 20 tool calls so far/);
     assert.equal(stepsLine().getAttribute('aria-expanded'), 'true', 'the steps show at once');
     assert.equal(stepCount(), 6);
@@ -188,11 +188,20 @@ describe('the subagent tool call (rendered in a DOM)', () => {
   it('"Show earlier" adds 40 older steps inside a scrolling box', async () => {
     await openRow('working', longTranscript());
     const earlier = host.querySelector('.agent-earlier') as HTMLElement;
-    assert.equal(earlier.textContent, 'Show 35 earlier of 35');
+    assert.equal(earlier.textContent, 'Show 36 earlier of 36');
     act(() => earlier.click());
-    assert.equal(stepCount(), 41);
+    assert.equal(stepCount(), 42, 'the prompt, 20 tool calls and 21 messages');
     assert.ok(host.querySelector('.agent-steps.is-paged'), 'capped so the row does not grow');
     assert.equal(host.querySelector('.agent-earlier'), null, 'nothing earlier is left');
+  });
+
+  it('renders messages like the chat and folds consecutive tool calls and thinking into one line', async () => {
+    const think = (id: string): TranscriptItem =>
+      ({ type: 'message', message: { id, role: 'thinking', text: 'Weighing it.' } }) as TranscriptItem;
+    await openRow('working', [say('a', 'Looking at the loader.'), think('h1'), tool('x1'), think('h2'), tool('x2'), tool('x3')]);
+    assert.ok(host.querySelector('.agent-steps > .msg.msg-assistant'), 'a message renders as a chat message');
+    const groups = [...host.querySelectorAll('.agent-steps > .toolline-wrap > .toolline')].map((b) => b.textContent);
+    assert.deepEqual(groups, ['Ran 3 commands'], 'one fold for the run of tool calls and thinking');
   });
 
   it('a running row fetches its transcript again while it is open', async () => {

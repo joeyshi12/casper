@@ -1,10 +1,11 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import type { SubagentSummary, TranscriptItem } from '@casper/shared';
 import { useStore, type ToolCallView } from '../../state/store.js';
 import { api } from '../../api/rest.js';
 import { formatElapsed } from '../../util/duration.js';
 import { ChevronIcon } from '../common/icons.js';
-import { ToolCallCard } from './ToolCallCard.js';
+import { TranscriptEntries } from './TranscriptEntries.js';
+import { groupToolCalls } from '../../util/toolGroups.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { Collapse } from './Collapse.js';
 
@@ -198,39 +199,22 @@ function SubagentRow({
   );
 }
 
-// How many of the latest steps an opened row shows, and how many more each click adds.
+// How many of the latest entries an opened row shows, and how many more each click adds.
 const TAIL = 6;
 const PAGE = 40;
 // A running subagent's transcript is fetched again this often while its row is open.
 const POLL_MS = 3000;
 
-type Step =
-  | { kind: 'tool'; id: string; tool: ToolCallView }
-  | { kind: 'say'; id: string; text: string }
-  | { kind: 'error'; id: string; text: string };
-
-/** One line per message and tool call, in order. The prompt and thinking are left out. */
-export function subagentSteps(items: TranscriptItem[]): Step[] {
-  const out: Step[] = [];
-  for (const it of items) {
-    if (it.type === 'tool_call') out.push({ kind: 'tool', id: it.tool.id, tool: it.tool });
-    else if (it.type === 'message' && it.message.role === 'assistant' && it.message.text.trim()) {
-      out.push({ kind: 'say', id: it.message.id, text: it.message.text });
-    } else if (it.type === 'turn_error') out.push({ kind: 'error', id: it.id, text: it.message });
-  }
-  return out;
-}
-
-function totals(steps: Step[]): string {
-  const messages = steps.filter((x) => x.kind === 'say').length;
-  const tools = steps.filter((x) => x.kind === 'tool').length;
+function totals(items: TranscriptItem[]): string {
+  const messages = items.filter((i) => i.type === 'message' && i.message.role === 'assistant').length;
+  const tools = items.filter((i) => i.type === 'tool_call').length;
   const m = messages === 1 ? '1 message' : `${messages} messages`;
   const t = tools === 1 ? '1 tool call' : `${tools} tool calls`;
   return `${m} and ${t}`;
 }
 
-/* A subagent's answer, then its steps as one-line entries. While it runs, the latest steps
-   show at once and the row keeps the same height as new ones arrive. */
+/* A subagent's answer, then the latest part of its conversation, rendered the same way as
+   the chat. While it runs, the latest entries show at once and the row keeps its height. */
 function SubagentTranscript({
   chatId,
   subagentId,
@@ -242,6 +226,7 @@ function SubagentTranscript({
   live: boolean;
   elapsed: string;
 }) {
+  const openFilePreview = useStore((s) => s.openFilePreview);
   const [items, setItems] = useState<TranscriptItem[] | null>(null);
   const [error, setError] = useState(false);
   // null until the user opens or closes the steps: then they follow whether it is running.
@@ -268,30 +253,31 @@ function SubagentTranscript({
     };
   }, [chatId, subagentId, live]);
 
-  const all = useMemo(() => subagentSteps(items ?? []), [items]);
+  const lastItem = items?.at(-1);
+  const answer =
+    !live && lastItem?.type === 'message' && lastItem.message.role === 'assistant' ? lastItem : undefined;
+  const rest = useMemo(() => (items ? (answer ? items.slice(0, -1) : items) : []), [items, answer]);
+  const entries = useMemo(() => groupToolCalls(rest), [rest]);
 
   if (error) return <div className="agent-note">Couldn't load this subagent's transcript.</div>;
   if (items === null) return <div className="agent-note">Loading…</div>;
 
-  const last = all.at(-1);
-  const answer = !live && last?.kind === 'say' ? last : undefined;
-  const steps = answer ? all.slice(0, -1) : all;
   const open = stepsOpen ?? live;
-  const visible = steps.slice(-shown);
-  const hidden = steps.length - visible.length;
+  const visible = entries.slice(-shown);
+  const hidden = entries.length - visible.length;
 
   return (
     <div className="agent-transcript">
       {answer && (
         <div className="msg msg-assistant">
-          <MarkdownRenderer text={answer.text} />
+          <MarkdownRenderer text={answer.message.text} />
         </div>
       )}
-      {steps.length > 0 && (
+      {entries.length > 0 && (
         <div>
           <button className="toolline" onClick={() => setStepsOpen(!open)} aria-expanded={open}>
             <span className="toolline-text">
-              {totals(all)} {live ? 'so far' : `over ${elapsed}`}
+              {totals(items)} {live ? 'so far' : `over ${elapsed}`}
             </span>
             <span className={`toolline-chevron ${open ? 'is-open' : ''}`}>
               <ChevronIcon size={13} />
@@ -310,32 +296,18 @@ function SubagentTranscript({
                   Show {Math.min(PAGE, hidden)} earlier of {hidden}
                 </button>
               )}
-              {visible.map((step): ReactNode =>
-                step.kind === 'tool' ? (
-                  <ToolCallCard key={step.id} tool={step.tool} />
-                ) : step.kind === 'say' ? (
-                  <SubagentMessage key={step.id} text={step.text} />
-                ) : (
-                  <div key={step.id} className="agent-note is-failed">
-                    {step.text}
-                  </div>
-                ),
-              )}
+              <TranscriptEntries
+                entries={visible}
+                lastActive={live}
+                chatId={chatId}
+                onOpenFile={openFilePreview}
+                readOnly
+              />
             </div>
           </Collapse>
         </div>
       )}
     </div>
-  );
-}
-
-/** A message between tool calls: one line, opening to the whole text. */
-function SubagentMessage({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <button className={`agent-say ${open ? 'is-open' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-      {text}
-    </button>
   );
 }
 

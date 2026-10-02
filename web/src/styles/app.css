@@ -1888,6 +1888,7 @@
   margin-top: 4px;
   display: flex;
   flex-direction: column;
+  gap: 10px;
 }
 .agent-steps > * {
   flex-shrink: 0;
@@ -1905,20 +1906,6 @@
 }
 .agent-earlier:hover {
   color: var(--n5);
-}
-.agent-say {
-  width: 100%;
-  min-height: 26px;
-  padding: 0;
-  font-size: 14px;
-  text-align: left;
-  color: var(--n5);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.agent-say.is-open {
-  white-space: pre-wrap;
 }
 
 .toolcall-file {
