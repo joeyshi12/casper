@@ -178,7 +178,6 @@ export class TranscriptViewport {
 
     this.setFlags({ loadingOlder: true });
     const { offset, limit } = olderPageRequest(this.content.remainingOlder, PAGE_SIZE);
-    this.anchor = el.scrollHeight - el.scrollTop;
 
     this.ports
       .fetchPage(chatId, offset, limit)
@@ -187,6 +186,9 @@ export class TranscriptViewport {
         // viewport's own chatId, not whatever the store now holds.
         if (this.content.chatId !== chatId) return this.abandonPage();
         if (items.length === 0) return this.abandonPage();
+        // Measured now, not when the fetch started: the user keeps scrolling while it runs.
+        const now = this.ports.element();
+        if (now) this.anchor = now.scrollHeight - now.scrollTop;
         this.ports.prepend(items);
       })
       .catch(() => {

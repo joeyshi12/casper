@@ -778,6 +778,23 @@ describe('transcript viewport', () => {
       assert.equal(h.requests.length, 3);
     });
 
+    it('keeps the position the user scrolled to while the page was loading', async () => {
+      const el = fakeElement(2000, 600);
+      const h = build(el);
+      h.viewport.onContent(content({ remainingOlder: 200 }));
+      el.scrollTop = 250; // within the threshold, so the page is requested
+      h.viewport.onScroll();
+      assert.equal(h.requests.length, 1);
+      el.scrollTop = 0; // and the user keeps scrolling up while it loads
+      h.resolvePage(page(80));
+      await Promise.resolve();
+      await Promise.resolve();
+      assert.equal(h.prepended.length, 1, 'the page reached the store');
+      el.scrollHeight = 3000; // React has rendered the prepend
+      h.viewport.restoreAnchor();
+      assert.equal(el.scrollTop, 1000, 'the content at the top stays at the top');
+    });
+
     it('asks for one page at a time', async () => {
       const el = fakeElement(2000, 600, 100);
       const h = build(el);
