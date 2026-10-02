@@ -22,7 +22,6 @@ import {
   type RunMember,
 } from '../../util/toolGroups.js';
 
-const STALL_MS = 700;
 
 const reduceMotion =
   typeof window !== 'undefined'
@@ -74,6 +73,16 @@ function AttachmentList({
   );
 }
 
+/** Whether this entry, as the last one of a running turn, shows its own shimmer. */
+function shimmersWhenLast(entry: GroupedEntry | undefined): boolean {
+  if (!entry) return false;
+  if (entry.type === 'run' || entry.type === 'thought') return true;
+  if (entry.type === 'tool') return entry.tool.status !== 'failed';
+  const item = entry.item;
+  if (item.type === 'message') return item.message.role === 'thinking';
+  return item.type === 'tool_call' && item.tool.status === 'in_progress';
+}
+
 export const Transcript = memo(function Transcript() {
   const items = useStore((s) => s.items);
   const streamingText = useStore((s) => s.streamingText);
@@ -110,13 +119,11 @@ export const Transcript = memo(function Transcript() {
     return map;
   }, [grouped]);
 
-  const [stalled, setStalled] = useState(false);
-  useEffect(() => {
-    setStalled(false);
-    if (turnStatus !== 'running') return;
-    const timer = setTimeout(() => setStalled(true), STALL_MS);
-    return () => clearTimeout(timer);
-  }, [turnStatus, streamingText, streamingThought, items.length]);
+  // The last line of a running turn shimmers, so the dots are only for when nothing does.
+  const lastActive = turnStatus === 'running' && !streamingText && pending.length === 0;
+  const progressShown =
+    (!!streamingThought && pending.length === 0) || (lastActive && shimmersWhenLast(grouped.at(-1)));
+  const showDots = (turnStatus === 'running' || waitingToStart) && !streamingText && !progressShown;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [flags, setFlags] = useState<ViewportFlags>({
@@ -181,7 +188,7 @@ export const Transcript = memo(function Transcript() {
 
       {grouped.map((entry, i) => {
         const isLast = i === grouped.length - 1;
-        const active = isLast && turnStatus === 'running' && !streamingText && pending.length === 0;
+        const active = isLast && lastActive;
         const joiningThought =
           isLast && streamingThought && pending.length === 0 && lastEntryJoinsStreamingThought(entry)
             ? streamingThought
@@ -235,12 +242,12 @@ export const Transcript = memo(function Transcript() {
               />
             );
           }
-          return <ThoughtLineCard key={entry.item.message.id} text={entry.text} />;
+          return <ThoughtLineCard key={entry.item.message.id} text={entry.text} live={active} />;
         }
         const item = entry.item;
         return item.type === 'message' ? (
           item.message.role === 'thinking' ? (
-            <ThoughtLineCard key={item.message.id} text={item.message.text} />
+            <ThoughtLineCard key={item.message.id} text={item.message.text} live={isLast && lastActive} />
           ) : (
             <div key={item.message.id} className={`msg msg-${item.message.role}`}>
               {item.message.role === 'assistant' ? (
@@ -300,8 +307,7 @@ export const Transcript = memo(function Transcript() {
         </div>
       )}
 
-      {(turnStatus === 'running' || waitingToStart) &&
-          (stalled || (!streamingText && !streamingThought)) && (
+      {showDots && (
         <div className="thinking">
           <span className="thinking-dot" />
           <span className="thinking-dot" />

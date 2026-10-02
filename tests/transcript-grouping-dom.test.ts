@@ -281,3 +281,35 @@ describe('folds open and close with the height animation (rendered in a DOM)', (
     assert.equal(transcript().querySelector('.toolline') === null, true, 'no Thinking line');
   });
 });
+
+describe('the working dots (rendered in a DOM)', () => {
+  const dots = () => transcript().querySelector('.thinking');
+  const running = (items: TranscriptItem[]) =>
+    act(() =>
+      useStore.setState((s: Any) => ({ items, observability: { ...s.observability, turnStatus: 'running' } })),
+    );
+
+  it('are not shown while the last group shimmers, even after a pause', async () => {
+    running([toolItem('t1', 'shell'), toolItem('t2', 'read')]);
+    assert.equal(dots(), null);
+    await new Promise((r) => setTimeout(r, 800));
+    act(() => {});
+    assert.equal(dots(), null, 'a pause in the turn does not bring them back');
+  });
+
+  it('are not shown while a lone thought ends a running turn, which shimmers instead', () => {
+    running([thought('th1', 'a reason')]);
+    assert.equal(dots(), null);
+    assert.ok(transcript().querySelector('.toolline-text.is-live'));
+  });
+
+  it('are shown when nothing else shows progress', () => {
+    running([{ type: 'message', message: { id: 'u1', role: 'user', text: 'Go' } } as unknown as TranscriptItem]);
+    assert.ok(dots());
+  });
+
+  it('are shown when the last tool call failed, since a failed line does not shimmer', () => {
+    running([toolItem('t1', 'shell', 'failed')]);
+    assert.ok(dots());
+  });
+});
