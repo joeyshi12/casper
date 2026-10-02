@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { SubagentSummary, TranscriptItem } from '@casper/shared';
 import { useStore, type ToolCallView } from '../../state/store.js';
 import { api } from '../../api/rest.js';
@@ -149,7 +149,7 @@ function fetchSubagents(chatId: string): ReturnType<typeof api.subagents> {
 }
 
 function rowActivity(a: SubagentSummary): string {
-  if (a.status === 'completed') return '';
+  if (a.status === 'completed') return 'Done';
   if (a.status === 'failed') return a.activity ?? 'Failed';
   return a.activity ?? 'Working';
 }
@@ -189,6 +189,7 @@ function SubagentRow({
               chatId={chatId}
               subagentId={subagent.sessionId}
               live={live}
+              elapsed={formatElapsed(elapsed)}
             />
           )}
         </div>
@@ -220,7 +221,13 @@ export function subagentSteps(items: TranscriptItem[]): Step[] {
   return out;
 }
 
-const stepCount = (n: number) => (n === 1 ? '1 step' : `${n} steps`);
+function totals(steps: Step[]): string {
+  const messages = steps.filter((x) => x.kind === 'say').length;
+  const tools = steps.filter((x) => x.kind === 'tool').length;
+  const m = messages === 1 ? '1 message' : `${messages} messages`;
+  const t = tools === 1 ? '1 tool call' : `${tools} tool calls`;
+  return `${m} and ${t}`;
+}
 
 /* A subagent's answer, then its steps as one-line entries. While it runs, the latest steps
    show at once and the row keeps the same height as new ones arrive. */
@@ -228,10 +235,12 @@ function SubagentTranscript({
   chatId,
   subagentId,
   live,
+  elapsed,
 }: {
   chatId: string;
   subagentId: string;
   live: boolean;
+  elapsed: string;
 }) {
   const [items, setItems] = useState<TranscriptItem[] | null>(null);
   const [error, setError] = useState(false);
@@ -274,13 +283,15 @@ function SubagentTranscript({
   return (
     <div className="agent-transcript">
       {answer && (
-        <SubagentAnswer text={answer.text} />
+        <div className="msg msg-assistant">
+          <MarkdownRenderer text={answer.text} />
+        </div>
       )}
       {steps.length > 0 && (
         <div>
           <button className="toolline" onClick={() => setStepsOpen(!open)} aria-expanded={open}>
             <span className="toolline-text">
-              {stepCount(steps.length)}{live ? ' so far' : ''}
+              {totals(all)} {live ? 'so far' : `over ${elapsed}`}
             </span>
             <span className={`toolline-chevron ${open ? 'is-open' : ''}`}>
               <ChevronIcon size={13} />
@@ -296,7 +307,7 @@ function SubagentTranscript({
                     setShown((n) => n + PAGE);
                   }}
                 >
-                  Show earlier
+                  Show {Math.min(PAGE, hidden)} earlier of {hidden}
                 </button>
               )}
               {visible.map((step): ReactNode =>
@@ -313,29 +324,6 @@ function SubagentTranscript({
             </div>
           </Collapse>
         </div>
-      )}
-    </div>
-  );
-}
-
-/** The subagent's final message, cut to a few lines until asked for in full. */
-function SubagentAnswer({ text }: { text: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [full, setFull] = useState(false);
-  const [long, setLong] = useState(false);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (el && !full) setLong(el.scrollHeight > el.clientHeight + 1);
-  }, [text, full]);
-  return (
-    <div>
-      <div ref={ref} className={`msg msg-assistant agent-answer ${full ? '' : 'is-clamped'} ${long && !full ? 'is-long' : ''}`}>
-        <MarkdownRenderer text={text} />
-      </div>
-      {long && (
-        <button className="agent-earlier" onClick={() => setFull((f) => !f)}>
-          {full ? 'Show less' : 'Show all'}
-        </button>
       )}
     </div>
   );
