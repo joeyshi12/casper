@@ -1882,7 +1882,45 @@
 .agent-transcript {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+}
+.agent-steps {
+  margin-top: 4px;
+  padding-left: 10px;
+  border-left: 2px solid var(--n1);
+  display: flex;
+  flex-direction: column;
+}
+.agent-steps > * {
+  flex-shrink: 0;
+}
+/* Older pages scroll inside the row, so paging back does not make it taller. */
+.agent-steps.is-paged {
+  max-height: 320px;
+  overflow-y: auto;
+}
+.agent-earlier {
+  align-self: flex-start;
+  font-size: 12.5px;
+  color: var(--n4);
+  padding: 2px 0 4px;
+}
+.agent-earlier:hover {
+  color: var(--n5);
+}
+.agent-say {
+  width: 100%;
+  min-height: 26px;
+  padding: 0;
+  font-size: 14px;
+  text-align: left;
+  color: var(--n5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-say.is-open {
+  white-space: pre-wrap;
 }
 
 .toolcall-file {

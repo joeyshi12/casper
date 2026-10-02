@@ -49,6 +49,8 @@ const summary = (over: Partial<SubagentSummary>): SubagentSummary => ({
 
 before(async () => {
   ({ host, react: { createElement, act } } = await installDomGlobals());
+  // MarkdownRenderer preloads KaTeX when idle, and its CSS cannot be imported under tsx.
+  (globalThis as Any).requestIdleCallback = () => {};
   ({ createRoot } = await import('react-dom/client'));
   ({ ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js'));
   ({ useStore } = await import('../web/src/state/store.js'));
@@ -145,13 +147,59 @@ describe('the subagent tool call (rendered in a DOM)', () => {
     assert.deepEqual(detailCalls, ['child-1'], 'only the opened row fetched its transcript');
   });
 
-  it("a row's own transcript renders with the same message rendering as the parent", async () => {
-    render(subagentTool('in_progress'));
+  const tool = (id: string, status = 'completed'): TranscriptItem =>
+    ({ type: 'tool_call', tool: { id, name: 'shell', title: 'shell', status, input: {}, content: [] } }) as unknown as TranscriptItem;
+  const say = (id: string, text: string): TranscriptItem =>
+    ({ type: 'message', message: { id, role: 'assistant', text } }) as TranscriptItem;
+  // A prompt, then 20 rounds of a tool call and a message, then the answer.
+  const longTranscript = (): TranscriptItem[] => [
+    { type: 'message', message: { id: 'p', role: 'user', text: 'The long prompt.' } },
+    ...Array.from({ length: 20 }, (_, i) => [tool(`t${i}`), say(`s${i}`, `Step ${i}.`)]).flat(),
+    say('answer', 'The answer.'),
+  ];
+  const openRow = async (status: 'working' | 'completed', transcript: TranscriptItem[]) => {
+    api.subagents = async () => ({ subagents: [summary({ status })] });
+    api.subagentDetail = async (_c: string, id: string) => (detailCalls.push(id), { subagent: summary({ status }), transcript });
+    render(subagentTool(status === 'working' ? 'in_progress' : 'completed'));
     await flush();
+    if (pipelineLine()!.getAttribute('aria-expanded') !== 'true') act(() => pipelineLine()!.click());
     act(() => (rows()[0] as HTMLElement).click());
     await flush();
-    assert.ok(host.querySelector('.agent-transcript'));
-    assert.ok(host.textContent?.includes('Mapped it.'));
+  };
+  const stepsLine = () => [...host.querySelectorAll('.agent-transcript > div > .toolline')][0] as HTMLElement;
+  const stepCount = () => host.querySelectorAll('.agent-steps > .toolline-wrap, .agent-steps > .agent-say').length;
+
+  it('a finished row shows its answer, with the steps behind a closed totals line', async () => {
+    await openRow('completed', longTranscript());
+    assert.ok(host.querySelector('.agent-transcript .msg-assistant')?.textContent?.includes('The answer.'));
+    assert.match(stepsLine().textContent ?? '', /^21 messages and 20 tool calls over /);
+    assert.equal(stepsLine().getAttribute('aria-expanded'), 'false');
+    assert.ok(!host.textContent?.includes('The long prompt.'), 'the prompt is not shown');
+  });
+
+  it('a running row shows only the latest 6 steps, with totals so far', async () => {
+    await openRow('working', longTranscript());
+    assert.equal(host.querySelector('.agent-transcript .msg-assistant'), null, 'no answer yet');
+    assert.match(stepsLine().textContent ?? '', /^21 messages and 20 tool calls so far/);
+    assert.equal(stepsLine().getAttribute('aria-expanded'), 'true', 'the steps show at once');
+    assert.equal(stepCount(), 6);
+  });
+
+  it('"Show earlier" adds 40 older steps inside a scrolling box', async () => {
+    await openRow('working', longTranscript());
+    const earlier = host.querySelector('.agent-earlier') as HTMLElement;
+    assert.equal(earlier.textContent, 'Show 35 earlier of 35');
+    act(() => earlier.click());
+    assert.equal(stepCount(), 41);
+    assert.ok(host.querySelector('.agent-steps.is-paged'), 'capped so the row does not grow');
+    assert.equal(host.querySelector('.agent-earlier'), null, 'nothing earlier is left');
+  });
+
+  it('a running row fetches its transcript again while it is open', async () => {
+    await openRow('working', longTranscript());
+    const before = detailCalls.length;
+    await act(() => new Promise((r) => setTimeout(r, 3100)));
+    assert.ok(detailCalls.length > before, 'polled for new steps');
   });
 
   it('shows a row per declared stage while the list is still loading, not an empty box', async () => {
