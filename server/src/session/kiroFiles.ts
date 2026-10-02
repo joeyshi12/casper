@@ -180,13 +180,25 @@ export interface ChildSession extends PersistedSession {
   parentSessionId: string;
 }
 
+/* kiro stops updating a child's .json updated_at seconds after it starts; the .jsonl is
+   written on every turn, so its mtime is when the subagent last did anything. */
+async function withLastWrite(child: ChildSession): Promise<ChildSession> {
+  try {
+    const st = await fs.stat(path.join(config.kiroSessionsDir, `${child.sessionId}.jsonl`));
+    const mtime = st.mtime.toISOString();
+    return mtime > child.updatedAt ? { ...child, updatedAt: mtime } : child;
+  } catch {
+    return child;
+  }
+}
+
 /** One child session of the given parent, or null if it is missing or belongs elsewhere. */
 export async function readChildSession(childSessionId: string, parentSessionId: string): Promise<ChildSession | null> {
   if (!isValidSessionId(childSessionId)) return null;
   try {
     const raw = await fs.readFile(path.join(config.kiroSessionsDir, `${childSessionId}.json`), 'utf8');
     const j = JSON.parse(raw) as KiroSessionJson;
-    return j.parent_session_id === parentSessionId ? { ...summarize(j), parentSessionId } : null;
+    return j.parent_session_id === parentSessionId ? await withLastWrite({ ...summarize(j), parentSessionId }) : null;
   } catch {
     return null;
   }
@@ -209,7 +221,7 @@ export async function listChildSessions(parentSessionId: string): Promise<ChildS
           const raw = await fs.readFile(path.join(config.kiroSessionsDir, n), 'utf8');
           const j = JSON.parse(raw) as KiroSessionJson;
           if (j.parent_session_id === parentSessionId) {
-            out.push({ ...summarize(j), parentSessionId });
+            out.push(await withLastWrite({ ...summarize(j), parentSessionId }));
           }
         } catch {
           /* unreadable or malformed file; skip it */

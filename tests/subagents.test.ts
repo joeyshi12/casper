@@ -457,3 +457,26 @@ describe('a title-matched subagent is saved, so the parent transcript is read on
     assert.equal(res.subagent.stageName, 'input_layer');
   });
 });
+
+describe('a finished subagent ends when its transcript was last written', () => {
+  it('uses the .jsonl mtime, since the .json stops updating early', async () => {
+    const proc = fakeKiroProcess({ sessionId: 'parent-mtime-test' });
+    const mgr = new SessionManager(noopLogger(), { spawn: () => proc });
+    const detail = await mgr.createChat({ cwd: sessionsCwd });
+    fs.writeFileSync(path.join(sessionsDir, 'mtime-child.json'), JSON.stringify({
+      session_id: 'mtime-child', title: 't', cwd: sessionsCwd,
+      created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:04.000Z',
+      parent_session_id: detail.summary.sessionId, session_created_reason: 'subagent',
+    }));
+    const jsonl = path.join(sessionsDir, 'mtime-child.jsonl');
+    fs.writeFileSync(jsonl, '');
+    const end = new Date('2026-01-01T00:12:00.000Z');
+    fs.utimesSync(jsonl, end, end);
+    const res = await mgr.getSubagentDetail(detail.summary.chatId, 'mtime-child');
+    assert.equal(res.subagent.updatedAt, end.toISOString());
+    const listed = (await mgr.getSubagents(detail.summary.chatId)).find((s) => s.sessionId === 'mtime-child');
+    assert.equal(listed?.updatedAt, end.toISOString());
+    mgr.disposeAll();
+    for (const ext of ['json', 'jsonl']) fs.rmSync(path.join(sessionsDir, `mtime-child.${ext}`), { force: true });
+  });
+});
