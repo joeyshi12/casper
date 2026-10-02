@@ -1898,6 +1898,11 @@
   max-height: 320px;
   overflow-y: auto;
 }
+/* The paged box already scrolls; a second scroll area inside it traps the wheel. */
+.agent-steps.is-paged .toolcall-body {
+  max-height: none;
+  overflow-y: visible;
+}
 .agent-earlier {
   align-self: flex-start;
   font-size: 12.5px;
