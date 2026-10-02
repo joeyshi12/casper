@@ -1,11 +1,11 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import type { SubagentSummary, TranscriptItem } from '@casper/shared';
 import { useStore, type ToolCallView } from '../../state/store.js';
 import { api } from '../../api/rest.js';
-import { groupToolCalls } from '../../util/toolGroups.js';
 import { formatElapsed } from '../../util/duration.js';
 import { ChevronIcon } from '../common/icons.js';
-import { ToolCallCard, ToolCallGroupCard } from './ToolCallCard.js';
+import { TranscriptEntries } from './TranscriptEntries.js';
+import { groupToolCalls } from '../../util/toolGroups.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { Collapse } from './Collapse.js';
 
@@ -186,7 +186,12 @@ function SubagentRow({
       <Collapse open={open}>
         <div className="agent-detail">
           {chatId && (
-            <SubagentTranscript chatId={chatId} subagentId={subagent.sessionId} live={live} />
+            <SubagentTranscript
+              chatId={chatId}
+              subagentId={subagent.sessionId}
+              live={live}
+              elapsed={formatElapsed(elapsed)}
+            />
           )}
         </div>
       </Collapse>
@@ -194,81 +199,114 @@ function SubagentRow({
   );
 }
 
+// How many of the latest entries an opened row shows, and how many more each click adds.
+const TAIL = 6;
+const PAGE = 40;
+// A running subagent's transcript is fetched again this often while its row is open.
+const POLL_MS = 3000;
+
+function totals(items: TranscriptItem[]): string {
+  const messages = items.filter((i) => i.type === 'message' && i.message.role === 'assistant').length;
+  const tools = items.filter((i) => i.type === 'tool_call').length;
+  const m = messages === 1 ? '1 message' : `${messages} messages`;
+  const t = tools === 1 ? '1 tool call' : `${tools} tool calls`;
+  return `${m} and ${t}`;
+}
+
+/* A subagent's answer, then the latest part of its conversation, rendered the same way as
+   the chat. While it runs, the latest entries show at once and the row keeps its height. */
 function SubagentTranscript({
   chatId,
   subagentId,
   live,
+  elapsed,
 }: {
   chatId: string;
   subagentId: string;
   live: boolean;
+  elapsed: string;
 }) {
+  const openFilePreview = useStore((s) => s.openFilePreview);
   const [items, setItems] = useState<TranscriptItem[] | null>(null);
   const [error, setError] = useState(false);
+  // null until the user opens or closes the steps: then they follow whether it is running.
+  const [stepsOpen, setStepsOpen] = useState<boolean | null>(null);
+  const [shown, setShown] = useState(TAIL);
 
   useEffect(() => {
     let alive = true;
-    setItems(null);
-    setError(false);
-    api
-      .subagentDetail(chatId, subagentId)
-      .then((r) => {
-        if (alive) setItems(r.transcript);
-      })
-      .catch(() => {
-        if (alive) setError(true);
-      });
+    const load = () =>
+      api
+        .subagentDetail(chatId, subagentId)
+        .then((r) => {
+          if (alive) setItems(r.transcript);
+        })
+        .catch(() => {
+          if (alive) setError(true);
+        });
+    void load();
+    if (!live) return () => void (alive = false);
+    const id = setInterval(load, POLL_MS);
     return () => {
       alive = false;
+      clearInterval(id);
     };
   }, [chatId, subagentId, live]);
 
-  const grouped = useMemo(() => groupToolCalls(items ?? []), [items]);
+  const lastItem = items?.at(-1);
+  const answer =
+    !live && lastItem?.type === 'message' && lastItem.message.role === 'assistant' ? lastItem : undefined;
+  const rest = useMemo(() => (items ? (answer ? items.slice(0, -1) : items) : []), [items, answer]);
+  const entries = useMemo(() => groupToolCalls(rest), [rest]);
 
   if (error) return <div className="agent-note">Couldn't load this subagent's transcript.</div>;
   if (items === null) return <div className="agent-note">Loading…</div>;
-  if (items.length === 0) return null;
+
+  const open = stepsOpen ?? live;
+  const visible = entries.slice(-shown);
+  const hidden = entries.length - visible.length;
 
   return (
     <div className="agent-transcript">
-      {grouped.map((entry): ReactNode => {
-        if (entry.type === 'run') {
-          const toolMembers = entry.members.filter((m) => m.type === 'tool');
-          if (toolMembers.length === 0) return null;
-          if (toolMembers.length === 1) {
-            return <ToolCallCard key={toolMembers[0]!.tool.id} tool={toolMembers[0]!.tool} />;
-          }
-          const key = toolMembers.map((m) => m.tool.id).join('-');
-          return (
-            <ToolCallGroupCard key={key} rows={toolMembers.map((m) => ({ kind: 'tool' as const, tool: m.tool }))} />
-          );
-        }
-        if (entry.type === 'thought') return null;
-        if (entry.type === 'tool') {
-          return <ToolCallCard key={entry.tool.id} tool={entry.tool} />;
-        }
-        const item = entry.item;
-        if (item.type === 'message') {
-          if (item.message.role === 'thinking') return null;
-          return (
-            <div key={item.message.id} className={`msg msg-${item.message.role}`}>
-              {item.message.role === 'assistant' ? (
-                <MarkdownRenderer text={item.message.text} />
-              ) : (
-                <div className="msg-user-text">{item.message.text}</div>
+      {answer && (
+        <div className="msg msg-assistant">
+          <MarkdownRenderer text={answer.message.text} />
+        </div>
+      )}
+      {entries.length > 0 && (
+        <div>
+          <button className="toolline" onClick={() => setStepsOpen(!open)} aria-expanded={open}>
+            <span className="toolline-text">
+              {totals(items)} {live ? 'so far' : `over ${elapsed}`}
+            </span>
+            <span className={`toolline-chevron ${open ? 'is-open' : ''}`}>
+              <ChevronIcon size={13} />
+            </span>
+          </button>
+          <Collapse open={open}>
+            <div className={`agent-steps ${shown > TAIL ? 'is-paged' : ''}`}>
+              {hidden > 0 && (
+                <button
+                  className="agent-earlier"
+                  onClick={() => {
+                    setStepsOpen(true);
+                    setShown((n) => n + PAGE);
+                  }}
+                >
+                  Show {Math.min(PAGE, hidden)} earlier of {hidden}
+                </button>
               )}
+              <TranscriptEntries
+                entries={visible}
+                lastActive={live}
+                chatId={chatId}
+                onOpenFile={openFilePreview}
+                readOnly
+              />
             </div>
-          );
-        }
-        if (item.type === 'turn_error') {
-          return (
-            <div key={item.id} className="agent-note is-failed">
-              {item.message}
-            </div>
-          );
-        }
-        return null;
-      })}
+          </Collapse>
+        </div>
+      )}
     </div>
   );
 }

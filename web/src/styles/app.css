@@ -1867,7 +1867,7 @@
   flex-shrink: 0;
 }
 .agent-detail {
-  padding: 2px 12px 12px 28px;
+  padding: 2px 12px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1882,7 +1882,35 @@
 .agent-transcript {
   display: flex;
   flex-direction: column;
+  gap: 8px;
+}
+.agent-steps {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+}
+.agent-steps > * {
+  flex-shrink: 0;
+}
+/* Older pages scroll inside the row, so paging back does not make it taller. */
+.agent-steps.is-paged {
+  max-height: 320px;
+  overflow-y: auto;
+}
+/* The paged box already scrolls; a second scroll area inside it traps the wheel. */
+.agent-steps.is-paged .toolcall-body {
+  max-height: none;
+  overflow-y: visible;
+}
+.agent-earlier {
+  align-self: flex-start;
+  font-size: 12.5px;
+  color: var(--n4);
+  padding: 2px 0 4px;
+}
+.agent-earlier:hover {
+  color: var(--n5);
 }
 
 .toolcall-file {
