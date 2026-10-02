@@ -1867,7 +1867,7 @@
   flex-shrink: 0;
 }
 .agent-detail {
-  padding: 2px 12px 12px 28px;
+  padding: 2px 12px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1886,8 +1886,6 @@
 }
 .agent-steps {
   margin-top: 4px;
-  padding-left: 10px;
-  border-left: 2px solid var(--n1);
   display: flex;
   flex-direction: column;
 }
