@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../../state/store.js';
-import { sendWidgetPrompt } from '../../state/sessionController.js';
+import { promptsAccepted, sendWidgetPrompt } from '../../state/sessionController.js';
 import { choiceOutcome, type ChoiceData } from '../../util/choiceCall.js';
 
 /**
@@ -22,6 +22,8 @@ export function ChoiceTemplate({ data, toolId }: { data: ChoiceData; toolId: str
   // Subscribed so a new message - typed or sent by a button - re-evaluates the outcome.
   const items = useStore((s) => s.items);
   const pending = useStore((s) => s.pending);
+  // The choice usually renders before the turn that asked it has ended.
+  const accepting = useStore(promptsAccepted);
   const [justPicked, setJustPicked] = useState<string | null>(null);
 
   const outcome = choiceOutcome(
@@ -32,7 +34,7 @@ export function ChoiceTemplate({ data, toolId }: { data: ChoiceData; toolId: str
   const closed = picked !== null || outcome.superseded;
 
   const choose = (option: ChoiceData['options'][number]) => {
-    if (closed) return;
+    if (closed || !accepting) return;
     if (sendWidgetPrompt(option.prompt)) setJustPicked(option.label);
   };
 
@@ -47,7 +49,7 @@ export function ChoiceTemplate({ data, toolId }: { data: ChoiceData; toolId: str
               key={option.label}
               className={`tpl-choice-opt${isPicked ? ' is-picked' : ''}`}
               onClick={() => choose(option)}
-              disabled={closed}
+              disabled={closed || !accepting}
               aria-pressed={isPicked}
             >
               <span className="tpl-choice-label">{option.label}</span>
