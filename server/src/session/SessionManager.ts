@@ -101,7 +101,11 @@ export type SpawnProcess = (
 
 export interface SessionManagerOptions {
   spawn?: SpawnProcess;
+  /** How long a cancelled turn may take to end before its kiro process is killed. */
+  cancelGraceMs?: number;
 }
+
+const CANCEL_GRACE_MS = 10_000;
 
 // Store, turn state and metadata exist as soon as a session is opened; the
 // kiro-cli child (`proc`) spawns lazily on first action.
@@ -120,6 +124,8 @@ export class Session {
   updatedAt = new Date().toISOString();
   lastActivity = Date.now();
   running = false;
+  // Set while a cancelled turn is given time to end before its process is killed.
+  cancelTimer?: NodeJS.Timeout;
   private everLive = false;
 
   proc?: ManagedProcess;
@@ -213,10 +219,12 @@ export class SessionManager {
   // whole parent transcript (145 MB in one chat), so each child is tried once per process.
   private readonly unmatchedChildren = new Map<string, Set<string>>();
   private readonly spawnProcess: SpawnProcess;
+  private readonly cancelGraceMs: number;
 
   constructor(log: Logger, opts: SessionManagerOptions = {}) {
     this.log = log;
     this.spawnProcess = opts.spawn ?? ((o, l) => new KiroProcess(o, l));
+    this.cancelGraceMs = opts.cancelGraceMs ?? CANCEL_GRACE_MS;
   }
 
   /** What a session is called, from every read path. */
@@ -586,14 +594,34 @@ export class SessionManager {
         s.record({ kind: 'turn_error', message });
       })
       .finally(() => {
+        clearTimeout(s.cancelTimer);
+        s.cancelTimer = undefined;
         s.running = false;
         s.lastActivity = Date.now();
       });
   }
 
+  /**
+   * Asks kiro to cancel the turn. If the turn has not ended within the grace period, kiro
+   * has stopped handling the session (its agent loop can panic while the process stays
+   * up), so the process is killed. Its exit then fails the pending prompt.
+   */
   cancel(chatId: string): void {
     const s = this.sessions.get(this.store.sessionIdForChat(chatId) ?? '');
-    s?.proc?.cancel(s.sessionId);
+    const proc = s?.proc;
+    if (!s || !proc) return;
+    proc.cancel(s.sessionId);
+    if (!s.running || s.cancelTimer) return;
+    s.cancelTimer = setTimeout(() => {
+      s.cancelTimer = undefined;
+      if (!s.running || s.proc !== proc) return;
+      this.log.warn(
+        { sessionId: s.sessionId, graceMs: this.cancelGraceMs },
+        'turn did not end after cancel; killing kiro-cli',
+      );
+      proc.dispose();
+    }, this.cancelGraceMs);
+    s.cancelTimer.unref?.();
   }
 
   async setMode(chatId: string, modeId: string): Promise<void> {

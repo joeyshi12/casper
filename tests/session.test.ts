@@ -1057,6 +1057,110 @@ describe('process lifecycle', () => {
   });
 });
 
+// kiro's agent loop can panic while the process stays up, after which session/cancel is
+// ignored and the prompt is never answered. Stop has to end the turn anyway.
+describe('cancel', () => {
+  const GRACE_MS = 20;
+
+  /** A process whose prompt never settles until the test ends it, or until it exits. */
+  const heldProcess = (sessionId: string) => {
+    let end: (stopReason: string) => void = () => {};
+    let fail: (err: Error) => void = () => {};
+    const proc = fakeKiroProcess({
+      sessionId,
+      onPrompt: () =>
+        new Promise((resolve, reject) => {
+          end = (stopReason) => resolve({ stopReason } as never);
+          fail = reject;
+        }),
+    });
+    // What KiroProcess does on exit: fail the pending request, then emit 'exit'.
+    const dispose = proc.dispose.bind(proc);
+    proc.dispose = () => {
+      dispose();
+      fail(new Error('kiro-cli exited on SIGTERM'));
+      proc.bus.emit('exit', null, 'SIGTERM');
+    };
+    return { proc, end: (stopReason: string) => end(stopReason) };
+  };
+
+  const managerWith = (proc: FakeProcess) =>
+    new SessionManager(noopLogger(), { spawn: () => proc, cancelGraceMs: GRACE_MS });
+
+  const waitFor = async (what: string, ok: () => boolean, timeoutMs = 2000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (ok()) return;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    assert.fail(`timed out waiting for ${what}`);
+  };
+
+  it('kills the process when the turn does not end after cancel', async () => {
+    const { proc } = heldProcess('ignores-cancel');
+    const mgr = managerWith(proc);
+    try {
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'ignores-cancel' });
+      await mgr.runPrompt('ignores-cancel', [{ type: 'text', text: 'hang' }]);
+      const s = await mgr.ensureOpen('ignores-cancel');
+
+      mgr.cancel('ignores-cancel');
+      assert.ok(proc.calls.includes('cancel'));
+      assert.equal(proc.disposed(), false, 'kiro gets the grace period first');
+
+      await waitFor('the process to be killed', () => proc.disposed());
+      await waitFor('the turn to end', () => !s.running);
+      assert.equal(s.turnState.get().turnStatus, 'idle');
+      // A new prompt is accepted instead of "A turn is already running".
+      await mgr.runPrompt('ignores-cancel', [{ type: 'text', text: 'again' }]);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  it('leaves the process alone when the turn ends within the grace period', async () => {
+    const { proc, end } = heldProcess('honours-cancel');
+    const mgr = managerWith(proc);
+    try {
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'honours-cancel' });
+      await mgr.runPrompt('honours-cancel', [{ type: 'text', text: 'stop me' }]);
+      const s = await mgr.ensureOpen('honours-cancel');
+
+      mgr.cancel('honours-cancel');
+      end('cancelled');
+      await waitFor('the turn to end', () => !s.running);
+
+      // Absence can only be shown by outlasting the grace period.
+      await new Promise((r) => setTimeout(r, GRACE_MS * 5));
+      assert.equal(proc.disposed(), false);
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
+  it('does not kill a newer turn started inside the grace period', async () => {
+    const { proc, end } = heldProcess('next-turn');
+    const mgr = managerWith(proc);
+    try {
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'next-turn' });
+      await mgr.runPrompt('next-turn', [{ type: 'text', text: 'first' }]);
+      const s = await mgr.ensureOpen('next-turn');
+
+      mgr.cancel('next-turn');
+      end('cancelled');
+      await waitFor('the first turn to end', () => !s.running);
+      await mgr.runPrompt('next-turn', [{ type: 'text', text: 'second' }]);
+
+      await new Promise((r) => setTimeout(r, GRACE_MS * 5));
+      assert.equal(proc.disposed(), false);
+      assert.equal(s.running, true);
+    } finally {
+      end('end_turn');
+      mgr.disposeAll();
+    }
+  });
+});
+
 // kiro binds the agent definition, the workspace's .kiro directory and its MCP
 // servers when the child starts, and offers no ACP method to re-read them, so a
 // reload is a process replacement.
