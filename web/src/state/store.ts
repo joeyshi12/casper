@@ -40,7 +40,7 @@ export interface ChatNotice {
   detail: string;
 }
 
-interface CasperState {
+export interface CasperState {
   chats: ChatSummary[];
   models: ModelInfo[];
   agents: AgentMode[];

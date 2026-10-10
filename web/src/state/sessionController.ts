@@ -11,7 +11,7 @@ import { stripAttachmentsLine, titleFromPrompt } from '@casper/shared';
 import { api } from '../api/rest.js';
 import { SessionSocket, type SessionSocketHandlers } from '../api/SessionSocket.js';
 import { DRAFT_PATH, pathForChat } from '../util/route.js';
-import { useStore } from './store.js';
+import { useStore, type CasperState } from './store.js';
 
 export type CreateOpts = Omit<CreateChatRequest, 'freshWorkspace'>;
 
@@ -420,9 +420,14 @@ export class SessionController {
 
 export const sessionController = new SessionController();
 
+/** Whether a prompt can be sent now: the same conditions under which the composer sends. */
+export function promptsAccepted(s: Pick<CasperState, 'observability'>): boolean {
+  return s.observability.turnStatus === 'idle' && !s.observability.compacting;
+}
+
 export function sendWidgetPrompt(text: string): boolean {
   const clean = text.trim().slice(0, 4000);
-  if (!clean || !sessionController.canSend) return false;
+  if (!clean || !sessionController.canSend || !promptsAccepted(useStore.getState())) return false;
   sessionController.send([{ type: 'text', text: clean }]);
   return true;
 }
