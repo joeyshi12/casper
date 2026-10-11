@@ -91,7 +91,24 @@ export type TranscriptItem =
   | { type: 'message'; message: TranscriptMessage }
   | { type: 'tool_call'; tool: TranscriptToolCall }
   | { type: 'compaction'; id: string; summary: string; timestamp?: number }
-  | { type: 'turn_error'; id: string; message: string; timestamp?: number };
+  | { type: 'turn_error'; id: string; message: string; timestamp?: number }
+  | { type: 'turn_interrupted'; id: string; timestamp?: number };
+
+/** A turn that failed or was stopped, stored because kiro drops what it had in flight. */
+export interface TurnEnding {
+  startedAt: number;
+  endedAt: number;
+  prompt: string;
+  kind: 'failed' | 'interrupted';
+  /** The error text of a failed turn. */
+  message?: string;
+  /** Everything the turn showed after the prompt. */
+  items: TranscriptItem[];
+}
+
+export interface StoredTurnEnding extends TurnEnding {
+  id: number;
+}
 
 export interface ChatDetail {
   summary: ChatSummary;

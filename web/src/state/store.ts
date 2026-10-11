@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import {
+  commitDraft,
   emptyObservabilitySnapshot,
+  foldSessionUpdate,
+  settleTools,
   stripAttachmentsLine,
   type AgentMode,
   type CasperEvent,
@@ -11,8 +14,6 @@ import {
   type ChatDetail,
   type ChatSummary,
   type SubagentSummary,
-  type ToolCallProgressUpdate,
-  type ToolCallUpdate,
   type TranscriptItem,
   type TranscriptToolCall,
 } from '@casper/shared';
@@ -291,60 +292,24 @@ export const useStore = create<CasperState>((set, get) => ({
       }
 
       case 'session_update': {
-        const u = p.update;
-        if (u.sessionUpdate === 'agent_message_chunk') {
-          const chunk = (u as { content?: { text?: string } }).content?.text ?? '';
-          set({ streamingText: state.streamingText + chunk });
-        } else if (u.sessionUpdate === 'agent_thought_chunk') {
-          const chunk = (u as { content?: { text?: string } }).content?.text ?? '';
-          set({ streamingThought: state.streamingThought + chunk });
-        } else if (u.sessionUpdate === 'tool_call') {
-          const tc = u as ToolCallUpdate;
-          const toolName = (tc as { _meta?: { kiro?: { toolName?: string } } })._meta?.kiro
-            ?.toolName;
+        const next = foldSessionUpdate(state, p.update, e.seq, e.ts);
+        if (next !== state) {
           set({
-            items: [
-              ...commitStreaming(state, `s-${e.seq}`, e.ts),
-              {
-                type: 'tool_call',
-                tool: {
-                  id: tc.toolCallId,
-                  name: toolName,
-                  title: tc.title ?? tc.toolCallId,
-                  kind: tc.kind,
-                  status: tc.status ?? 'pending',
-                  input: tc.rawInput,
-                  content: tc.content ?? [],
-                },
-              },
-            ],
-            streamingText: '',
-            streamingThought: '',
-          });
-        } else if (u.sessionUpdate === 'tool_call_update') {
-          const tu = u as ToolCallProgressUpdate;
-          set({
-            items: state.items.map((it) =>
-              it.type === 'tool_call' && it.tool.id === tu.toolCallId
-                ? {
-                    type: 'tool_call',
-                    tool: {
-                      ...it.tool,
-                      status: tu.status ?? it.tool.status,
-                      output: tu.rawOutput ?? it.tool.output,
-                      content: tu.content ?? it.tool.content,
-                    },
-                  }
-                : it,
-            ),
+            items: next.items,
+            streamingText: next.streamingText,
+            streamingThought: next.streamingThought,
           });
         }
         break;
       }
 
       case 'turn_ended': {
+        const committed = commitStreaming(state, `s-${e.seq}`, e.ts);
         set({
-          items: commitStreaming(state, `s-${e.seq}`, e.ts),
+          items:
+            p.stopReason === 'cancelled'
+              ? [...settleTools(committed), { type: 'turn_interrupted', id: `int-${e.seq}`, timestamp: e.ts }]
+              : committed,
           chatNotice: null,
           streamingText: '',
           streamingThought: '',
@@ -357,7 +322,7 @@ export const useStore = create<CasperState>((set, get) => ({
         const failure = classifyTurnFailure(p.message);
         set({
           items: [
-            ...commitStreaming(state, `s-${e.seq}`, e.ts),
+            ...settleTools(commitStreaming(state, `s-${e.seq}`, e.ts)),
             { type: 'turn_error', id: `err-${e.seq}`, message: p.message, timestamp: e.ts },
           ],
           chatNotice: failure.sessionWide
@@ -418,25 +383,5 @@ function commitStreaming(
   baseId: string,
   ts = Date.now(),
 ): TranscriptItem[] {
-  const next = [...state.items];
-  if (state.streamingThought.trim()) {
-    next.push({
-      type: 'message',
-      // Trimmed: this renders pre-wrap, so a late chunk would otherwise open
-      // the next commit with blank lines.
-      message: {
-        id: `t-${baseId}`,
-        role: 'thinking',
-        text: state.streamingThought.trim(),
-        timestamp: ts,
-      },
-    });
-  }
-  if (state.streamingText.trim()) {
-    next.push({
-      type: 'message',
-      message: { id: `a-${baseId}`, role: 'assistant', text: state.streamingText, timestamp: ts },
-    });
-  }
-  return next;
+  return commitDraft(state, baseId, ts);
 }

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { MessageAttachment } from '@casper/shared';
+import type { MessageAttachment, TranscriptItem } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 import { sessionController } from '../../state/sessionController.js';
 import { api } from '../../api/rest.js';
@@ -7,7 +7,8 @@ import { formatSize } from '../../util/formatSize.js';
 import { lazyImageProps } from '../../util/lazyImage.js';
 import { classifyTurnFailure } from '../../util/turnFailure.js';
 import { lastEntryJoinsStreamingThought, type GroupedEntry, type RunMember } from '../../util/toolGroups.js';
-import { CompressIcon, FileIcon, WarningIcon } from '../common/icons.js';
+import { ChevronIcon, CompressIcon, FileIcon, InterruptedIcon, RefreshIcon, WarningIcon } from '../common/icons.js';
+import { Collapse } from './Collapse.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { ToolCallCard, ToolCallGroupCard, ThoughtLineCard, type RunRowInput } from './ToolCallCard.js';
 
@@ -127,7 +128,9 @@ export function TranscriptEntries({
         ) : item.type === 'tool_call' ? (
           <ToolCallCard key={item.tool.id} tool={item.tool} arriving={arrivedLive(item.tool.id)} />
         ) : item.type === 'turn_error' ? (
-          <TurnErrorBlock key={item.id} message={item.message} readOnly={readOnly} />
+          <TurnEndCard key={item.id} id={item.id} message={item.message} readOnly={readOnly} />
+        ) : item.type === 'turn_interrupted' ? (
+          <TurnEndCard key={item.id} id={item.id} readOnly={readOnly} />
         ) : (
           <CompactionBlock key={item.id} summary={item.summary} />
         );
@@ -185,16 +188,34 @@ function runRowOf(member: RunMember): RunRowInput {
   return member.type === 'tool' ? { kind: 'tool', tool: member.tool } : { kind: 'thought', text: member.text };
 }
 
-function TurnErrorBlock({
+const firstLine = (message: string): string => message.split('\n').find((l) => l.trim())?.trim() ?? '';
+
+/** Whether the user has written since this card, which ends it as the latest turn. */
+function settledAfter(items: TranscriptItem[], pending: number, id: string): boolean {
+  if (pending > 0) return true;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i]!;
+    if ((it.type === 'turn_error' || it.type === 'turn_interrupted') && it.id === id) return false;
+    if (it.type === 'message' && it.message.role === 'user') return true;
+  }
+  return false;
+}
+
+function TurnEndCard({
+  id,
   message,
   readOnly = false,
 }: {
-  message: string;
+  id: string;
+  /** Present for a failed turn, absent for an interrupted one. */
+  message?: string;
   readOnly?: boolean;
 }) {
+  const failed = message !== undefined;
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const failure = classifyTurnFailure(message);
+  const failure = failed ? classifyTurnFailure(message) : null;
+  const settled = useStore((s) => !readOnly && settledAfter(s.items, s.pending.length, id));
   const lastPrompt = useStore((s) => {
     for (let i = s.items.length - 1; i >= 0; i--) {
       const it = s.items[i]!;
@@ -203,8 +224,10 @@ function TurnErrorBlock({
     return '';
   });
 
+  if (settled && !failed) return null;
+
   const copy = () => {
-    void navigator.clipboard?.writeText(message).then(
+    void navigator.clipboard?.writeText(message ?? '').then(
       () => {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
@@ -213,35 +236,46 @@ function TurnErrorBlock({
     );
   };
 
-  return (
-    <div className="sysnote">
-      <div className="sysnote-rule">
-        <button
-          className="sysnote-head"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-        >
-          <WarningIcon size={13} />
-          <span className="sysnote-label">{failure.title}</span>
-          <span className="sysnote-toggle">{open ? 'Hide details' : 'Show details'}</span>
-        </button>
-      </div>
+  const summary = failed ? firstLine(message) : '';
+  const canRetry = Boolean(lastPrompt) && !readOnly && !settled;
 
-      {open && (
-        <div className="sysnote-body">
-          {failure.fix && <p className="sysnote-fix">{failure.fix}</p>}
-          <pre className="sysnote-raw">{message}</pre>
-          <div className="sysnote-actions">
-            {lastPrompt && !readOnly && (
-              <button className="btn-sm is-danger" onClick={() => sessionController.retryTurn(lastPrompt)}>
-                Retry turn
-              </button>
-            )}
+  return (
+    <div className={`turn-end${failed ? ' is-failed' : ''}${settled ? ' is-settled' : ''}`} role="status">
+      <div className="turn-end-row">
+        <span className="turn-end-icon">
+          {failed ? <WarningIcon size={16} /> : <InterruptedIcon size={16} />}
+        </span>
+        <span className="turn-end-text">
+          {failure ? failure.title : "Casper's response was interrupted"}
+          {summary && summary !== failure?.title && <span className="turn-end-why">{summary}</span>}
+        </span>
+        <span className="turn-end-actions">
+          {failed && (
+            <button className="btn-sm btn-ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+              {open ? 'Hide details' : 'Details'}
+              <span className={`toolline-chevron ${open ? 'is-open' : ''}`}>
+                <ChevronIcon size={13} />
+              </span>
+            </button>
+          )}
+          {canRetry && (
+            <button className="btn-sm" onClick={() => sessionController.retryTurn(lastPrompt)}>
+              <RefreshIcon size={13} />
+              Retry
+            </button>
+          )}
+        </span>
+      </div>
+      {failed && (
+        <Collapse open={open}>
+          <div className="turn-end-body">
+            {failure?.fix && <p className="turn-end-fix">{failure.fix}</p>}
+            <pre className="turn-end-raw">{message}</pre>
             <button className="btn-sm" onClick={copy}>
               {copied ? 'Copied' : 'Copy details'}
             </button>
           </div>
-        </div>
+        </Collapse>
       )}
     </div>
   );

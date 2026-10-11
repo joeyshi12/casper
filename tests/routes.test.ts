@@ -489,6 +489,47 @@ describe('turn failures surface as system events, not assistant messages', () =>
     assert.equal(useStore.getState().items[0]!.type, 'turn_error');
   });
 
+  it('records an interruption when kiro ends the turn as cancelled', () => {
+    useStore.getState().applyEvent({
+      ...turnEnded(1),
+      payload: { kind: 'turn_ended', stopReason: 'cancelled' } as unknown as CasperEventPayload,
+    });
+    const items = useStore.getState().items;
+    assert.deepEqual(items.map((i) => i.type), ['turn_interrupted']);
+    assert.equal(useStore.getState().observability.turnStatus, 'idle');
+  });
+
+  it('marks a tool still running as failed when the turn is stopped or fails', () => {
+    const toolCall = (seq: number): CasperEvent => ({
+      seq,
+      sessionId: 's1',
+      ts: 1,
+      payload: {
+        kind: 'session_update',
+        update: { sessionUpdate: 'tool_call', toolCallId: `t${seq}`, title: 'shell', status: 'in_progress' },
+      } as unknown as CasperEventPayload,
+    });
+    const status = () =>
+      useStore.getState().items.flatMap((i) => (i.type === 'tool_call' ? [i.tool.status] : []));
+
+    useStore.getState().applyEvent(toolCall(1));
+    useStore.getState().applyEvent({
+      ...turnEnded(2),
+      payload: { kind: 'turn_ended', stopReason: 'cancelled' } as unknown as CasperEventPayload,
+    });
+    assert.deepEqual(status(), ['failed']);
+
+    useStore.getState().clearActive();
+    useStore.getState().applyEvent(toolCall(1));
+    useStore.getState().applyEvent(turnError(2, 'kiro-cli exited'));
+    assert.deepEqual(status(), ['failed']);
+  });
+
+  it('records no interruption for a turn that ended normally', () => {
+    useStore.getState().applyEvent(turnEnded(1));
+    assert.deepEqual(useStore.getState().items, []);
+  });
+
   it('clears the notice once a turn gets through', () => {
     useStore.getState().applyEvent(turnError(1, 'Error: credentials have expired'));
     assert.ok(useStore.getState().chatNotice);

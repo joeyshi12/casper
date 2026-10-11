@@ -22,6 +22,7 @@ import {
   type SubagentDetailResponse,
   type SubagentSummary,
   type TranscriptItem,
+  type TurnEnding,
   resolveSessionTitle,
   sanitizeTitle,
   titleFromPrompt,
@@ -36,6 +37,7 @@ import { isWithinRoot, isValidChatId } from '../util/paths.js';
 import { KiroProcess } from './KiroProcess.js';
 import { EventStore } from './EventStore.js';
 import { TurnState } from './TurnState.js';
+import { TurnRecorder } from './TurnRecorder.js';
 import { SubagentTracker, type SubagentStageInput } from './SubagentTracker.js';
 import { showSummaryAsAnswer } from './subagentResult.js';
 import { matchSubagentsFallback, subagentCallsIn } from './subagentFallbackMatch.js';
@@ -113,6 +115,7 @@ export class Session {
   readonly sessionId: string;
   readonly store: EventStore;
   readonly turnState = new TurnState();
+  readonly recorder = new TurnRecorder();
   readonly subagents = new SubagentTracker();
   cwd: string;
   agentId?: string;
@@ -124,6 +127,7 @@ export class Session {
   updatedAt = new Date().toISOString();
   lastActivity = Date.now();
   running = false;
+  cancelRequested = false;
   // Set while a cancelled turn is given time to end before its process is killed.
   cancelTimer?: NodeJS.Timeout;
   private everLive = false;
@@ -153,7 +157,9 @@ export class Session {
   record(payload: CasperEventPayload): CasperEvent {
     this.updatedAt = new Date().toISOString();
     this.turnState.apply(payload);
-    return this.store.append(payload);
+    const event = this.store.append(payload);
+    this.recorder.observe(event);
+    return event;
   }
 }
 
@@ -582,8 +588,18 @@ export class SessionManager {
 
     proc
       .prompt({ sessionId: s.sessionId, prompt: content })
-      .then((res) => s.record({ kind: 'turn_ended', stopReason: res.stopReason }))
+      .then((res) => {
+        if (res.stopReason === 'cancelled') this.saveEnding(chatId, s.recorder.finish({ kind: 'interrupted' }));
+        else s.recorder.discard();
+        s.record({ kind: 'turn_ended', stopReason: res.stopReason });
+      })
       .catch((err: Error) => {
+        if (s.cancelRequested) {
+          // The user stopped the turn and the process had to be killed to do it.
+          this.saveEnding(chatId, s.recorder.finish({ kind: 'interrupted' }));
+          s.record({ kind: 'turn_ended', stopReason: 'cancelled' });
+          return;
+        }
         this.log.error({ err, sessionId: s.sessionId }, 'prompt turn failed');
         // Appends kiro's stderr tail only if not already in the message.
         const tail = proc.stderrTail();
@@ -591,14 +607,25 @@ export class SessionManager {
           tail && !err.message.includes(tail)
             ? `${err.message}\n\nkiro-cli output:\n${tail}`
             : err.message;
+        this.saveEnding(chatId, s.recorder.finish({ kind: 'failed', message }));
         s.record({ kind: 'turn_error', message });
       })
       .finally(() => {
+        s.cancelRequested = false;
         clearTimeout(s.cancelTimer);
         s.cancelTimer = undefined;
         s.running = false;
         s.lastActivity = Date.now();
       });
+  }
+
+  private saveEnding(chatId: string, ending: TurnEnding | null): void {
+    if (!ending) return;
+    try {
+      this.store.addTurnEnding(chatId, ending);
+    } catch (err) {
+      this.log.error({ err, chatId }, 'could not store a failed turn');
+    }
   }
 
   /**
@@ -611,7 +638,9 @@ export class SessionManager {
     const proc = s?.proc;
     if (!s || !proc) return;
     proc.cancel(s.sessionId);
-    if (!s.running || s.cancelTimer) return;
+    if (!s.running) return;
+    s.cancelRequested = true;
+    if (s.cancelTimer) return;
     s.cancelTimer = setTimeout(() => {
       s.cancelTimer = undefined;
       if (!s.running || s.proc !== proc) return;
@@ -712,6 +741,14 @@ export class SessionManager {
     return sessionId;
   }
 
+  private hydrate(chatId: string, sessionId: string): Promise<TranscriptItem[]> {
+    return hydrateTranscript(
+      sessionId,
+      this.store.attachmentsByChat(chatId),
+      this.store.turnEndingsByChat(chatId),
+    );
+  }
+
   async getDetail(chatId: string): Promise<ChatDetail> {
     const chat = this.store.get(chatId);
     if (!chat) throw new Error(`Unknown chat: ${chatId}`);
@@ -719,7 +756,7 @@ export class SessionManager {
 
     const [transcript, persisted] = await Promise.all([
       sessionId
-        ? hydrateTranscript(sessionId, this.store.attachmentsByChat(chatId))
+        ? this.hydrate(chatId, sessionId)
         : Promise.resolve([]),
       sessionId ? readPersistedSession(sessionId) : Promise.resolve(null),
     ]);
@@ -736,10 +773,7 @@ export class SessionManager {
     offset: number,
     limit: number,
   ): Promise<TranscriptItem[]> {
-    const transcript = await hydrateTranscript(
-      this.sessionIdOf(chatId),
-      this.store.attachmentsByChat(chatId),
-    );
+    const transcript = await this.hydrate(chatId, this.sessionIdOf(chatId));
     const start = Math.max(0, Math.min(offset, transcript.length));
     const end = Math.max(start, Math.min(start + limit, transcript.length));
     return transcript.slice(start, end);

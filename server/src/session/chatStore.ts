@@ -1,4 +1,4 @@
-import type { MessageAttachment } from '@casper/shared';
+import type { MessageAttachment, StoredTurnEnding, TranscriptItem, TurnEnding } from '@casper/shared';
 import { db } from './db.js';
 
 type ChatColumn = 'title' | 'cwd' | 'session_id';
@@ -114,9 +114,53 @@ export class ChatStore {
     return out;
   }
 
+  addTurnEnding(chatId: string, e: TurnEnding): void {
+    db()
+      .prepare(
+        `INSERT INTO turn_endings (chat_id, started_at, ended_at, prompt, kind, message, items)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(chatId, e.startedAt, e.endedAt, e.prompt, e.kind, e.message ?? null, JSON.stringify(e.items));
+  }
+
+  turnEndingsByChat(chatId: string): StoredTurnEnding[] {
+    const rows = db()
+      .prepare(
+        `SELECT id, started_at, ended_at, prompt, kind, message, items FROM turn_endings
+         WHERE chat_id = ? ORDER BY id`,
+      )
+      .all(chatId) as {
+      id: number;
+      started_at: number;
+      ended_at: number;
+      prompt: string;
+      kind: string;
+      message: string | null;
+      items: string;
+    }[];
+    const out: StoredTurnEnding[] = [];
+    for (const r of rows) {
+      try {
+        out.push({
+          id: r.id,
+          startedAt: r.started_at,
+          endedAt: r.ended_at,
+          prompt: r.prompt,
+          kind: r.kind === 'interrupted' ? 'interrupted' : 'failed',
+          ...(r.message === null ? {} : { message: r.message }),
+          items: JSON.parse(r.items) as TranscriptItem[],
+        });
+      } catch {
+        /* an unreadable row is skipped */
+      }
+    }
+    return out;
+  }
+
   remove(chatId: string): void {
     db().prepare('DELETE FROM chats WHERE chat_id = ?').run(chatId);
     db().prepare('DELETE FROM message_attachments WHERE chat_id = ?').run(chatId);
+    db().prepare('DELETE FROM turn_endings WHERE chat_id = ?').run(chatId);
   }
 
   private read(chatId: string, column: ChatColumn): string | undefined {
