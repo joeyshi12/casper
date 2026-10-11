@@ -13,7 +13,7 @@ import { ChatStore } from '../server/src/session/chatStore.js';
 import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
 import { SessionManager } from '../server/src/session/SessionManager.js';
 import { TurnRecorder } from '../server/src/session/TurnRecorder.js';
-import { fakeKiroProcess, noopLogger, type FakeProcess } from './helpers.js';
+import { fakeKiroProcess, noopLogger, waitFor, type FakeProcess } from './helpers.js';
 
 const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-endings-sessions-'));
 const sessionsCwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-endings-cwd-')));
@@ -280,9 +280,7 @@ describe('a turn that ends badly, through SessionManager', () => {
 
   const settled = async (chatId: string) => {
     const s = await mgr.ensureOpen(chatId);
-    const deadline = Date.now() + 2000;
-    while (s.running && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
-    assert.equal(s.running, false, 'the turn should have ended');
+    await waitFor('the turn to end', () => !s.running);
   };
 
   const start = async (chatId: string, text = 'do the thing') => {

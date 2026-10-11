@@ -16,7 +16,7 @@ import { ChatStore } from '../server/src/session/chatStore.js';
 import { LoginStore } from '../server/src/session/logins.js';
 import { hydrateTranscript, promptCount } from '../server/src/session/kiroFiles.js';
 import { bumpChatToTop } from '../web/src/state/chats.js';
-import { noopLogger, fakeKiroProcess, type FakeProcess } from './helpers.js';
+import { noopLogger, fakeKiroProcess, waitFor, type FakeProcess } from './helpers.js';
 import {
   chatDir,
   chatsRoot,
@@ -181,9 +181,8 @@ describe('EventStore.getSince + replay gating', () => {
 });
 
 describe('re-open mid-turn must not drop the prompt', () => {
-  // The head given to a reconnecting client: kiro only writes a turn to its jsonl once it
-  // completes, so an in-flight one is missing from the hydrated transcript and has to be
-  // replayed from the event store. Read through getDetail, which is how a client asks.
+  // The head given to a reconnecting client. An in-flight turn whose prompt is not in the
+  // hydrated transcript yet is replayed from the event store. Read through getDetail.
   let mgr: SessionManager;
   let session: Session;
   let chatId: string;
@@ -1087,15 +1086,6 @@ describe('cancel', () => {
   const managerWith = (proc: FakeProcess) =>
     new SessionManager(noopLogger(), { spawn: () => proc, cancelGraceMs: GRACE_MS });
 
-  const waitFor = async (what: string, ok: () => boolean, timeoutMs = 2000) => {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      if (ok()) return;
-      await new Promise((r) => setTimeout(r, 5));
-    }
-    assert.fail(`timed out waiting for ${what}`);
-  };
-
   it('kills the process when the turn does not end after cancel', async () => {
     const { proc } = heldProcess('ignores-cancel');
     const mgr = managerWith(proc);
@@ -1376,15 +1366,6 @@ describe('reloading a session re-detects its setup', () => {
         },
       });
       return { mgr, release };
-    };
-
-    const waitFor = async (what: string, ok: () => boolean, timeoutMs = 2000) => {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        if (ok()) return;
-        await new Promise((r) => setTimeout(r, 5));
-      }
-      assert.fail(`timed out waiting for ${what}`);
     };
 
     it('runs on the replacement process, never on the one being disposed', async () => {

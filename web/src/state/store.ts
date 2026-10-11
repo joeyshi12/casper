@@ -304,7 +304,7 @@ export const useStore = create<CasperState>((set, get) => ({
       }
 
       case 'turn_ended': {
-        const committed = commitStreaming(state, `s-${e.seq}`, e.ts);
+        const committed = commitDraft(state, `s-${e.seq}`, e.ts);
         set({
           items:
             p.stopReason === 'cancelled'
@@ -322,7 +322,7 @@ export const useStore = create<CasperState>((set, get) => ({
         const failure = classifyTurnFailure(p.message);
         set({
           items: [
-            ...settleTools(commitStreaming(state, `s-${e.seq}`, e.ts)),
+            ...settleTools(commitDraft(state, `s-${e.seq}`, e.ts)),
             { type: 'turn_error', id: `err-${e.seq}`, message: p.message, timestamp: e.ts },
           ],
           chatNotice: failure.sessionWide
@@ -375,13 +375,3 @@ export const useStore = create<CasperState>((set, get) => ({
     }
   },
 }));
-
-/* baseId must be unique per commit (seq-derived) so React keys stay stable and
-   never reuse a DOM node from a prior commit. */
-function commitStreaming(
-  state: CasperState,
-  baseId: string,
-  ts = Date.now(),
-): TranscriptItem[] {
-  return commitDraft(state, baseId, ts);
-}

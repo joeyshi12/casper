@@ -27,6 +27,7 @@ import { widgetCallOf } from '../web/src/util/widgetCall.js';
 import { lazyImageProps } from '../web/src/util/lazyImage.js';
 import { classifyTurnFailure } from '../web/src/util/turnFailure.js';
 import { uuid } from '../web/src/util/uuid.js';
+import { waitFor } from './helpers.js';
 import {
   classifyTool,
   toolLabel,
@@ -1424,19 +1425,6 @@ describe('session controller', () => {
   };
 
   const settle = () => new Promise((r) => setTimeout(r, 5));
-
-  /**
-   * Wait for something a real timer will bring about. A fixed sleep raced two chained
-   * timers - the turn-ended delay, then the list coalesce - and lost on a loaded CI box.
-   */
-  const waitFor = async (what: string, ok: () => boolean, timeoutMs = 2000) => {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      if (ok()) return;
-      await new Promise((r) => setTimeout(r, 5));
-    }
-    assert.fail(`timed out waiting for ${what}`);
-  };
 
   beforeEach(() => {
     useStore.getState().clearActive();

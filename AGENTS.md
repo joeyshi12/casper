@@ -94,9 +94,10 @@ npm run typecheck              # all workspaces
 ## Architecture notes
 
 - **Sessions live in kiro's files**, `~/.kiro/sessions/cli/<id>.{json,jsonl}`. `casper.db` holds only
-  what kiro doesn't: `chats` (the session binding plus title and cwd overrides), `logins`, and
-  `message_attachments`. kiro creates both files at `session/new` but leaves the
-  `.jsonl` empty until a turn completes, and **deletes both** when a session that never ran one
+  what kiro doesn't: `chats` (the session binding plus title and cwd overrides), `logins`,
+  `message_attachments`, `subagent_links`, and `turn_endings` (turns that failed or were stopped,
+  of which kiro keeps only what it had finished). kiro creates both files at `session/new` but
+  leaves the `.jsonl` empty until the first prompt is written, and **deletes both** when a session that never ran one
   exits — so a brand-new session legitimately ends up with no file (see `isGhost` in
   `SessionManager`). An empty `.jsonl` also means kiro will refuse `session/load` with "Session not
   found", which is what `hasRecordedTurns` gates a reload on.

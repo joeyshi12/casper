@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { JSDOM } from 'jsdom';
 import type { SessionPromptResult } from '@casper/shared';
@@ -133,4 +134,14 @@ export function fakeKiroProcess(
       if (opts.onDisposeAndWait) await opts.onDisposeAndWait();
     },
   } as FakeProcess;
+}
+
+/** Polls to a deadline instead of sleeping a fixed time. */
+export async function waitFor(what: string, ok: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (ok()) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  assert.fail(`timed out waiting for ${what}`);
 }
