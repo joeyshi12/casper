@@ -1280,57 +1280,65 @@
   color: var(--frost-deep);
 }
 
-.sysnote {
+.turn-end {
   align-self: stretch;
   width: 100%;
   margin: 6px 0;
+  background: var(--n1);
+  border: 1px solid var(--n2);
+  border-radius: var(--r-md);
+  font-size: 13.5px;
 }
-.sysnote-rule {
+.turn-end.is-failed {
+  border-color: color-mix(in srgb, var(--aurora-red) 45%, transparent);
+}
+.turn-end.is-settled {
+  background: none;
+  border-style: dashed;
+}
+.turn-end-row {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: 44px;
+  padding: 9px 10px 9px 13px;
 }
-.sysnote-rule::before,
-.sysnote-rule::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--aurora-red);
-  opacity: 0.35;
+.turn-end.is-settled .turn-end-row {
+  min-height: 36px;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
-.sysnote-head {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+.turn-end-icon {
+  display: flex;
   flex-shrink: 0;
-  padding: 3px 10px;
-  border-radius: var(--r-pill);
-  background: var(--n1);
-  border: 1px solid var(--aurora-red);
-  color: var(--aurora-red);
-  font-size: 12px;
-  cursor: pointer;
-}
-.sysnote-head:hover {
-  background: var(--n2);
-}
-.sysnote-toggle {
   color: var(--n4);
 }
-.sysnote-body {
-  max-width: 92%;
-  margin: 10px auto 0;
-  border-left: 2px solid var(--aurora-red);
-  padding: 2px 0 2px 12px;
+.turn-end.is-failed .turn-end-icon {
+  color: var(--aurora-red);
 }
-.sysnote-fix {
+.turn-end-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--n5);
+}
+.turn-end-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+.turn-end-body {
+  border-top: 1px solid var(--n2);
+  padding: 10px 13px 12px;
+}
+.turn-end-fix {
   font-size: 13px;
   color: var(--n5);
   margin: 0 0 10px;
 }
-/* Monospaced and scrollable: a stderr tail has its own line breaks that prose
-   wrapping or markdown would mangle. */
-.sysnote-raw {
+.turn-end-raw {
   font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.5;
@@ -1345,12 +1353,10 @@
   max-height: 160px;
   overflow: auto;
 }
-.sysnote-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
 .btn-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   font-weight: 600;
   padding: 5px 11px;
@@ -1363,9 +1369,14 @@
 .btn-sm:hover {
   background: var(--n2);
 }
-.btn-sm.is-danger {
-  border-color: var(--aurora-red);
-  color: var(--aurora-red);
+.btn-sm.btn-ghost {
+  background: none;
+  border-color: transparent;
+  color: var(--n4);
+}
+.btn-sm.btn-ghost:hover {
+  background: var(--n2);
+  color: var(--n5);
 }
 
 .notice-banner {

@@ -205,6 +205,24 @@ export function ArrowUpIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function InterruptedIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9.5" />
+      <rect x="8.5" y="8.5" width="7" height="7" rx="1.2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 /** Filled square: stop, matching the convention of a solid block for "halt". */
 export function StopIcon({ size = 16, className }: IconProps) {
   return (

@@ -3,6 +3,7 @@ import path from 'node:path';
 import type {
   TranscriptItem,
   TranscriptMessage,
+  StoredTurnEnding,
   TranscriptToolCall,
 } from '@casper/shared';
 import { stripAttachmentsLine } from '@casper/shared';
@@ -271,16 +272,44 @@ export async function hasRecordedTurns(sessionId: string): Promise<boolean> {
   }
 }
 
+/* kiro stamps a prompt in whole seconds; a prompt belongs to a stored turn if it was
+   written between the turn's start and end, give or take this much. */
+const STAMP_PAD_MS = 2000;
+
+function endingItems(e: StoredTurnEnding): TranscriptItem[] {
+  const prefix = `te${e.id}-`;
+  const items = e.items.map((it): TranscriptItem =>
+    it.type === 'message' ? { type: 'message', message: { ...it.message, id: prefix + it.message.id } } : it,
+  );
+  items.push(
+    e.kind === 'failed'
+      ? { type: 'turn_error', id: `${prefix}end`, message: e.message ?? '', timestamp: e.endedAt }
+      : { type: 'turn_interrupted', id: `${prefix}end`, timestamp: e.endedAt },
+  );
+  return items;
+}
+
 /** Hydrates the transcript from kiro's <id>.jsonl, matching the live stream's shape.
  *  Tool uses live in AssistantMessage content; their results arrive in a later
- *  ToolResults entry, matched back by toolUseId. */
+ *  ToolResults entry, matched back by toolUseId.
+ *
+ *  A stored ending replaces the entries kiro wrote for its turn, found by prompt text and
+ *  time. One whose prompt kiro never wrote is placed by time among the prompts. */
 export async function hydrateTranscript(
   sessionId: string,
   attachments?: Map<number, MessageAttachment[]>,
+  endings: StoredTurnEnding[] = [],
 ): Promise<TranscriptItem[]> {
   const items: TranscriptItem[] = [];
   let userOrdinal = 0;
   const toolsById = new Map<string, TranscriptToolCall>();
+  const waiting = [...endings];
+  let replaced = false;
+
+  const unrecorded = (e: StoredTurnEnding): TranscriptItem[] => [
+    { type: 'message', message: { id: `te${e.id}-u`, role: 'user', text: e.prompt, timestamp: e.startedAt } },
+    ...endingItems(e),
+  ];
 
   for (const entry of await readJsonlEntries(sessionId)) {
     const content = contentBlocks(entry.data.content);
@@ -291,12 +320,32 @@ export async function hydrateTranscript(
     const pushMsg = (msg: TranscriptMessage) => items.push({ type: 'message', message: msg });
 
     if (entry.kind === 'Prompt') {
+      replaced = false;
       const text = stripAttachmentsLine(textOf('text'));
+      let matched: StoredTurnEnding | undefined;
+      if (ts !== undefined) {
+        const at = ts * 1000;
+        matched = waiting.find(
+          (e) =>
+            e.prompt.trim() === text.trim() &&
+            at >= e.startedAt - STAMP_PAD_MS &&
+            at <= e.endedAt + STAMP_PAD_MS,
+        );
+        while (waiting.length && waiting[0] !== matched && waiting[0]!.endedAt < at - STAMP_PAD_MS) {
+          items.push(...unrecorded(waiting.shift()!));
+        }
+        if (matched) waiting.splice(waiting.indexOf(matched), 1);
+      }
       const attached = attachments?.get(userOrdinal);
       userOrdinal++;
       if (text.trim() || attached?.length)
         pushMsg({ id: `u-${baseId}`, role: 'user', text, timestamp: ts, attachments: attached });
+      if (matched) {
+        items.push(...endingItems(matched));
+        replaced = true;
+      }
     } else if (entry.kind === 'AssistantMessage') {
+      if (replaced) continue;
       const thinking = textOf('thinking');
       if (thinking.trim())
         pushMsg({ id: `t-${baseId}`, role: 'thinking', text: thinking.trim(), timestamp: ts });
@@ -320,6 +369,7 @@ export async function hydrateTranscript(
         items.push({ type: 'tool_call', tool });
       }
     } else if (entry.kind === 'ToolResults') {
+      if (replaced) continue;
       for (const c of content) {
         const d = toolResultData(c);
         if (!d) continue;
@@ -334,5 +384,6 @@ export async function hydrateTranscript(
         items.push({ type: 'compaction', id: `c-${baseId}`, summary, timestamp: ts });
     }
   }
+  for (const e of waiting) items.push(...unrecorded(e));
   return items;
 }
