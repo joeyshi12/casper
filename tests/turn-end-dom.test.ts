@@ -98,12 +98,9 @@ describe('failed turn card', () => {
   const items = [user('u1', 'Fix the tests'), failed('err-1', STDERR)];
   const open = () => host.querySelector('.collapse')!.classList.contains('is-open');
 
-  it('shows the title and the first line of the error, with the full error folded', () => {
+  it('shows only the title, with the error folded', () => {
     show(items);
-    const text = card()!.querySelector('.turn-end-text')!.textContent!;
-    assert.match(text, /Turn failed/);
-    assert.match(text, /kiro-cli exited on SIGTERM: The application panicked/);
-    assert.ok(!text.includes('invalid conversation history'), 'later lines wait under Details');
+    assert.equal(card()!.querySelector('.turn-end-text')!.textContent, 'Turn failed');
     assert.equal(open(), false);
     assert.ok(button('Retry'));
   });

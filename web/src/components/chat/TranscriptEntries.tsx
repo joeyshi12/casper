@@ -188,8 +188,6 @@ function runRowOf(member: RunMember): RunRowInput {
   return member.type === 'tool' ? { kind: 'tool', tool: member.tool } : { kind: 'thought', text: member.text };
 }
 
-const firstLine = (message: string): string => message.split('\n').find((l) => l.trim())?.trim() ?? '';
-
 /** Whether the user has written since this card, which ends it as the latest turn. */
 function settledAfter(items: TranscriptItem[], pending: number, id: string): boolean {
   if (pending > 0) return true;
@@ -236,7 +234,6 @@ function TurnEndCard({
     );
   };
 
-  const summary = failed ? firstLine(message) : '';
   const canRetry = Boolean(lastPrompt) && !readOnly && !settled;
 
   return (
@@ -245,10 +242,7 @@ function TurnEndCard({
         <span className="turn-end-icon">
           {failed ? <WarningIcon size={16} /> : <InterruptedIcon size={16} />}
         </span>
-        <span className="turn-end-text">
-          {failure ? failure.title : "Casper's response was interrupted"}
-          {summary && summary !== failure?.title && <span className="turn-end-why">{summary}</span>}
-        </span>
+        <span className="turn-end-text">{failure ? failure.title : "Casper's response was interrupted"}</span>
         <span className="turn-end-actions">
           {failed && (
             <button className="btn-sm btn-ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
