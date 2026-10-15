@@ -1108,6 +1108,52 @@ describe('cancel', () => {
     }
   });
 
+  it('marks subagents stopped when a cancelled turn has its process killed', async () => {
+    const { proc } = heldProcess('cancel-subagents');
+    const mgr = managerWith(proc);
+    try {
+      await mgr.createChat({ cwd: sessionsCwd, chatId: 'cancel-subagents' });
+      await mgr.runPrompt('cancel-subagents', [{ type: 'text', text: 'spawn' }]);
+      const s = await mgr.ensureOpen('cancel-subagents');
+      proc.bus.emit('notification', {
+        method: 'session/update',
+        params: {
+          sessionId: s.sessionId,
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'crew-1',
+            title: 'Spawning agent crew',
+            rawInput: { stages: [{ name: 'a' }, { name: 'b', depends_on: ['a'] }] },
+            _meta: { kiro: { toolName: 'subagent' } },
+          },
+        },
+      });
+      proc.bus.emit('notification', {
+        method: '_kiro.dev/subagent/list_update',
+        params: {
+          subagents: [{ sessionId: 'crew-child-a', sessionName: 'a', status: { type: 'working' } }],
+          pendingStages: [],
+        },
+      });
+      assert.deepEqual(
+        (await mgr.getSubagents('cancel-subagents')).map((a) => a.status),
+        ['working', 'pending'],
+      );
+
+      mgr.cancel('cancel-subagents');
+      await waitFor('the turn to end', () => !s.running);
+
+      const after = await mgr.getSubagents('cancel-subagents');
+      assert.deepEqual(after.map((a) => [a.stageName, a.status]), [['a', 'failed']]);
+      const { events } = s.store.getSince(0);
+      const last = events.findLast((e) => e.payload.kind === 'subagents_changed')?.payload;
+      assert.ok(last?.kind === 'subagents_changed');
+      assert.equal(last.subagents[0]?.status, 'failed', 'connected clients are told too');
+    } finally {
+      mgr.disposeAll();
+    }
+  });
+
   it('leaves the process alone when the turn ends within the grace period', async () => {
     const { proc, end } = heldProcess('honours-cancel');
     const mgr = managerWith(proc);

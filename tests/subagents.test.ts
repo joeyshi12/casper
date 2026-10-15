@@ -235,6 +235,25 @@ describe('SubagentTracker (unit)', () => {
     assert.equal(t.get('s1')?.toolCallId, 'call-1');
     assert.equal(t.get('s2')?.toolCallId, 'call-2');
   });
+
+  it('turnEnded marks working subagents stopped and drops pending stages', () => {
+    const t = new SubagentTracker();
+    t.callStarted('call-1', [{ name: 'a' }, { name: 'b', depends_on: ['a'] }, { name: 'c' }]);
+    t.apply([
+      { sessionId: 's1', sessionName: 'a', status: { type: 'working' }, dependsOn: [] },
+      { sessionId: 's3', sessionName: 'c', status: { type: 'terminated' }, dependsOn: [] },
+    ]);
+    assert.equal(t.turnEnded(), true);
+    assert.equal(t.get('s1')?.status, 'failed');
+    assert.equal(t.get('s1')?.activity, 'Stopped');
+    assert.equal(t.get('s3')?.status, 'completed', 'a finished subagent keeps its status');
+    assert.deepEqual(
+      t.listForCall('call-1').map((r) => r.stageName),
+      ['a', 'c'],
+      'the stage that never started is no longer listed as pending',
+    );
+    assert.equal(t.turnEnded(), false, 'nothing left to change');
+  });
 });
 
 describe('GET /api/chats/:id/subagents and /:subagentId', () => {
