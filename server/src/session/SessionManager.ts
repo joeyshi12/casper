@@ -616,6 +616,7 @@ export class SessionManager {
         s.cancelTimer = undefined;
         s.running = false;
         s.lastActivity = Date.now();
+        if (s.subagents.turnEnded()) s.record({ kind: 'subagents_changed', subagents: s.subagents.list() });
       });
   }
 

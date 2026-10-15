@@ -60,6 +60,22 @@ export class SubagentTracker {
     return resolved;
   }
 
+  /** Called when the parent turn ends. The `subagent` tool call blocks the turn, so
+   *  any subagent still working was stopped with it, and kiro does not always send a
+   *  list_update saying so. Returns whether anything changed. */
+  turnEnded(now: () => string = () => new Date().toISOString()): boolean {
+    let changed = this.pendingCalls.length > 0;
+    this.pendingCalls.length = 0;
+    for (const s of this.byChild.values()) {
+      if (s.status !== 'working') continue;
+      s.status = 'failed';
+      s.activity = 'Stopped';
+      s.updatedAt = now();
+      changed = true;
+    }
+    return changed;
+  }
+
   /** Started stages plus a synthetic 'pending' row for each declared stage that
    *  hasn't started, so a stage waiting on a dependency still shows up. */
   listForCall(toolCallId: string): SubagentSummary[] {
