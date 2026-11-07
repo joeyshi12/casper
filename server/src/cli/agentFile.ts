@@ -19,20 +19,17 @@ interface McpServer {
   timeout: number;
 }
 
-/** kiro's agent schema, as far as we set it. */
+/** kiro V3's agent schema, as far as we set it. It has no `allowedTools` or
+ *  `toolsSettings`: kiro V3 skips a file with either as a kiro 2.x agent. */
 export interface KiroAgent {
   name: string;
   description: string;
   prompt: string;
   mcpServers: Record<string, McpServer>;
   tools: string[];
-  toolAliases: Record<string, string>;
-  allowedTools: string[];
   resources: string[];
-  hooks: Record<string, unknown>;
-  toolsSettings: Record<string, unknown>;
+  hooks: unknown[];
   includeMcpJson: boolean;
-  model: string | null;
 }
 
 /** Plain text, read rather than imported, so an edit diffs line by line. */
@@ -68,14 +65,42 @@ export function agentConfig(prompt: string, mcp: string | null): KiroAgent {
         : { command: 'casper', args: ['mcp'], env: {}, timeout: 10000 },
     },
     tools: ['*'],
-    toolAliases: {},
-    allowedTools: [],
     resources: [],
-    hooks: {},
-    toolsSettings: {},
+    hooks: [],
     includeMcpJson: true,
-    model: null,
   };
+}
+
+/**
+ * Whether kiro's own agent upgrade rewrote Casper's file. kiro rewrites kiro 2.x agents
+ * when a V3 chat starts in its terminal UI and on `kiro-cli agent upgrade`, marks the
+ * result with `kiroUpgrade`, and keeps the original beside it as `<name>.bak` or
+ * `<name>.bak.<n>`. If that original is the file Casper last wrote, the agent is still
+ * ours to update.
+ */
+function upgradedByKiro(target: string, onDisk: string, stamp: string): boolean {
+  try {
+    const parsed = JSON.parse(onDisk) as unknown;
+    if (typeof parsed !== 'object' || parsed === null || !('kiroUpgrade' in parsed)) return false;
+  } catch {
+    return false;
+  }
+  const dir = path.dirname(target);
+  const prefix = `${path.basename(target)}.bak`;
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return false;
+  }
+  const isBackup = (n: string) => n.startsWith(prefix) && /^(\.\d+)?$/.test(n.slice(prefix.length));
+  return names.filter(isBackup).some((n) => {
+    try {
+      return sha256(fs.readFileSync(path.join(dir, n), 'utf8')) === stamp;
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function installAgentFile(home: string, dataDir: string): AgentResult {
@@ -116,7 +141,7 @@ export function installAgentFile(home: string, dataDir: string): AgentResult {
 
   const onDisk = fs.readFileSync(target, 'utf8');
   if (sha256(onDisk) === sha256(desired)) return { action: 'unchanged', target };
-  if (stamp !== '' && sha256(onDisk) === stamp) {
+  if (stamp !== '' && (sha256(onDisk) === stamp || upgradedByKiro(target, onDisk, stamp))) {
     write();
     return { action: 'updated', target };
   }

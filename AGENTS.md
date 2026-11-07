@@ -112,7 +112,9 @@ npm run typecheck              # all workspaces
   portal to `document.body`.
 - The agent prompt is `assets/agents/prompt.txt`: plain text in XML-style sections, no markdown. It
   installs to `~/.kiro/agents/casper.json` at startup and only overwrites while the on-disk copy still
-  hashes to Casper's stamp. kiro reads it at spawn, so changes need a restart *and* a new session.
+  hashes to Casper's stamp, or is kiro's own upgrade of that copy (a `kiroUpgrade` marker beside a
+  `.bak` with the stamp's hash). It must carry no `allowedTools` or `toolsSettings`: kiro V3 skips an
+  agent with either. kiro reads it at spawn, so changes need a restart *and* a new session.
 
 ## Install and restart
 

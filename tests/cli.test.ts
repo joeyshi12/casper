@@ -15,7 +15,7 @@ import {
   installAgentFile,
   type KiroAgent,
 } from '../server/src/cli/agentFile.js';
-import { mcpWiring } from '../server/src/cli/doctor.js';
+import { agentFormat, mcpWiring } from '../server/src/cli/doctor.js';
 import type { Command } from 'commander';
 import { buildProgram } from '../server/src/cli/program.js';
 import { handleMessage } from '../server/src/mcp/protocol.js';
@@ -164,6 +164,45 @@ describe('cli agent file', () => {
     assert.notEqual(fs.readFileSync(target, 'utf8'), 'superseded contents');
   });
 
+  /** What kiro's own agent upgrade does to the file: keeps the original as a backup and
+   *  writes a version with its marker. */
+  const upgradeLikeKiro = (backup: string) => {
+    const original = fs.readFileSync(target, 'utf8');
+    fs.writeFileSync(path.join(path.dirname(target), backup), original);
+    const upgraded = { ...JSON.parse(original), permissions: { rules: [] }, kiroUpgrade: { revision: 2 } };
+    fs.writeFileSync(target, JSON.stringify(upgraded, null, 2));
+  };
+
+  it("takes its file back after kiro's agent upgrade rewrote Casper's own copy", () => {
+    installAgentFile(home, data);
+    const ours = fs.readFileSync(target, 'utf8');
+    upgradeLikeKiro('casper.json.bak');
+    assert.equal(installAgentFile(home, data).action, 'updated');
+    assert.equal(fs.readFileSync(target, 'utf8'), ours);
+  });
+
+  it('finds the backup kiro numbers when one already exists', () => {
+    installAgentFile(home, data);
+    fs.writeFileSync(`${target}.bak`, 'an older backup');
+    upgradeLikeKiro('casper.json.bak.1');
+    assert.equal(installAgentFile(home, data).action, 'updated');
+  });
+
+  it('keeps an upgraded file whose original the user had edited', () => {
+    installAgentFile(home, data);
+    fs.writeFileSync(target, '{"name":"casper","description":"mine"}');
+    upgradeLikeKiro('casper.json.bak');
+    assert.equal(installAgentFile(home, data).action, 'kept-yours');
+    assert.match(fs.readFileSync(target, 'utf8'), /mine/);
+  });
+
+  it('does not take a file without the upgrade marker just because a backup matches', () => {
+    installAgentFile(home, data);
+    fs.copyFileSync(target, `${target}.bak`);
+    fs.writeFileSync(target, '{"name":"casper","description":"mine"}');
+    assert.equal(installAgentFile(home, data).action, 'kept-yours');
+  });
+
   it('replaces a symlink left by the old shell installer', () => {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.symlinkSync('/nonexistent/casper.json', target);
@@ -266,6 +305,15 @@ describe('pre-settings paths', () => {
   });
 });
 
+describe('doctor: kiro V3', () => {
+  it('flags an agent file kiro V3 would skip', () => {
+    const r = agentFormat(JSON.stringify({ name: 'casper', allowedTools: [], toolsSettings: {} }));
+    assert.equal(r.ok, false);
+    assert.match(r.detail, /allowedTools and toolsSettings/);
+    assert.equal(agentFormat('{oops').ok, false);
+  });
+});
+
 describe('doctor: casper mcp', () => {
   // The recorded path can outlive its install: npm replaces the directory on upgrade,
   // and a hand-edited agent file stops being rewritten.
@@ -352,6 +400,10 @@ describe('shipped agent config', () => {
     assert.equal(written.name, 'casper');
     assert.equal(written.prompt, prompt);
     assert.equal(written.includeMcpJson, true);
+    // kiro V3 skips an agent with either field as a kiro 2.x agent, and `agent validate`
+    // does not say so.
+    assert.ok(!('allowedTools' in written) && !('toolsSettings' in written), 'no kiro 2.x trust fields');
+    assert.deepEqual(agentFormat(JSON.stringify(written)), { ok: true, detail: 'in the kiro V3 format' });
 
     const kiro = spawnSync('kiro-cli', ['agent', 'validate', '--path', res.target], {
       encoding: 'utf8',

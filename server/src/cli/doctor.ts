@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { config } from '../config.js';
 import { readSettings } from './settings.js';
@@ -50,6 +51,23 @@ export function mcpWiring(
     return { ok: false, detail: `${script} is gone - delete the agent file and restart to rewrite it` };
   }
   return { ok: true, detail: script ?? `${command} ${args.join(' ')}` };
+}
+
+/** Whether kiro V3 will use the agent file: it skips one with kiro 2.x trust fields. */
+export function agentFormat(agentJson: string): { ok: boolean; detail: string } {
+  let agent: Record<string, unknown>;
+  try {
+    agent = JSON.parse(agentJson) as Record<string, unknown>;
+  } catch {
+    return { ok: false, detail: 'the agent file is not valid JSON' };
+  }
+  const v2Fields = ['allowedTools', 'toolsSettings'].filter((f) => f in agent);
+  return v2Fields.length === 0
+    ? { ok: true, detail: 'in the kiro V3 format' }
+    : {
+        ok: false,
+        detail: `has ${v2Fields.join(' and ')}, so kiro V3 skips it - delete the file and restart to rewrite it`,
+      };
 }
 
 function checks(): Check[] {
@@ -135,7 +153,7 @@ function checks(): Check[] {
         },
   );
 
-  const agent = path.join(config.kiroSessionsDir, '..', '..', 'agents', 'casper.json');
+  const agent = path.join(os.homedir(), '.kiro', 'agents', 'casper.json');
   const hasAgent = fs.existsSync(agent);
   out.push({
     ok: hasAgent,
@@ -144,7 +162,10 @@ function checks(): Check[] {
   });
 
   if (hasAgent) {
-    const wiring = mcpWiring(fs.readFileSync(agent, 'utf8'), which);
+    const json = fs.readFileSync(agent, 'utf8');
+    const format = agentFormat(json);
+    out.push({ ok: format.ok, name: 'agent format', detail: format.detail });
+    const wiring = mcpWiring(json, which);
     out.push({ ok: wiring.ok, name: 'casper mcp', detail: wiring.detail });
   }
 
