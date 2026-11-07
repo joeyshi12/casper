@@ -70,6 +70,12 @@ export function agentFormat(agentJson: string): { ok: boolean; detail: string } 
       };
 }
 
+/** The major version in `kiro-cli --version` output, e.g. 3 for "kiro-cli 3.1.0". */
+export function kiroMajor(versionOutput: string): number | undefined {
+  const m = /(\d+)\.\d+\.\d+/.exec(versionOutput);
+  return m ? Number(m[1]) : undefined;
+}
+
 function checks(): Check[] {
   const out: Check[] = [];
 
@@ -87,7 +93,12 @@ function checks(): Check[] {
     } catch {
       version = '(version unavailable)';
     }
-    out.push({ ok: true, name: 'kiro-cli', detail: `${version} at ${kiro}` });
+    const major = kiroMajor(version);
+    out.push(
+      major === undefined || major >= 3
+        ? { ok: true, name: 'kiro-cli', detail: `${version} at ${kiro}` }
+        : { ok: false, name: 'kiro-cli', detail: `${version} at ${kiro} - Casper needs kiro-cli 3.0 or later` },
+    );
   } else {
     out.push({
       ok: false,

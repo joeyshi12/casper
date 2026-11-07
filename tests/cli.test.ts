@@ -15,7 +15,7 @@ import {
   installAgentFile,
   type KiroAgent,
 } from '../server/src/cli/agentFile.js';
-import { agentFormat, mcpWiring } from '../server/src/cli/doctor.js';
+import { agentFormat, kiroMajor, mcpWiring } from '../server/src/cli/doctor.js';
 import type { Command } from 'commander';
 import { buildProgram } from '../server/src/cli/program.js';
 import { handleMessage } from '../server/src/mcp/protocol.js';
@@ -306,6 +306,12 @@ describe('pre-settings paths', () => {
 });
 
 describe('doctor: kiro V3', () => {
+  it('reads the major version from kiro-cli --version', () => {
+    assert.equal(kiroMajor('kiro-cli 3.1.0'), 3);
+    assert.equal(kiroMajor('kiro-cli 2.19.1'), 2);
+    assert.equal(kiroMajor('(version unavailable)'), undefined);
+  });
+
   it('flags an agent file kiro V3 would skip', () => {
     const r = agentFormat(JSON.stringify({ name: 'casper', allowedTools: [], toolsSettings: {} }));
     assert.equal(r.ok, false);

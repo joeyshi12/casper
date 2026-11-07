@@ -4,6 +4,8 @@ import split2 from 'split2';
 import {
   ACP_METHODS,
   type JsonRpcNotification,
+  type JsonRpcRequest,
+  type RequestPermissionParams,
   type SessionLoadParams,
   type SessionNewParams,
   type SessionNewResult,
@@ -16,12 +18,27 @@ import { AcpClient } from '../acp/AcpClient.js';
 
 interface KiroProcessOptions {
   cwd: string;
-  agent?: string;
-  model?: string;
 }
 
 // Trailing stderr lines kept for the exit message.
 const STDERR_KEEP = 8;
+
+// A compaction summarises the whole conversation, which can take minutes on a long one.
+const COMPACT_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * The answer to one session/request_permission. Casper runs turns unattended, as it did
+ * with `--trust-all-tools` before kiro V3 dropped that flag from `acp`, so it allows the
+ * call once. It never picks "always allow", which would write a rule that also applies
+ * outside Casper. With no allow option it rejects the call, or failing that cancels.
+ */
+export function permissionOutcome(params: RequestPermissionParams | undefined): {
+  outcome: { outcome: 'selected'; optionId: string } | { outcome: 'cancelled' };
+} {
+  const options = params?.options ?? [];
+  const pick = options.find((o) => o.kind === 'allow_once') ?? options.find((o) => o.kind === 'reject_once');
+  return pick ? { outcome: { outcome: 'selected', optionId: pick.optionId } } : { outcome: { outcome: 'cancelled' } };
+}
 
 // Owns one kiro-cli acp child and its ACP client, independent of any browser socket.
 export class KiroProcess extends EventEmitter {
@@ -30,14 +47,15 @@ export class KiroProcess extends EventEmitter {
   private readonly log: Logger;
   private disposed = false;
   private readonly recentStderr: string[] = [];
+  // kiro's optional methods, as advertised by initialize.
+  private extensionMethods = new Set<string>();
 
   constructor(opts: KiroProcessOptions, log: Logger) {
     super();
     this.log = log;
 
-    const args = ['acp', '--trust-all-tools'];
-    if (opts.agent) args.push('--agent', opts.agent);
-    if (opts.model) args.push('--model', opts.model);
+    // The agent and model are session inputs under V3, not launch flags.
+    const args = ['acp', '--agent-engine', 'v3'];
 
     this.log.info({ bin: config.kiroBin, args, cwd: opts.cwd }, 'spawning kiro-cli acp');
     this.child = spawn(config.kiroBin, args, {
@@ -52,12 +70,14 @@ export class KiroProcess extends EventEmitter {
       this.emit('notification', n);
     });
 
-    // Answer agent-initiated requests minimally so the turn never stalls. With
-    // --trust-all-tools kiro shouldn't ask for permission, but fs/terminal client
-    // requests can still arrive.
-    this.client.on('serverRequest', (req) => {
-      this.log.debug({ method: req.method }, 'acp: unhandled server request');
-      this.client.respond(req.id, {});
+    // Every request from kiro gets an answer, or the turn waiting on it stalls.
+    this.client.on('serverRequest', (req: JsonRpcRequest) => {
+      if (req.method === ACP_METHODS.requestPermission) {
+        this.client.respond(req.id, permissionOutcome(req.params as RequestPermissionParams | undefined));
+        return;
+      }
+      this.log.debug({ method: req.method }, 'acp: unsupported request from kiro');
+      this.client.respondError(req.id, -32601, `Method not found: ${req.method}`);
     });
 
     // Keep the tail of stderr: when kiro dies the reason is printed here.
@@ -96,9 +116,11 @@ export class KiroProcess extends EventEmitter {
     this.child.stdout.on('error', () => {});
   }
 
-  /** The ACP initialize handshake. kiro's reply is not used. */
+  /** The ACP initialize handshake. Keeps the optional methods kiro advertises. */
   async initialize(): Promise<void> {
-    await this.client.request(ACP_METHODS.initialize, {
+    const res = await this.client.request<{
+      agentCapabilities?: { _meta?: { kiro?: { extensionMethods?: unknown } } };
+    }>(ACP_METHODS.initialize, {
       protocolVersion: 1,
       clientCapabilities: {
         fs: { readTextFile: false, writeTextFile: false },
@@ -106,6 +128,10 @@ export class KiroProcess extends EventEmitter {
       },
       clientInfo: { name: 'casper', version: '0.5.0' },
     });
+    const methods = res?.agentCapabilities?._meta?.kiro?.extensionMethods;
+    this.extensionMethods = new Set(
+      Array.isArray(methods) ? methods.filter((m): m is string => typeof m === 'string') : [],
+    );
   }
 
   newSession(params: SessionNewParams): Promise<SessionNewResult> {
@@ -135,15 +161,19 @@ export class KiroProcess extends EventEmitter {
   }
 
   setModel(sessionId: string, modelId: string): Promise<unknown> {
-    return this.client.request(ACP_METHODS.sessionSetModel, { sessionId, modelId });
+    return this.client.request(ACP_METHODS.sessionSetConfigOption, {
+      sessionId,
+      configId: 'model',
+      value: modelId,
+    });
   }
 
-  execCommand(sessionId: string, command: string): Promise<unknown> {
-    // kiro expects { command: <name>, args }, no leading slash on the name.
-    return this.client.request(ACP_METHODS.commandsExecute, {
-      sessionId,
-      command: { command: command.replace(/^\//, ''), args: {} },
-    });
+  /** Summarises the conversation so far. Resolves once kiro has finished. */
+  compact(sessionId: string): Promise<unknown> {
+    if (!this.extensionMethods.has(ACP_METHODS.compact)) {
+      return Promise.reject(new Error('This kiro-cli does not offer compaction'));
+    }
+    return this.client.request(ACP_METHODS.compact, { sessionId }, COMPACT_TIMEOUT_MS);
   }
 
   /** Recent stderr from kiro, for attaching to a failure. */

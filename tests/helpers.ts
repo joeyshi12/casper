@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import type { SessionPromptResult } from '@casper/shared';
 import type { ManagedProcess } from '../server/src/session/SessionManager.js';
@@ -54,6 +57,8 @@ export interface FakeProcess extends ManagedProcess {
   /** Emit what kiro would have sent. */
   readonly bus: EventEmitter;
   readonly calls: string[];
+  /** The arguments of each call, in the same order as `calls`. */
+  readonly args: unknown[][];
   readonly disposed: () => boolean;
 }
 
@@ -68,69 +73,81 @@ export function fakeKiroProcess(
     /** The id kiro "assigns", so session-id adoption can be exercised. */
     sessionId?: string;
     currentModeId?: string;
+    availableModes?: { id: string; name: string }[];
+    /** The model kiro reports in its config options. */
+    modelId?: string;
     onPrompt?: () => Promise<SessionPromptResult>;
     onInitialize?: () => Promise<unknown>;
     /** Hold the shutdown open, so a reload can be observed mid-flight. */
     onDisposeAndWait?: () => Promise<void>;
+    onCompact?: () => Promise<unknown>;
   } = {},
 ): FakeProcess {
   const bus = new EventEmitter();
   const calls: string[] = [];
+  const args: unknown[][] = [];
   let disposed = false;
   const handshake = async () => ({
     sessionId: opts.sessionId ?? 'kiro-session',
     modes: {
-      availableModes: [{ id: 'casper', name: 'casper' }],
+      availableModes: opts.availableModes ?? [{ id: 'casper', name: 'casper' }],
       currentModeId: opts.currentModeId ?? 'casper',
     },
+    ...(opts.modelId ? { configOptions: [{ id: 'model', currentValue: opts.modelId }] } : {}),
   });
+  const log = (name: string, a: unknown[]) => {
+    calls.push(name);
+    args.push(a);
+  };
 
   return {
     bus,
     calls,
+    args,
     disposed: () => disposed,
     on(event: string, cb: (...args: never[]) => void) {
       return bus.on(event, cb as (...args: unknown[]) => void);
     },
     initialize: opts.onInitialize ?? (async () => ({})),
-    async newSession() {
-      calls.push('newSession');
+    async newSession(...a: unknown[]) {
+      log('newSession', a);
       return handshake();
     },
-    async loadSession() {
-      calls.push('loadSession');
+    async loadSession(...a: unknown[]) {
+      log('loadSession', a);
       return handshake();
     },
     // Recorded even when a test supplies its own onPrompt, so "which process got
     // prompted" is answerable - the reload race turns on exactly that.
-    async prompt() {
-      calls.push('prompt');
+    async prompt(...a: unknown[]) {
+      log('prompt', a);
       return opts.onPrompt
         ? opts.onPrompt()
         : ({ stopReason: 'end_turn' } as SessionPromptResult);
     },
     stderrTail: () => '',
-    cancel() {
-      calls.push('cancel');
+    cancel(...a: unknown[]) {
+      log('cancel', a);
     },
-    async setMode() {
-      calls.push('setMode');
+    async setMode(...a: unknown[]) {
+      log('setMode', a);
     },
-    async setModel() {
-      calls.push('setModel');
+    async setModel(...a: unknown[]) {
+      log('setModel', a);
     },
-    async execCommand() {
-      calls.push('execCommand');
+    async compact(...a: unknown[]) {
+      log('compact', a);
+      if (opts.onCompact) return opts.onCompact();
     },
     dispose() {
       disposed = true;
-      calls.push('dispose');
+      log('dispose', []);
     },
     async disposeAndWait() {
       disposed = true;
       // Recorded before the hook runs, so a test can see the reload has reached
       // shutdown while the hook still holds it there.
-      calls.push('disposeAndWait');
+      log('disposeAndWait', []);
       if (opts.onDisposeAndWait) await opts.onDisposeAndWait();
     },
   } as FakeProcess;
@@ -144,4 +161,58 @@ export async function waitFor(what: string, ok: () => boolean, timeoutMs = 2000)
     await new Promise((r) => setTimeout(r, 5));
   }
   assert.fail(`timed out waiting for ${what}`);
+}
+
+/** One line of a kiro V3 conversation file. */
+export interface V3Line {
+  id: string;
+  timestamp?: string;
+  payload: Record<string, unknown>;
+}
+
+/**
+ * Writes a session the way kiro V3 stores it, <sessions>/<workspace hash>/<id>/, and
+ * returns that directory. The shapes follow what kiro-cli 3.1 wrote.
+ */
+export function writeV3Session(
+  sessionsDir: string,
+  s: {
+    id: string;
+    cwd: string;
+    title?: string;
+    agentMode?: string;
+    modelId?: string;
+    createdAt?: string;
+    lastModifiedAt?: string;
+    messages?: V3Line[];
+    subExecutions?: Record<string, V3Line[]>;
+  },
+): string {
+  const workspace = crypto.createHash('sha256').update(s.cwd).digest('hex').slice(0, 16);
+  const dir = path.join(sessionsDir, workspace, s.id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'session.json'),
+    JSON.stringify(
+      {
+        schemaVersion: '1.0.0',
+        id: s.id,
+        title: s.title ?? 'New Session',
+        agentMode: s.agentMode ?? 'vibe',
+        workspacePaths: [s.cwd],
+        createdAt: s.createdAt ?? '2026-11-07T06:39:07.031Z',
+        lastModifiedAt: s.lastModifiedAt ?? '2026-11-07T06:39:15.621Z',
+        ...(s.modelId ? { modelId: s.modelId } : {}),
+      },
+      null,
+      2,
+    ),
+  );
+  const lines = (ls: V3Line[]) => ls.map((l) => JSON.stringify(l)).join('\n') + '\n';
+  if (s.messages) fs.writeFileSync(path.join(dir, 'messages.jsonl'), lines(s.messages));
+  for (const [subId, ls] of Object.entries(s.subExecutions ?? {})) {
+    fs.mkdirSync(path.join(dir, 'sub-executions'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'sub-executions', `${subId}.jsonl`), lines(ls));
+  }
+  return dir;
 }

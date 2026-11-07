@@ -75,7 +75,9 @@ export interface TranscriptMessage {
 /** A tool-call entry in a session transcript. */
 export interface TranscriptToolCall {
   id: string;
-  /** Canonical kiro tool name (shell/write/read/grep/todo_list). */
+  /** A tool name where one is known: `server/tool` for MCP, `invoke_sub_agent` for a
+   *  subagent, and kiro's own names in a V2 session's file. kiro V3 names none of its
+   *  built-in tools, which are told apart by kind and input. */
   name?: string;
   title: string;
   kind?: string;

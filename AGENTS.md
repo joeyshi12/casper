@@ -70,8 +70,8 @@ npm run typecheck              # all workspaces
 
 - Verify with the project's own commands, and say which ones you ran.
 - Keep new filesystem routes inside the `config.fileRoot` check.
-- Treat any new network-reachable route as needing auth: Casper launches kiro with
-  `--trust-all-tools`, so access to it is equivalent to a shell on the machine.
+- Treat any new network-reachable route as needing auth: Casper allows every tool call kiro
+  asks permission for, so access to it is equivalent to a shell on the machine.
 
 **Ask first**
 
@@ -93,14 +93,21 @@ npm run typecheck              # all workspaces
 
 ## Architecture notes
 
-- **Sessions live in kiro's files**, `~/.kiro/sessions/cli/<id>.{json,jsonl}`. `casper.db` holds only
-  what kiro doesn't: `chats` (the session binding plus title and cwd overrides), `logins`,
-  `message_attachments`, `subagent_links`, and `turn_endings` (turns that failed or were stopped,
-  of which kiro keeps only what it had finished). kiro creates both files at `session/new` but
-  leaves the `.jsonl` empty until the first prompt is written, and **deletes both** when a session that never ran one
-  exits — so a brand-new session legitimately ends up with no file (see `isGhost` in
-  `SessionManager`). An empty `.jsonl` also means kiro will refuse `session/load` with "Session not
-  found", which is what `hasRecordedTurns` gates a reload on.
+- **Sessions live in kiro's files.** kiro V3 keeps each in `~/.kiro/sessions/<hash of the first
+  cwd>/<id>/` (`session.json`, `messages.jsonl`, and `sub-executions/<id>.jsonl` per subagent).
+  `casper.db` holds only what kiro doesn't: `chats` (the session binding plus title and cwd
+  overrides), `logins`, `message_attachments`, `subagent_links`, and `turn_endings` (turns that
+  failed or were stopped, of which kiro keeps only what it had finished). kiro 2.x kept
+  `~/.kiro/sessions/cli/<id>.{json,jsonl}`; V3 copies one into its own store, same id, the first
+  time it loads it, so `kiroFiles.ts` reads the V3 copy when there is one and the 2.x files when
+  not. `session/load` of an id kiro has neither of starts an empty session under it, which is
+  what `isLoadable` guards a reload against.
+- **kiro V3 over ACP** (`KiroProcess`): the agent and model are `_meta.kiro` session inputs, not
+  launch flags, and V3 rejects the 2.x flags. On load kiro applies the model but keeps the
+  session's own mode, so `restoreMode` sets it back. Every request kiro sends needs an answer:
+  permissions are allowed once, anything else gets a JSON-RPC error. kiro sends a subagent's own
+  updates on the parent's session tagged `_meta.kiro.agentSubtaskId`; they update the subagent's
+  row and must not reach the chat's event log.
 - **One title resolver**, `shared/src/titles.ts`. Don't add a second precedence chain. The same goes
   for a session summary: `summaryOf` in `SessionManager` is the only place one is assembled.
 - Store updates go through `applyEvent`, which drops anything whose `seq` it has seen. Work that

@@ -1,11 +1,10 @@
 import { db } from './db.js';
 
 /**
- * Which parent tool call and stage name a child session belongs to, learned live from
- * `_kiro.dev/subagent/list_update` and otherwise lost once the parent chat's process is
- * gone (see SubagentTracker, which lives only in memory). Written once a child's
- * toolCallId is known, so a restart or process eviction does not reset the subagent
- * card in the chat back to showing nothing.
+ * Which parent tool call and stage name a kiro 2.x child session belongs to. kiro 2.x
+ * did not record it, so an earlier Casper saved what it learned live, and title matching
+ * (subagentFallbackMatch.ts) saves what it finds, so it runs once per child. kiro V3
+ * records each subagent's call in the parent's own file instead.
  */
 export class SubagentLinkStore {
   /** Record (or correct) one child's link. Idempotent: a repeat call with the same

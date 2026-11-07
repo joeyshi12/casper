@@ -1,5 +1,6 @@
-// ACP (Agent Client Protocol) types for kiro-cli, transported as
-// newline-delimited JSON-RPC 2.0 over stdio. See https://kiro.dev/docs/cli/acp/
+// ACP (Agent Client Protocol) types for kiro-cli's V3 engine (`kiro-cli acp
+// --agent-engine v3`), transported as newline-delimited JSON-RPC 2.0 over stdio.
+// See https://kiro.dev/docs/cli/v3/acp-migration/
 
 export type JsonRpcId = number | string;
 
@@ -53,10 +54,18 @@ export function isJsonRpcNotification(
   return !('id' in m) && 'method' in m;
 }
 
+/** The session inputs kiro reads from `_meta.kiro` on session/new and session/load.
+ *  On load, kiro applies `modelId` but keeps the session's own mode. */
+export interface KiroSessionInputs {
+  modeId?: string;
+  modelId?: string;
+}
+
 // kiro spawns MCP servers itself from its config, so Casper always passes [].
 export interface SessionNewParams {
   cwd: string;
   mcpServers: never[];
+  _meta?: { kiro: KiroSessionInputs };
 }
 
 /** An ACP "mode", which maps to a selectable kiro-cli agent. */
@@ -75,15 +84,24 @@ export interface SessionModes {
   availableModes: AgentMode[];
 }
 
+/** One advertised session setting, such as the model (`id: 'model'`). */
+export interface SessionConfigOption {
+  id: string;
+  currentValue?: string;
+  [key: string]: unknown;
+}
+
 export interface SessionNewResult {
   sessionId: string;
   modes: SessionModes;
+  configOptions?: SessionConfigOption[];
 }
 
 export interface SessionLoadParams {
   sessionId: string;
   cwd: string;
   mcpServers: never[];
+  _meta?: { kiro: KiroSessionInputs };
 }
 
 export interface TextContentBlock {
@@ -138,6 +156,21 @@ export interface ToolCallContent {
   [key: string]: unknown;
 }
 
+/** What kiro attaches under `_meta.kiro` on a session update. */
+export interface KiroUpdateMeta {
+  /** 'agent-subtask' on the tool call that starts a subagent. */
+  kind?: string;
+  /** On the call that starts a subagent, that subagent's id. On any other update, the
+   *  subagent the update came from: kiro sends a subagent's own updates on its parent's
+   *  session. */
+  agentSubtaskId?: string;
+  /** The server of an MCP tool call. */
+  serverName?: string;
+  /** Set on updates kiro replays during session/load. */
+  replay?: boolean;
+  [key: string]: unknown;
+}
+
 /** ACP-standard tool_call update - an MCP/agent tool invocation. */
 export interface ToolCallUpdate {
   sessionUpdate: 'tool_call';
@@ -147,6 +180,7 @@ export interface ToolCallUpdate {
   status?: ToolCallStatus;
   rawInput?: unknown;
   content?: ToolCallContent[];
+  _meta?: { kiro?: KiroUpdateMeta };
 }
 
 /** Progress/result update for a previously-announced tool call. */
@@ -157,6 +191,23 @@ export interface ToolCallProgressUpdate {
   title?: string;
   content?: ToolCallContent[];
   rawOutput?: unknown;
+  _meta?: { kiro?: KiroUpdateMeta };
+}
+
+/** kiro's session-level events, told apart by `_meta.kiro.kind`: `context_usage`
+ *  carries `usagePercentage`, and `summarization_started`, `summarization_completed`
+ *  (with `conversationSummary`) and `summarization_failed` report a compaction. */
+export interface SessionInfoUpdate {
+  sessionUpdate: 'session_info_update';
+  title?: string;
+  _meta?: {
+    kiro?: {
+      kind?: string;
+      usagePercentage?: number;
+      conversationSummary?: string;
+      [key: string]: unknown;
+    };
+  };
 }
 
 export type SessionUpdate =
@@ -164,6 +215,7 @@ export type SessionUpdate =
   | AgentThoughtChunkUpdate
   | ToolCallUpdate
   | ToolCallProgressUpdate
+  | SessionInfoUpdate
   | { sessionUpdate: string; [key: string]: unknown };
 
 export interface SessionUpdateParams {
@@ -171,54 +223,51 @@ export interface SessionUpdateParams {
   update: SessionUpdate;
 }
 
-// _kiro.dev/* extension notifications (observability + commands)
+/** The name Casper gives the tool call that starts a subagent. */
+export const SUBAGENT_TOOL = 'invoke_sub_agent';
 
-export interface MeteringUsage {
-  value: number;
-  unit: string;
-  unitPlural: string;
+/**
+ * The tool name Casper uses for a kiro tool call, live or read back from kiro's files.
+ * kiro sends no stable name for its built-in tools, so those stay unnamed and are told
+ * apart by kind and input. An MCP tool is named `server/tool`; kiro titles it
+ * `@server/tool`.
+ */
+export function kiroToolName(call: { title?: string; _meta?: { kiro?: KiroUpdateMeta } }): string | undefined {
+  const meta = call._meta?.kiro;
+  if (meta?.kind === 'agent-subtask') return SUBAGENT_TOOL;
+  const server = meta?.serverName;
+  if (!server) return undefined;
+  const title = call.title ?? '';
+  const prefix = `@${server}/`;
+  return `${server}/${title.startsWith(prefix) ? title.slice(prefix.length) : title}`;
 }
+
+/** One choice kiro offers on session/request_permission. */
+export interface PermissionOption {
+  optionId: string;
+  name?: string;
+  kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always' | string;
+}
+
+export interface RequestPermissionParams {
+  sessionId: string;
+  toolCall?: { toolCallId?: string; title?: string };
+  options?: PermissionOption[];
+}
+
+// The shapes Casper records for context usage and compaction. kiro reports both as
+// `session_info_update`; SessionManager maps them into these.
 
 export interface KiroMetadataParams {
   sessionId: string;
   contextUsagePercentage?: number;
-  meteringUsage?: MeteringUsage[];
-  turnDurationMs?: number;
 }
 
-/** Progress of a /compact operation (`_kiro.dev/compaction/status`). */
 export interface KiroCompactionStatusParams {
   sessionId: string;
   status: { type: 'started' | 'completed' | 'failed' | string };
   /** The conversation summary once compaction completes (null while running). */
   summary: string | null;
-}
-
-export type SubagentStatusType = 'working' | 'terminated' | string;
-
-/** One running or finished subagent, as reported by `_kiro.dev/subagent/list_update`. */
-export interface KiroSubagentInfo {
-  sessionId: string;
-  /** Matches the `subagent` tool call's `rawInput.stages[].name`. */
-  sessionName: string;
-  agentName?: string;
-  initialQuery?: string;
-  status: { type: SubagentStatusType; message?: string };
-  group?: string;
-  role?: string;
-  dependsOn?: string[];
-  hasLoop?: boolean;
-  loopIteration?: number;
-  loopMaxIterations?: number;
-  createdAtMs?: number;
-}
-
-/** The full set of subagents running or just finished on this kiro-cli process.
- *  Carries no sessionId of its own; one kiro-cli child per chat means it's always
- *  that chat's. */
-export interface KiroSubagentListUpdateParams {
-  subagents: KiroSubagentInfo[];
-  pendingStages: unknown[];
 }
 
 export const ACP_METHODS = {
@@ -228,17 +277,12 @@ export const ACP_METHODS = {
   sessionPrompt: 'session/prompt',
   sessionCancel: 'session/cancel',
   sessionSetMode: 'session/set_mode',
-  sessionSetModel: 'session/set_model',
+  sessionSetConfigOption: 'session/set_config_option',
   sessionUpdate: 'session/update',
-  commandsExecute: '_kiro.dev/commands/execute',
+  requestPermission: 'session/request_permission',
+  compact: '_kiro/session/compact',
 } as const;
 
-export const KIRO_NOTIFICATIONS = {
-  metadata: '_kiro.dev/metadata',
-  subagentListUpdate: '_kiro.dev/subagent/list_update',
-  mcpServerInitialized: '_kiro.dev/mcp/server_initialized',
-  mcpServerInitFailure: '_kiro.dev/mcp/server_init_failure',
-  commandsAvailable: '_kiro.dev/commands/available',
-  mcpOauthRequest: '_kiro.dev/mcp/oauth_request',
-  compactionStatus: '_kiro.dev/compaction/status',
-} as const;
+/** kiro's notice that a requested agent could not be used, so the session fell back to
+ *  another one. */
+export const KIRO_AGENT_NOT_FOUND = '_kiro/customAgent/not_found';

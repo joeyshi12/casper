@@ -4,13 +4,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Fastify from 'fastify';
-import type { SubagentDetailResponse, SubagentListResponse } from '@casper/shared';
+import type { CasperEvent, SubagentDetailResponse, SubagentListResponse } from '@casper/shared';
 import { config } from '../server/src/config.js';
 import { closeDb } from '../server/src/session/db.js';
 import { SessionManager } from '../server/src/session/SessionManager.js';
 import { SubagentTracker } from '../server/src/session/SubagentTracker.js';
+import { SubagentLinkStore } from '../server/src/session/subagentLinks.js';
 import { registerSubagentRoutes } from '../server/src/routes/subagents.js';
-import { noopLogger, fakeKiroProcess, type FakeProcess } from './helpers.js';
+import { noopLogger, fakeKiroProcess, writeV3Session, type FakeProcess } from './helpers.js';
 
 // Fixtures go in temp directories, never the developer's real ~/.kiro. Set before any
 // suite runs; node's test runner gives each file its own process, so this cannot leak
@@ -20,6 +21,9 @@ const sessionsCwd = fs.realpathSync(
   fs.mkdtempSync(path.join(os.tmpdir(), 'casper-subagents-cwd-')),
 );
 (config as { kiroSessionsDir: string }).kiroSessionsDir = sessionsDir;
+// Where kiro 2.x kept its files, child sessions included.
+const v2Dir = path.join(sessionsDir, 'cli');
+fs.mkdirSync(v2Dir, { recursive: true });
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-data-subagents-'));
 (config as { casperDataDir: string }).casperDataDir = dataDir;
@@ -32,54 +36,50 @@ after(() => {
   fs.rmSync(sessionsCwd, { recursive: true, force: true });
 });
 
-// A session/update carrying a subagent's own tool_call, same shape kiro sends.
+// A session/update carrying a tool_call, same shape kiro sends.
 const childToolCall = (sessionId: string, toolCallId: string, title: string) => ({
   method: 'session/update',
   params: { sessionId, update: { sessionUpdate: 'tool_call', toolCallId, title } },
 });
 
-// The subagent tool call on the parent, as kiro tags it with _meta.kiro.toolName.
-const subagentCall = (
-  parentSessionId: string,
-  toolCallId: string,
-  stages: { name: string; depends_on?: string[] }[],
-) => ({
+// The tool call kiro V3 starts a subagent with, on the parent's session.
+const invokeCall = (sessionId: string, toolCallId: string, subagentId: string, name: string) => ({
   method: 'session/update',
   params: {
-    sessionId: parentSessionId,
+    sessionId,
     update: {
       sessionUpdate: 'tool_call',
       toolCallId,
-      title: 'Spawning agent crew',
-      rawInput: { task: 'test', mode: 'blocking', stages },
-      _meta: { kiro: { toolName: 'subagent' } },
+      title: `Sub-agent: ${name}`,
+      kind: 'other',
+      status: 'pending',
+      rawInput: { name, prompt: 'Run ls and report back.', explanation: 'why', contextFiles: [] },
+      _meta: { kiro: { kind: 'agent-subtask', agentSubtaskId: subagentId } },
     },
   },
 });
 
-const subagentCallFinished = (parentSessionId: string, toolCallId: string) => ({
+const invokeEnded = (sessionId: string, toolCallId: string, subagentId: string, status: 'completed' | 'failed') => ({
   method: 'session/update',
   params: {
-    sessionId: parentSessionId,
-    update: { sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' },
+    sessionId,
+    update: {
+      sessionUpdate: 'tool_call_update',
+      toolCallId,
+      status,
+      rawOutput: 'The answer.',
+      _meta: { kiro: { kind: 'agent-subtask', agentSubtaskId: subagentId } },
+    },
   },
 });
 
-const listUpdate = (
-  subagents: { sessionId: string; sessionName: string; status: 'working' | 'terminated' }[],
-) => ({
-  method: '_kiro.dev/subagent/list_update',
-  params: {
-    subagents: subagents.map((s) => ({
-      sessionId: s.sessionId,
-      sessionName: s.sessionName,
-      status: { type: s.status, message: s.status === 'working' ? 'Running' : undefined },
-      dependsOn: [],
-      createdAtMs: Date.now(),
-    })),
-    pendingStages: [],
-  },
+// One of the subagent's own updates. kiro sends them on the parent's session, tagged.
+const fromSubagent = (sessionId: string, subagentId: string, update: Record<string, unknown>) => ({
+  method: 'session/update',
+  params: { sessionId, update: { ...update, _meta: { kiro: { agentSubtaskId: subagentId } } } },
 });
+
+const kinds = (events: CasperEvent[]) => events.map((e) => e.payload.kind);
 
 describe('SessionManager.wire: notifications are routed by sessionId', () => {
   let mgr: SessionManager;
@@ -121,151 +121,258 @@ describe('SessionManager.wire: notifications are routed by sessionId', () => {
   });
 });
 
-describe('SessionManager.wire: subagent list_update updates the tracker and is pushed as an event', () => {
+describe('SessionManager.wire: a kiro V3 subagent', () => {
   let mgr: SessionManager;
   let proc: FakeProcess;
   let chatId: string;
-  let parentSessionId: string;
+  let sid: string;
 
   before(async () => {
-    proc = fakeKiroProcess({ sessionId: 'parent-tracker-test' });
+    proc = fakeKiroProcess({ sessionId: 'parent-v3-wire' });
     mgr = new SessionManager(noopLogger(), { spawn: () => proc });
     const detail = await mgr.createChat({ cwd: sessionsCwd });
     chatId = detail.summary.chatId;
-    parentSessionId = detail.summary.sessionId!;
+    sid = detail.summary.sessionId!;
   });
   after(() => mgr.disposeAll());
 
-  it('a list_update with no sessionId still updates this chat (one kiro-cli child per chat)', async () => {
-    proc.bus.emit(
-      'notification',
-      subagentCall(parentSessionId, 'subagent-call-1', [{ name: 'stage_one' }, { name: 'stage_two' }]),
-    );
-    proc.bus.emit(
-      'notification',
-      listUpdate([{ sessionId: 'child-1', sessionName: 'stage_one', status: 'working' }]),
-    );
-    const subs = await mgr.getSubagents(chatId);
-    const stageOne = subs.find((s) => s.sessionId === 'child-1');
-    assert.equal(stageOne?.status, 'working');
-    assert.equal(stageOne?.toolCallId, 'subagent-call-1');
-  });
-
-  it('a list_update is also recorded as a subagents_changed event, for live push', async () => {
+  it('the call that starts it is a tool call in the chat, and adds a working row', async () => {
     const store = mgr.getStore(chatId)!;
-    const { events } = store.getSince(0);
-    const found = events.some((e) => e.payload.kind === 'subagents_changed');
-    assert.ok(found, 'expected a subagents_changed event in the store');
+    const head = store.head();
+    proc.bus.emit('notification', invokeCall(sid, 'invoke-1', 'sub-1', 'context-gatherer'));
+    assert.deepEqual(kinds(store.getSince(head).events), ['subagents_changed', 'session_update']);
+    const [row] = await mgr.getSubagents(chatId);
+    assert.equal(row?.sessionId, 'sub-1');
+    assert.equal(row?.stageName, 'context-gatherer');
+    assert.equal(row?.toolCallId, 'invoke-1');
+    assert.equal(row?.status, 'working');
   });
 
-  it('a stage not yet started shows up as pending, with what it waits for', async () => {
+  it("keeps the subagent's own updates out of the chat, showing its latest step on the row", async () => {
+    const store = mgr.getStore(chatId)!;
+    const head = store.head();
     proc.bus.emit(
       'notification',
-      subagentCall(parentSessionId, 'subagent-call-2', [
-        { name: 'alpha' },
-        { name: 'beta', depends_on: ['alpha'] },
-      ]),
+      fromSubagent(sid, 'sub-1', { sessionUpdate: 'tool_call', toolCallId: 'sub-call-1', title: 'List workspace files', kind: 'execute' }),
     );
     proc.bus.emit(
       'notification',
-      listUpdate([
-        { sessionId: 'child-1', sessionName: 'stage_one', status: 'working' },
-        { sessionId: 'child-alpha', sessionName: 'alpha', status: 'working' },
-      ]),
+      fromSubagent(sid, 'sub-1', { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'the subagent talking' } }),
     );
-    const subs = await mgr.getSubagents(chatId);
-    const beta = subs.find((s) => s.stageName === 'beta');
-    assert.equal(beta?.status, 'pending');
-    assert.equal(beta?.activity, 'Waits for alpha');
-    // Started subagents are listed before a pending one, regardless of name order.
-    assert.equal(subs.at(-1)?.stageName, 'beta');
+    assert.deepEqual(kinds(store.getSince(head).events), ['subagents_changed'], 'only the row changed');
+    assert.equal((await mgr.getSubagents(chatId))[0]?.activity, 'List workspace files');
   });
 
-  it('finishing the subagent call stops matching its stage names against new children', async () => {
-    proc.bus.emit('notification', subagentCallFinished(parentSessionId, 'subagent-call-2'));
-    proc.bus.emit(
-      'notification',
-      listUpdate([
-        { sessionId: 'child-1', sessionName: 'stage_one', status: 'working' },
-        { sessionId: 'child-alpha', sessionName: 'alpha', status: 'terminated' },
-        { sessionId: 'child-beta', sessionName: 'beta', status: 'working' },
-      ]),
-    );
-    const subs = await mgr.getSubagents(chatId);
-    const beta = subs.find((s) => s.sessionId === 'child-beta');
-    // The call that declared "beta" has finished, so a fresh "beta" (a new, unrelated
-    // call reusing the name) resolves to no toolCallId rather than the stale one.
-    assert.equal(beta?.toolCallId, undefined);
+  it('marks the row done when the call that started it ends', async () => {
+    proc.bus.emit('notification', invokeEnded(sid, 'invoke-1', 'sub-1', 'completed'));
+    const [row] = await mgr.getSubagents(chatId);
+    assert.equal(row?.status, 'completed');
+    assert.equal(row?.activity, undefined);
+  });
+
+  it('a failed call marks its subagent failed', async () => {
+    proc.bus.emit('notification', invokeCall(sid, 'invoke-2', 'sub-2', 'general-task-execution'));
+    proc.bus.emit('notification', invokeEnded(sid, 'invoke-2', 'sub-2', 'failed'));
+    const row = (await mgr.getSubagents(chatId)).find((r) => r.sessionId === 'sub-2');
+    assert.equal(row?.status, 'failed');
   });
 });
 
 describe('SubagentTracker (unit)', () => {
-  it('a started stage resolves its toolCallId from the call that declared it', () => {
-    const t = new SubagentTracker();
-    t.callStarted('call-1', [{ name: 'a' }, { name: 'b' }]);
-    t.apply([{ sessionId: 's1', sessionName: 'a', status: { type: 'working' }, dependsOn: [] }]);
-    assert.equal(t.get('s1')?.toolCallId, 'call-1');
+  let clock = 0;
+  const tick = () => new Date(Date.UTC(2026, 0, 1, 0, 0, clock++)).toISOString();
+
+  it('lists subagents in the order they started, as copies', () => {
+    const t = new SubagentTracker(tick);
+    assert.equal(t.started('s2', 'call-2', 'second'), true);
+    assert.equal(t.started('s1', 'call-1', 'first'), true);
+    assert.equal(t.started('s1', 'call-1', 'first'), false, 'a repeat changes nothing');
+    assert.deepEqual(t.list().map((s) => s.sessionId), ['s2', 's1']);
+    t.list()[0]!.status = 'failed';
+    assert.equal(t.get('s2')?.status, 'working', 'a listed row is a copy');
   });
 
-  it('a terminated subagent is reported as completed', () => {
-    const t = new SubagentTracker();
-    t.callStarted('call-1', [{ name: 'a' }]);
-    t.apply([{ sessionId: 's1', sessionName: 'a', status: { type: 'working' }, dependsOn: [] }]);
-    t.apply([{ sessionId: 's1', sessionName: 'a', status: { type: 'terminated' }, dependsOn: [] }]);
+  it('reports a change only when the activity moves on', () => {
+    const t = new SubagentTracker(tick);
+    t.started('s1', 'call-1', 'a');
+    assert.equal(t.progressed('s1'), false, 'a chunk with no new step');
+    assert.equal(t.progressed('s1', 'Reading x.ts'), true);
+    assert.equal(t.progressed('s1', 'Reading x.ts'), false);
+    assert.equal(t.progressed('unknown', 'Reading x.ts'), false);
+  });
+
+  it('finishes the subagent its call started, and only while it works', () => {
+    const t = new SubagentTracker(tick);
+    t.started('s1', 'call-1', 'a');
+    assert.equal(t.finished('call-9', true), false);
+    assert.equal(t.finished('call-1', true), true);
     assert.equal(t.get('s1')?.status, 'completed');
+    assert.equal(t.finished('call-1', false), false, 'an ended subagent stays as it ended');
+    assert.equal(t.progressed('s1', 'late'), false);
   });
 
-  it('listForCall adds a pending row for a declared stage with no session yet', () => {
-    const t = new SubagentTracker();
-    t.callStarted('call-1', [{ name: 'a' }, { name: 'b', depends_on: ['a'] }]);
-    t.apply([{ sessionId: 's1', sessionName: 'a', status: { type: 'working' }, dependsOn: [] }]);
-    const rows = t.listForCall('call-1');
-    const pending = rows.find((r) => r.stageName === 'b');
-    assert.equal(pending?.status, 'pending');
-    assert.equal(pending?.activity, 'Waits for a');
-  });
-
-  it('a repeated stage name across two calls resolves to whichever call is still open', () => {
-    const t = new SubagentTracker();
-    t.callStarted('call-1', [{ name: 'fix' }]);
-    t.apply([{ sessionId: 's1', sessionName: 'fix', status: { type: 'terminated' }, dependsOn: [] }]);
-    t.callFinished('call-1');
-    t.callStarted('call-2', [{ name: 'fix' }]);
-    t.apply([{ sessionId: 's2', sessionName: 'fix', status: { type: 'working' }, dependsOn: [] }]);
-    assert.equal(t.get('s1')?.toolCallId, 'call-1');
-    assert.equal(t.get('s2')?.toolCallId, 'call-2');
-  });
-
-  it('turnEnded marks working subagents stopped and drops pending stages', () => {
-    const t = new SubagentTracker();
-    t.callStarted('call-1', [{ name: 'a' }, { name: 'b', depends_on: ['a'] }, { name: 'c' }]);
-    t.apply([
-      { sessionId: 's1', sessionName: 'a', status: { type: 'working' }, dependsOn: [] },
-      { sessionId: 's3', sessionName: 'c', status: { type: 'terminated' }, dependsOn: [] },
-    ]);
+  it('turnEnded marks working subagents stopped', () => {
+    const t = new SubagentTracker(tick);
+    t.started('s1', 'call-1', 'a');
+    t.started('s2', 'call-2', 'b');
+    t.finished('call-2', true);
     assert.equal(t.turnEnded(), true);
     assert.equal(t.get('s1')?.status, 'failed');
     assert.equal(t.get('s1')?.activity, 'Stopped');
-    assert.equal(t.get('s3')?.status, 'completed', 'a finished subagent keeps its status');
-    assert.deepEqual(
-      t.listForCall('call-1').map((r) => r.stageName),
-      ['a', 'c'],
-      'the stage that never started is no longer listed as pending',
-    );
+    assert.equal(t.get('s2')?.status, 'completed', 'a finished subagent keeps its status');
     assert.equal(t.turnEnded(), false, 'nothing left to change');
   });
 });
 
-describe('GET /api/chats/:id/subagents and /:subagentId', () => {
+/** The lines kiro V3 writes in the parent's messages.jsonl for one subagent. */
+const subagentLines = (toolCallId: string, subId: string, name: string, done?: 'success' | 'error') => [
+  {
+    id: `${toolCallId}-sub-agent-start`,
+    timestamp: '2026-11-07T06:42:55.661Z',
+    payload: { type: 'sub_agent_start', subSessionId: subId, subAgentName: name, prompt: 'Run ls and report back.' },
+  },
+  ...(done
+    ? [
+        {
+          id: `${toolCallId}-sub-agent-complete`,
+          timestamp: '2026-11-07T06:43:01.171Z',
+          payload: { type: 'sub_agent_complete', subSessionId: subId, response: 'out.txt', status: done },
+        },
+      ]
+    : []),
+];
+
+describe('GET /api/chats/:id/subagents and /:subagentId (kiro V3)', () => {
   let mgr: SessionManager;
   let proc: FakeProcess;
+  let app: Awaited<ReturnType<typeof Fastify>>;
+  let chatId: string;
+  let sid: string;
+  let otherChatId: string;
+
+  before(async () => {
+    proc = fakeKiroProcess({ sessionId: 'sess_parent-route' });
+    let n = 0;
+    mgr = new SessionManager(noopLogger(), {
+      spawn: () => (n++ === 0 ? proc : fakeKiroProcess({ sessionId: 'sess_other-chat' })),
+    });
+    const detail = await mgr.createChat({ cwd: sessionsCwd });
+    chatId = detail.summary.chatId;
+    sid = detail.summary.sessionId!;
+    otherChatId = (await mgr.createChat({ cwd: sessionsCwd })).summary.chatId;
+
+    writeV3Session(sessionsDir, {
+      id: sid,
+      cwd: sessionsCwd,
+      messages: [
+        { id: 'u1', timestamp: '2026-11-07T06:42:49.000Z', payload: { type: 'user', content: 'go' } },
+        ...subagentLines('invoke-done', 'sub-done', 'semantic_reviewer', 'success'),
+        ...subagentLines('invoke-running', 'sub-running', 'context-gatherer'),
+      ],
+      subExecutions: {
+        'sub-done': [
+          {
+            id: 'run_command_1-call',
+            timestamp: '2026-11-07T06:42:58.000Z',
+            payload: { type: 'tool_call', toolCallId: 'run_command_1', toolName: 'execute_bash', kind: 'execute', title: 'List files', args: { command: 'ls' }, status: 'completed' },
+          },
+          {
+            id: 'run_command_1-result',
+            timestamp: '2026-11-07T06:42:58.000Z',
+            payload: { type: 'tool_result', toolCallId: 'run_command_1', content: 'Output:\nout.txt', success: true },
+          },
+          {
+            id: 'say-1',
+            timestamp: '2026-11-07T06:43:00.000Z',
+            payload: { type: 'assistant', operationType: 'Say', content: 'The directory holds out.txt.' },
+          },
+        ],
+      },
+    });
+    writeV3Session(sessionsDir, {
+      id: 'sess_other-chat',
+      cwd: sessionsCwd,
+      messages: subagentLines('invoke-other', 'sub-other', 'reviewer', 'success'),
+      subExecutions: { 'sub-other': [] },
+    });
+
+    app = Fastify();
+    registerSubagentRoutes(app, mgr);
+    await app.ready();
+  });
+  after(async () => {
+    await app.close();
+    mgr.disposeAll();
+  });
+
+  const list = async () =>
+    ((await app.inject({ method: 'GET', url: `/api/chats/${chatId}/subagents` })).json() as SubagentListResponse).subagents;
+
+  it("lists the subagents kiro recorded in the session's file", async () => {
+    const rows = await list();
+    assert.deepEqual(
+      rows.map((r) => [r.sessionId, r.stageName, r.toolCallId, r.status, r.activity]),
+      [
+        ['sub-done', 'semantic_reviewer', 'invoke-done', 'completed', undefined],
+        ['sub-running', 'context-gatherer', 'invoke-running', 'failed', 'Stopped'],
+      ],
+    );
+  });
+
+  it('a live row wins over a recorded one that has not ended', async () => {
+    proc.bus.emit('notification', invokeCall(sid, 'invoke-running', 'sub-running', 'context-gatherer'));
+    proc.bus.emit('notification', invokeCall(sid, 'invoke-done', 'sub-done', 'semantic_reviewer'));
+    const rows = await list();
+    assert.equal(rows.find((r) => r.sessionId === 'sub-running')?.status, 'working');
+    assert.equal(rows.find((r) => r.sessionId === 'sub-done')?.status, 'completed', 'the file says it ended');
+  });
+
+  it("serves a subagent's transcript from its sub-executions file", async () => {
+    const res = await app.inject({ method: 'GET', url: `/api/chats/${chatId}/subagents/sub-done` });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as SubagentDetailResponse;
+    assert.equal(body.subagent.stageName, 'semantic_reviewer');
+    assert.equal(body.subagent.status, 'completed');
+    const tool = body.transcript.find((it) => it.type === 'tool_call');
+    assert.ok(tool?.type === 'tool_call');
+    assert.deepEqual(tool.tool.input, { command: 'ls' });
+    assert.equal(tool.tool.kind, 'execute');
+    assert.equal(tool.tool.name, undefined, "kiro V3's built-in tools stay unnamed");
+    const last = body.transcript.at(-1);
+    assert.ok(last?.type === 'message' && last.message.text === 'The directory holds out.txt.');
+  });
+
+  it('serves a live subagent before kiro has written its file', async () => {
+    const res = await app.inject({ method: 'GET', url: `/api/chats/${chatId}/subagents/sub-running` });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as SubagentDetailResponse;
+    assert.equal(body.subagent.status, 'working');
+    assert.deepEqual(body.transcript, []);
+  });
+
+  it("404s for another chat's subagent, and for an id that could leave the directory", async () => {
+    for (const id of ['sub-other', '..', '..%2F..%2Fsess_other-chat']) {
+      const res = await app.inject({ method: 'GET', url: `/api/chats/${chatId}/subagents/${id}` });
+      assert.equal(res.statusCode, 404, id);
+    }
+    const own = await app.inject({ method: 'GET', url: `/api/chats/${otherChatId}/subagents/sub-other` });
+    assert.equal(own.statusCode, 200, 'the other chat can read its own');
+  });
+
+  it('404s for an unknown chat', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/chats/no-such-chat/subagents' });
+    assert.equal(res.statusCode, 404);
+  });
+});
+
+describe('GET /api/chats/:id/subagents/:subagentId (kiro 2.x child sessions)', () => {
+  let mgr: SessionManager;
   let app: Awaited<ReturnType<typeof Fastify>>;
   let chatId: string;
   let parentSessionId: string;
 
   before(async () => {
-    proc = fakeKiroProcess({ sessionId: 'parent-route-test' });
-    mgr = new SessionManager(noopLogger(), { spawn: () => proc });
+    mgr = new SessionManager(noopLogger(), { spawn: () => fakeKiroProcess({ sessionId: 'parent-route-test' }) });
     const detail = await mgr.createChat({ cwd: sessionsCwd });
     chatId = detail.summary.chatId;
     parentSessionId = detail.summary.sessionId!;
@@ -274,10 +381,9 @@ describe('GET /api/chats/:id/subagents and /:subagentId', () => {
     registerSubagentRoutes(app, mgr);
     await app.ready();
 
-    // A real child session on disk, with its own task text and one recorded turn,
-    // so hydrateTranscript has something to read.
+    // A child session kiro 2.x wrote, with its own task text and one recorded turn.
     fs.writeFileSync(
-      path.join(sessionsDir, 'child-on-disk.json'),
+      path.join(v2Dir, 'child-on-disk.json'),
       JSON.stringify({
         session_id: 'child-on-disk',
         title: 'read sprite-dom.ts',
@@ -289,7 +395,7 @@ describe('GET /api/chats/:id/subagents and /:subagentId', () => {
       }),
     );
     fs.writeFileSync(
-      path.join(sessionsDir, 'child-on-disk.jsonl'),
+      path.join(v2Dir, 'child-on-disk.jsonl'),
       JSON.stringify({
         version: 'v1',
         kind: 'AssistantMessage',
@@ -301,7 +407,7 @@ describe('GET /api/chats/:id/subagents and /:subagentId', () => {
     await app.close();
     mgr.disposeAll();
     for (const ext of ['json', 'jsonl']) {
-      fs.rmSync(path.join(sessionsDir, `child-on-disk.${ext}`), { force: true });
+      fs.rmSync(path.join(v2Dir, `child-on-disk.${ext}`), { force: true });
     }
   });
 
@@ -312,22 +418,6 @@ describe('GET /api/chats/:id/subagents and /:subagentId', () => {
     const child = body.subagents.find((s) => s.sessionId === 'child-on-disk');
     assert.ok(child, 'expected the on-disk child session to be listed');
     assert.equal(child?.status, 'completed');
-  });
-
-  it('merges a live tracker row over the on-disk one', async () => {
-    proc.bus.emit(
-      'notification',
-      subagentCall(parentSessionId, 'live-call-1', [{ name: 'reading' }]),
-    );
-    proc.bus.emit(
-      'notification',
-      listUpdate([{ sessionId: 'child-on-disk', sessionName: 'reading', status: 'working' }]),
-    );
-    const res = await app.inject({ method: 'GET', url: `/api/chats/${chatId}/subagents` });
-    const body = res.json() as SubagentListResponse;
-    const child = body.subagents.find((s) => s.sessionId === 'child-on-disk');
-    assert.equal(child?.status, 'working', 'the live row must win over the on-disk default');
-    assert.equal(child?.stageName, 'reading');
   });
 
   it('fetches a subagent transcript hydrated from its own jsonl', async () => {
@@ -349,11 +439,6 @@ describe('GET /api/chats/:id/subagents and /:subagentId', () => {
     });
     assert.equal(res.statusCode, 404);
   });
-
-  it('404s for an unknown chat', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/chats/no-such-chat/subagents' });
-    assert.equal(res.statusCode, 404);
-  });
 });
 
 describe('a subagent link survives a restart (a fresh SessionManager, same casper.db)', () => {
@@ -369,21 +454,13 @@ describe('a subagent link survives a restart (a fresh SessionManager, same caspe
     chatId = detail.summary.chatId;
     parentSessionId = detail.summary.sessionId!;
 
-    // Live link learned the normal way: a subagent call declares its stage, then
-    // list_update reports a child session running it.
-    proc.bus.emit(
-      'notification',
-      subagentCall(parentSessionId, 'restart-call-1', [{ name: 'stage_one' }]),
-    );
-    proc.bus.emit(
-      'notification',
-      listUpdate([{ sessionId: 'restart-child-1', sessionName: 'stage_one', status: 'terminated' }]),
-    );
+    // The link Casper saved while kiro 2.x ran the subagent.
+    new SubagentLinkStore().record('restart-child-1', parentSessionId, 'restart-call-1', 'stage_one');
 
     // The child's own file, as it would be on disk once kiro finished with it -
     // this is what a restart has to go on, since the tracker above is gone.
     fs.writeFileSync(
-      path.join(sessionsDir, 'restart-child-1.json'),
+      path.join(v2Dir, 'restart-child-1.json'),
       JSON.stringify({
         session_id: 'restart-child-1',
         title: 'stage_one',
@@ -398,7 +475,7 @@ describe('a subagent link survives a restart (a fresh SessionManager, same caspe
   after(() => {
     mgr.disposeAll();
     for (const ext of ['json', 'jsonl']) {
-      fs.rmSync(path.join(sessionsDir, `restart-child-1.${ext}`), { force: true });
+      fs.rmSync(path.join(v2Dir, `restart-child-1.${ext}`), { force: true });
     }
   });
 
@@ -427,7 +504,7 @@ describe('a title-matched subagent is saved, so the parent transcript is read on
     parentSessionId = detail.summary.sessionId!;
     // The parent's own record of the subagent call: the only place the stage name is.
     fs.writeFileSync(
-      path.join(sessionsDir, `${parentSessionId}.jsonl`),
+      path.join(v2Dir, `${parentSessionId}.jsonl`),
       JSON.stringify({
         version: 'v1',
         kind: 'AssistantMessage',
@@ -441,7 +518,7 @@ describe('a title-matched subagent is saved, so the parent transcript is read on
       }) + '\n',
     );
     fs.writeFileSync(
-      path.join(sessionsDir, 'fallback-child-1.json'),
+      path.join(v2Dir, 'fallback-child-1.json'),
       JSON.stringify({
         session_id: 'fallback-child-1',
         title: 'Port the input layer.\n\nPort scripts/input.gd.',
@@ -455,15 +532,15 @@ describe('a title-matched subagent is saved, so the parent transcript is read on
   });
   after(() => {
     mgr.disposeAll();
-    fs.rmSync(path.join(sessionsDir, 'fallback-child-1.json'), { force: true });
-    fs.rmSync(path.join(sessionsDir, `${parentSessionId}.jsonl`), { force: true });
+    fs.rmSync(path.join(v2Dir, 'fallback-child-1.json'), { force: true });
+    fs.rmSync(path.join(v2Dir, `${parentSessionId}.jsonl`), { force: true });
   });
 
   it('still resolves the child after the parent transcript is gone', async () => {
     const first = (await mgr.getSubagents(chatId)).find((s) => s.sessionId === 'fallback-child-1');
     assert.equal(first?.toolCallId, 'fallback-call-1', 'matched by title the first time');
 
-    fs.rmSync(path.join(sessionsDir, `${parentSessionId}.jsonl`), { force: true });
+    fs.rmSync(path.join(v2Dir, `${parentSessionId}.jsonl`), { force: true });
     const fresh = new SessionManager(noopLogger(), { spawn: () => fakeKiroProcess() });
     const again = (await fresh.getSubagents(chatId)).find((s) => s.sessionId === 'fallback-child-1');
     assert.equal(again?.toolCallId, 'fallback-call-1', 'the match came from the db, not a second read');
@@ -482,12 +559,12 @@ describe('a finished subagent ends when its transcript was last written', () => 
     const proc = fakeKiroProcess({ sessionId: 'parent-mtime-test' });
     const mgr = new SessionManager(noopLogger(), { spawn: () => proc });
     const detail = await mgr.createChat({ cwd: sessionsCwd });
-    fs.writeFileSync(path.join(sessionsDir, 'mtime-child.json'), JSON.stringify({
+    fs.writeFileSync(path.join(v2Dir, 'mtime-child.json'), JSON.stringify({
       session_id: 'mtime-child', title: 't', cwd: sessionsCwd,
       created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:04.000Z',
       parent_session_id: detail.summary.sessionId, session_created_reason: 'subagent',
     }));
-    const jsonl = path.join(sessionsDir, 'mtime-child.jsonl');
+    const jsonl = path.join(v2Dir, 'mtime-child.jsonl');
     fs.writeFileSync(jsonl, '');
     const end = new Date('2026-01-01T00:12:00.000Z');
     fs.utimesSync(jsonl, end, end);
@@ -496,6 +573,6 @@ describe('a finished subagent ends when its transcript was last written', () => 
     const listed = (await mgr.getSubagents(detail.summary.chatId)).find((s) => s.sessionId === 'mtime-child');
     assert.equal(listed?.updatedAt, end.toISOString());
     mgr.disposeAll();
-    for (const ext of ['json', 'jsonl']) fs.rmSync(path.join(sessionsDir, `mtime-child.${ext}`), { force: true });
+    for (const ext of ['json', 'jsonl']) fs.rmSync(path.join(v2Dir, `mtime-child.${ext}`), { force: true });
   });
 });

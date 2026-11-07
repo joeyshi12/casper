@@ -20,6 +20,9 @@ const sessionsCwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'caspe
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-endings-data-'));
 (config as { kiroSessionsDir: string }).kiroSessionsDir = sessionsDir;
 (config as { casperDataDir: string }).casperDataDir = dataDir;
+// Where kiro 2.x kept its files, which kiro V3 still reads a session from until it loads it.
+const v2Dir = path.join(sessionsDir, 'cli');
+fs.mkdirSync(v2Dir, { recursive: true });
 
 after(() => {
   closeDb();
@@ -109,7 +112,7 @@ describe('TurnRecorder', () => {
 
 describe('hydrateTranscript with stored turn endings', () => {
   const sid = 'endings-hydrate';
-  const file = path.join(sessionsDir, `${sid}.jsonl`);
+  const file = path.join(v2Dir, `${sid}.jsonl`);
   const T = 1_800_000_000; // seconds, as kiro stamps a record
 
   const prompt = (id: string, text: string, ts: number) => ({
@@ -292,7 +295,7 @@ describe('a turn that ends badly, through SessionManager', () => {
   beforeEach(() => {
     // The file kiro keeps for a session, so a manager that has never seen it can open the chat.
     fs.writeFileSync(
-      path.join(sessionsDir, 'endings-live.json'),
+      path.join(v2Dir, 'endings-live.json'),
       JSON.stringify({
         session_id: 'endings-live',
         title: 'kiro title',
