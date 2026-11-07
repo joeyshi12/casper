@@ -187,6 +187,38 @@ describe("reading kiro V3's session store", () => {
     assert.equal(call.tool.name, 'subagent');
   });
 
+  it('shows once the turns kiro wrote again after a compaction it copied in from kiro 2.x', async () => {
+    writeV3Session(sessionsDir, {
+      id: 'imported-compaction',
+      cwd: sessionsCwd,
+      messages: [
+        line({ type: 'user', content: 'first' }, undefined, 'p1'),
+        line({ type: 'assistant', operationType: 'Say', content: 'one' }, undefined, 'a1-text-0'),
+        line({ type: 'tool_call', toolCallId: 't1', toolName: 'shell', args: { command: 'ls' }, status: 'completed' }, undefined, 'a1-tool-0'),
+        line({ type: 'tool_result', toolCallId: 't1', content: 'x', success: true }, undefined, 't1-result'),
+        line({ type: 'tombstone', kind: 'summarization' }, undefined, 'tombstone_summarize_s1'),
+        line({ type: 'assistant', operationType: 'Summary', content: 'A summary.' }, undefined, 'summary_s1'),
+        // What kiro 2.x kept in context past the summary, written again.
+        line({ type: 'user', content: 'first' }, undefined, 'compact_s1_p1'),
+        line({ type: 'assistant', operationType: 'Say', content: 'one' }, undefined, 'compact_s1_a1-text-0'),
+        line({ type: 'tool_call', toolCallId: 't1', toolName: 'shell', args: { command: 'ls' }, status: 'completed' }, undefined, 'compact_s1_a1-tool-0'),
+        line({ type: 'tool_result', toolCallId: 't1', content: 'x', success: true }, undefined, 'compact_s1_t1-result'),
+        line({ type: 'user', content: 'after' }, undefined, 'p2'),
+        // An id of that shape that repeats nothing is kept.
+        line({ type: 'user', content: 'unmatched' }, undefined, 'compact_s1_never-seen'),
+      ],
+    });
+    assert.deepEqual(texts(await hydrateTranscript('imported-compaction')), [
+      'user:first',
+      'assistant:one',
+      'tool:shell:completed',
+      'compaction',
+      'user:after',
+      'user:unmatched',
+    ]);
+    assert.equal(await promptCount('imported-compaction'), 3, 'attachments stay on the prompts they were sent with');
+  });
+
   it('puts attachments and stored turn endings back, with millisecond timestamps', async () => {
     const at = (s: number) => new Date(Date.UTC(2026, 10, 7, 6, 0, s)).toISOString();
     writeV3Session(sessionsDir, {

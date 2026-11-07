@@ -193,6 +193,18 @@ function resultBlocks(content: unknown): unknown[] {
 const START_SUFFIX = '-sub-agent-start';
 const COMPLETE_SUFFIX = '-sub-agent-complete';
 
+/**
+ * Whether a line repeats one already read. When kiro copies in a kiro 2.x session, after
+ * each compaction it writes again the turns 2.x had kept in context, each under the id
+ * `compact_<summary id>_<id of the line it repeats>`.
+ */
+function isCompactionCopy(id: string, seen: Set<string>): boolean {
+  if (!id.startsWith('compact_')) return false;
+  const rest = id.slice('compact_'.length);
+  const sep = rest.indexOf('_');
+  return sep >= 0 && seen.has(rest.slice(sep + 1));
+}
+
 /** The entries of one V3 conversation file: a session's messages.jsonl or a subagent's
  *  sub-executions file. Timestamps are milliseconds. kiro records no tool call for the
  *  call that starts a subagent, only its start and its result, so one is built from
@@ -210,7 +222,11 @@ export async function readV3Entries(file: string): Promise<TranscriptEntry[]> {
     out.push({ kind: 'item', item: { type: 'tool_call', tool } });
   };
 
+  const seen = new Set<string>();
   for (const line of await readLines(file)) {
+    const copy = isCompactionCopy(line.id, seen);
+    seen.add(line.id);
+    if (copy) continue;
     const p = line.payload;
     const parsed = line.timestamp ? Date.parse(line.timestamp) : NaN;
     const at = Number.isNaN(parsed) ? undefined : parsed;
