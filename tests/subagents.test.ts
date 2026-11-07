@@ -9,7 +9,6 @@ import { config } from '../server/src/config.js';
 import { closeDb } from '../server/src/session/db.js';
 import { SessionManager } from '../server/src/session/SessionManager.js';
 import { SubagentTracker } from '../server/src/session/SubagentTracker.js';
-import { SubagentLinkStore } from '../server/src/session/subagentLinks.js';
 import { registerSubagentRoutes } from '../server/src/routes/subagents.js';
 import { noopLogger, fakeKiroProcess, writeV3Session, type FakeProcess } from './helpers.js';
 
@@ -21,9 +20,6 @@ const sessionsCwd = fs.realpathSync(
   fs.mkdtempSync(path.join(os.tmpdir(), 'casper-subagents-cwd-')),
 );
 (config as { kiroSessionsDir: string }).kiroSessionsDir = sessionsDir;
-// Where kiro 2.x kept its files, child sessions included.
-const v2Dir = path.join(sessionsDir, 'cli');
-fs.mkdirSync(v2Dir, { recursive: true });
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-data-subagents-'));
 (config as { casperDataDir: string }).casperDataDir = dataDir;
@@ -42,7 +38,7 @@ const childToolCall = (sessionId: string, toolCallId: string, title: string) => 
   params: { sessionId, update: { sessionUpdate: 'tool_call', toolCallId, title } },
 });
 
-// The tool call kiro V3 starts a subagent with, on the parent's session.
+// The tool call kiro starts a subagent with, on the parent's session.
 const invokeCall = (sessionId: string, toolCallId: string, subagentId: string, name: string) => ({
   method: 'session/update',
   params: {
@@ -121,7 +117,7 @@ describe('SessionManager.wire: notifications are routed by sessionId', () => {
   });
 });
 
-describe('SessionManager.wire: a kiro V3 subagent', () => {
+describe('SessionManager.wire: a subagent', () => {
   let mgr: SessionManager;
   let proc: FakeProcess;
   let chatId: string;
@@ -242,7 +238,7 @@ const subagentLines = (toolCallId: string, subId: string, name: string, done?: '
     : []),
 ];
 
-describe('GET /api/chats/:id/subagents and /:subagentId (kiro V3)', () => {
+describe('GET /api/chats/:id/subagents and /:subagentId', () => {
   let mgr: SessionManager;
   let proc: FakeProcess;
   let app: Awaited<ReturnType<typeof Fastify>>;
@@ -362,217 +358,5 @@ describe('GET /api/chats/:id/subagents and /:subagentId (kiro V3)', () => {
   it('404s for an unknown chat', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/chats/no-such-chat/subagents' });
     assert.equal(res.statusCode, 404);
-  });
-});
-
-describe('GET /api/chats/:id/subagents/:subagentId (kiro 2.x child sessions)', () => {
-  let mgr: SessionManager;
-  let app: Awaited<ReturnType<typeof Fastify>>;
-  let chatId: string;
-  let parentSessionId: string;
-
-  before(async () => {
-    mgr = new SessionManager(noopLogger(), { spawn: () => fakeKiroProcess({ sessionId: 'parent-route-test' }) });
-    const detail = await mgr.createChat({ cwd: sessionsCwd });
-    chatId = detail.summary.chatId;
-    parentSessionId = detail.summary.sessionId!;
-
-    app = Fastify();
-    registerSubagentRoutes(app, mgr);
-    await app.ready();
-
-    // A child session kiro 2.x wrote, with its own task text and one recorded turn.
-    fs.writeFileSync(
-      path.join(v2Dir, 'child-on-disk.json'),
-      JSON.stringify({
-        session_id: 'child-on-disk',
-        title: 'read sprite-dom.ts',
-        cwd: sessionsCwd,
-        created_at: '2026-01-01T00:00:00.000Z',
-        updated_at: '2026-01-01T00:05:00.000Z',
-        parent_session_id: parentSessionId,
-        session_created_reason: 'subagent',
-      }),
-    );
-    fs.writeFileSync(
-      path.join(v2Dir, 'child-on-disk.jsonl'),
-      JSON.stringify({
-        version: 'v1',
-        kind: 'AssistantMessage',
-        data: { message_id: 'm1', content: [{ kind: 'text', data: 'done reading' }] },
-      }) + '\n',
-    );
-  });
-  after(async () => {
-    await app.close();
-    mgr.disposeAll();
-    for (const ext of ['json', 'jsonl']) {
-      fs.rmSync(path.join(v2Dir, `child-on-disk.${ext}`), { force: true });
-    }
-  });
-
-  it('lists the on-disk child session', async () => {
-    const res = await app.inject({ method: 'GET', url: `/api/chats/${chatId}/subagents` });
-    assert.equal(res.statusCode, 200);
-    const body = res.json() as SubagentListResponse;
-    const child = body.subagents.find((s) => s.sessionId === 'child-on-disk');
-    assert.ok(child, 'expected the on-disk child session to be listed');
-    assert.equal(child?.status, 'completed');
-  });
-
-  it('fetches a subagent transcript hydrated from its own jsonl', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: `/api/chats/${chatId}/subagents/child-on-disk`,
-    });
-    assert.equal(res.statusCode, 200);
-    const body = res.json() as SubagentDetailResponse;
-    assert.equal(body.subagent.sessionId, 'child-on-disk');
-    const text = body.transcript.find((it) => it.type === 'message');
-    assert.ok(text, 'expected a hydrated message item');
-  });
-
-  it('404s for a session id that is not this chat’s child', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: `/api/chats/${chatId}/subagents/not-a-child-of-this-chat`,
-    });
-    assert.equal(res.statusCode, 404);
-  });
-});
-
-describe('a subagent link survives a restart (a fresh SessionManager, same casper.db)', () => {
-  let mgr: SessionManager;
-  let proc: FakeProcess;
-  let chatId: string;
-  let parentSessionId: string;
-
-  before(async () => {
-    proc = fakeKiroProcess({ sessionId: 'parent-restart-test' });
-    mgr = new SessionManager(noopLogger(), { spawn: () => proc });
-    const detail = await mgr.createChat({ cwd: sessionsCwd });
-    chatId = detail.summary.chatId;
-    parentSessionId = detail.summary.sessionId!;
-
-    // The link Casper saved while kiro 2.x ran the subagent.
-    new SubagentLinkStore().record('restart-child-1', parentSessionId, 'restart-call-1', 'stage_one');
-
-    // The child's own file, as it would be on disk once kiro finished with it -
-    // this is what a restart has to go on, since the tracker above is gone.
-    fs.writeFileSync(
-      path.join(v2Dir, 'restart-child-1.json'),
-      JSON.stringify({
-        session_id: 'restart-child-1',
-        title: 'stage_one',
-        cwd: sessionsCwd,
-        created_at: '2026-01-01T00:00:00.000Z',
-        updated_at: '2026-01-01T00:05:00.000Z',
-        parent_session_id: parentSessionId,
-        session_created_reason: 'subagent',
-      }),
-    );
-  });
-  after(() => {
-    mgr.disposeAll();
-    for (const ext of ['json', 'jsonl']) {
-      fs.rmSync(path.join(v2Dir, `restart-child-1.${ext}`), { force: true });
-    }
-  });
-
-  it('a second manager, with no live tracker for this chat, still resolves the link', async () => {
-    // Nothing adopts parent-restart-test's old process; this stands in for the server
-    // having restarted, or the chat's process having been evicted from the pool.
-    const freshMgr = new SessionManager(noopLogger(), { spawn: () => fakeKiroProcess() });
-    const subs = await freshMgr.getSubagents(chatId);
-    const child = subs.find((s) => s.sessionId === 'restart-child-1');
-    assert.ok(child, 'expected the on-disk child to be listed');
-    assert.equal(child?.toolCallId, 'restart-call-1', 'the tool call id must come from the db, not memory');
-    assert.equal(child?.stageName, 'stage_one');
-    freshMgr.disposeAll();
-  });
-});
-
-describe('a title-matched subagent is saved, so the parent transcript is read once', () => {
-  let mgr: SessionManager;
-  let chatId: string;
-  let parentSessionId: string;
-
-  before(async () => {
-    mgr = new SessionManager(noopLogger(), { spawn: () => fakeKiroProcess({ sessionId: 'parent-fallback-test' }) });
-    const detail = await mgr.createChat({ cwd: sessionsCwd });
-    chatId = detail.summary.chatId;
-    parentSessionId = detail.summary.sessionId!;
-    // The parent's own record of the subagent call: the only place the stage name is.
-    fs.writeFileSync(
-      path.join(v2Dir, `${parentSessionId}.jsonl`),
-      JSON.stringify({
-        version: 'v1',
-        kind: 'AssistantMessage',
-        data: {
-          message_id: 'p1',
-          content: [{ kind: 'toolUse', data: { toolUseId: 'fallback-call-1', name: 'subagent', input: {
-            task: 'Port the input layer.',
-            stages: [{ name: 'input_layer', prompt_template: '{task}\n\nPort scripts/input.gd.' }],
-          } } }],
-        },
-      }) + '\n',
-    );
-    fs.writeFileSync(
-      path.join(v2Dir, 'fallback-child-1.json'),
-      JSON.stringify({
-        session_id: 'fallback-child-1',
-        title: 'Port the input layer.\n\nPort scripts/input.gd.',
-        cwd: sessionsCwd,
-        created_at: '2026-01-01T00:00:00.000Z',
-        updated_at: '2026-01-01T00:05:00.000Z',
-        parent_session_id: parentSessionId,
-        session_created_reason: 'subagent',
-      }),
-    );
-  });
-  after(() => {
-    mgr.disposeAll();
-    fs.rmSync(path.join(v2Dir, 'fallback-child-1.json'), { force: true });
-    fs.rmSync(path.join(v2Dir, `${parentSessionId}.jsonl`), { force: true });
-  });
-
-  it('still resolves the child after the parent transcript is gone', async () => {
-    const first = (await mgr.getSubagents(chatId)).find((s) => s.sessionId === 'fallback-child-1');
-    assert.equal(first?.toolCallId, 'fallback-call-1', 'matched by title the first time');
-
-    fs.rmSync(path.join(v2Dir, `${parentSessionId}.jsonl`), { force: true });
-    const fresh = new SessionManager(noopLogger(), { spawn: () => fakeKiroProcess() });
-    const again = (await fresh.getSubagents(chatId)).find((s) => s.sessionId === 'fallback-child-1');
-    assert.equal(again?.toolCallId, 'fallback-call-1', 'the match came from the db, not a second read');
-    assert.equal(again?.stageName, 'input_layer');
-    fresh.disposeAll();
-  });
-
-  it('serves the transcript of a child without listing every subagent', async () => {
-    const res = await mgr.getSubagentDetail(chatId, 'fallback-child-1');
-    assert.equal(res.subagent.stageName, 'input_layer');
-  });
-});
-
-describe('a finished subagent ends when its transcript was last written', () => {
-  it('uses the .jsonl mtime, since the .json stops updating early', async () => {
-    const proc = fakeKiroProcess({ sessionId: 'parent-mtime-test' });
-    const mgr = new SessionManager(noopLogger(), { spawn: () => proc });
-    const detail = await mgr.createChat({ cwd: sessionsCwd });
-    fs.writeFileSync(path.join(v2Dir, 'mtime-child.json'), JSON.stringify({
-      session_id: 'mtime-child', title: 't', cwd: sessionsCwd,
-      created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:04.000Z',
-      parent_session_id: detail.summary.sessionId, session_created_reason: 'subagent',
-    }));
-    const jsonl = path.join(v2Dir, 'mtime-child.jsonl');
-    fs.writeFileSync(jsonl, '');
-    const end = new Date('2026-01-01T00:12:00.000Z');
-    fs.utimesSync(jsonl, end, end);
-    const res = await mgr.getSubagentDetail(detail.summary.chatId, 'mtime-child');
-    assert.equal(res.subagent.updatedAt, end.toISOString());
-    const listed = (await mgr.getSubagents(detail.summary.chatId)).find((s) => s.sessionId === 'mtime-child');
-    assert.equal(listed?.updatedAt, end.toISOString());
-    mgr.disposeAll();
-    for (const ext of ['json', 'jsonl']) fs.rmSync(path.join(v2Dir, `mtime-child.${ext}`), { force: true });
   });
 });

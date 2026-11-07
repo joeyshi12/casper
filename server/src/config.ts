@@ -164,8 +164,7 @@ export const config = {
   /** Filesystem root the file endpoints are confined to. Defaults to /; narrow it
    *  to keep authenticated users out of system files such as /etc or SSH keys. */
   fileRoot: path.resolve(setting('CASPER_FILE_ROOT', 'fileRoot', '/')),
-  /** kiro's session store. V3 keeps one directory per workspace in here, and kiro 2.x
-   *  kept its files in `cli/`. */
+  /** kiro's session store, one directory per workspace. */
   kiroSessionsDir: path.resolve(
     setting(
       'CASPER_KIRO_SESSIONS_DIR',

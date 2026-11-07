@@ -13,15 +13,10 @@ interface StageInput {
   name: string;
 }
 
-/** The subagents a call starts: one named by kiro V3's `invoke_sub_agent`, or the
- *  stages of a kiro 2.x `subagent` call. */
+/** The subagent a call starts, named in its input. */
 function stagesOf(tool: ToolCallView): StageInput[] {
-  const input = tool.input as { name?: unknown; stages?: unknown } | undefined;
-  if (typeof input?.name === 'string') return [{ name: input.name }];
-  if (!input || !Array.isArray(input.stages)) return [];
-  return input.stages.filter(
-    (s): s is StageInput => typeof s === 'object' && s !== null && typeof (s as StageInput).name === 'string',
-  );
+  const input = tool.input as { name?: unknown } | undefined;
+  return typeof input?.name === 'string' ? [{ name: input.name }] : [];
 }
 
 export function elapsedSeconds(subagent: Pick<SubagentSummary, 'status' | 'createdAt' | 'updatedAt'>): number {

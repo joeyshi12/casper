@@ -76,8 +76,8 @@ export interface TranscriptMessage {
 export interface TranscriptToolCall {
   id: string;
   /** A tool name where one is known: `server/tool` for MCP, `invoke_sub_agent` for a
-   *  subagent, and kiro's own names in a V2 session's file. kiro V3 names none of its
-   *  built-in tools, which are told apart by kind and input. */
+   *  subagent, and kiro 2.x's names on calls kiro copied in from a 2.x session. kiro names
+   *  none of its own built-in tools, which are told apart by kind and input. */
   name?: string;
   title: string;
   kind?: string;

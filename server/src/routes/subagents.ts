@@ -2,10 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import type { SubagentDetailResponse, SubagentListResponse } from '@casper/shared';
 import type { SessionManager } from '../session/SessionManager.js';
 
-// The subagents a chat started. Reachable only under the chat they belong to: a kiro V3
-// subagent is read from under the chat's own session directory, and a kiro 2.x child's
-// parent_session_id is checked against the chat's session, so one chat's id can't be
-// used to read another chat's subagent transcript.
+// The subagents a chat started. Reachable only under the chat they belong to: a subagent
+// is read from under the chat's own session directory, so one chat's id can't be used to
+// read another chat's subagent transcript.
 export function registerSubagentRoutes(
   app: FastifyInstance,
   manager: SessionManager,

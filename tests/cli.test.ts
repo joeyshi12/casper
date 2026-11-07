@@ -164,45 +164,6 @@ describe('cli agent file', () => {
     assert.notEqual(fs.readFileSync(target, 'utf8'), 'superseded contents');
   });
 
-  /** What kiro's own agent upgrade does to the file: keeps the original as a backup and
-   *  writes a version with its marker. */
-  const upgradeLikeKiro = (backup: string) => {
-    const original = fs.readFileSync(target, 'utf8');
-    fs.writeFileSync(path.join(path.dirname(target), backup), original);
-    const upgraded = { ...JSON.parse(original), permissions: { rules: [] }, kiroUpgrade: { revision: 2 } };
-    fs.writeFileSync(target, JSON.stringify(upgraded, null, 2));
-  };
-
-  it("takes its file back after kiro's agent upgrade rewrote Casper's own copy", () => {
-    installAgentFile(home, data);
-    const ours = fs.readFileSync(target, 'utf8');
-    upgradeLikeKiro('casper.json.bak');
-    assert.equal(installAgentFile(home, data).action, 'updated');
-    assert.equal(fs.readFileSync(target, 'utf8'), ours);
-  });
-
-  it('finds the backup kiro numbers when one already exists', () => {
-    installAgentFile(home, data);
-    fs.writeFileSync(`${target}.bak`, 'an older backup');
-    upgradeLikeKiro('casper.json.bak.1');
-    assert.equal(installAgentFile(home, data).action, 'updated');
-  });
-
-  it('keeps an upgraded file whose original the user had edited', () => {
-    installAgentFile(home, data);
-    fs.writeFileSync(target, '{"name":"casper","description":"mine"}');
-    upgradeLikeKiro('casper.json.bak');
-    assert.equal(installAgentFile(home, data).action, 'kept-yours');
-    assert.match(fs.readFileSync(target, 'utf8'), /mine/);
-  });
-
-  it('does not take a file without the upgrade marker just because a backup matches', () => {
-    installAgentFile(home, data);
-    fs.copyFileSync(target, `${target}.bak`);
-    fs.writeFileSync(target, '{"name":"casper","description":"mine"}');
-    assert.equal(installAgentFile(home, data).action, 'kept-yours');
-  });
-
   it('replaces a symlink left by the old shell installer', () => {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.symlinkSync('/nonexistent/casper.json', target);

@@ -1,5 +1,5 @@
-// The `subagent` tool call renders as one line that opens onto a list of its subagents,
-// each row opening in place onto that subagent's own task and transcript. Rendered in a
+// The `invoke_sub_agent` call renders as one line that opens onto its subagent's row,
+// the row opening in place onto that subagent's own task and transcript. Rendered in a
 // DOM the same way tests/transcript-dom.test.ts renders Transcript: jsdom computes no
 // layout, so this proves the wiring (fetch on open, not before; the websocket event
 // updating the list; a row opening its own transcript), not paint or geometry.
@@ -21,19 +21,16 @@ let api: Any;
 let root: Any;
 let host: HTMLElement;
 
+// The call kiro starts a subagent with: one subagent, named in its input.
 const subagentTool = (status: ToolCallView['status'] = 'in_progress'): ToolCallView =>
   ({
     id: 'call-1',
-    title: 'subagent',
-    name: 'subagent',
+    title: 'Sub-agent: map_server',
+    name: 'invoke_sub_agent',
+    kind: 'other',
     status,
     content: [],
-    input: {
-      stages: [
-        { name: 'map_server', prompt_template: 'Map server/src.' },
-        { name: 'map_web', prompt_template: 'Map web/src.' },
-      ],
-    },
+    input: { name: 'map_server', prompt: 'Map server/src.', explanation: 'why', contextFiles: [] },
   }) as unknown as ToolCallView;
 
 const summary = (over: Partial<SubagentSummary>): SubagentSummary => ({
@@ -94,7 +91,8 @@ describe('the subagent tool call (rendered in a DOM)', () => {
     detailCalls = [];
     api.subagents = async (chatId: string) => {
       subagentsCalls.push(chatId);
-      return { subagents: [summary({ status: 'working' }), summary({ sessionId: 'child-2', stageName: 'map_web', status: 'pending', activity: 'Waits for map_server', createdAt: '', updatedAt: '' })] };
+      // The chat's list: this call's subagent, and another call's, which this card leaves out.
+      return { subagents: [summary({ status: 'working' }), summary({ sessionId: 'child-2', stageName: 'map_web', toolCallId: 'call-2' })] };
     };
     api.subagentDetail = async (_chatId: string, subagentId: string) => {
       detailCalls.push(subagentId);
@@ -128,13 +126,12 @@ describe('the subagent tool call (rendered in a DOM)', () => {
     assert.equal(pipelineLine()!.getAttribute('aria-expanded'), 'true');
   });
 
-  it('shows one row per subagent with its stage name and activity', async () => {
+  it("shows its own subagent's row with its name and activity, and no other call's", async () => {
     render(subagentTool('in_progress'));
     await flush();
-    assert.equal(rows().length, 2);
+    assert.equal(rows().length, 1);
     assert.ok(rows()[0]!.textContent?.includes('map_server'));
     assert.ok(rows()[0]!.textContent?.includes('Reading AGENTS.md'));
-    assert.ok(rows()[1]!.textContent?.includes('Waits for map_server'));
   });
 
   it('does not fetch a row transcript until that row is opened', async () => {
@@ -211,15 +208,15 @@ describe('the subagent tool call (rendered in a DOM)', () => {
     assert.ok(detailCalls.length > before, 'polled for new steps');
   });
 
-  it('shows a row per declared stage while the list is still loading, not an empty box', async () => {
+  it("shows the subagent the call names while the list is still loading, not an empty box", async () => {
     let finish: (v: unknown) => void = () => {};
     api.subagents = () => new Promise((r) => (finish = r));
     render(subagentTool('completed'));
     act(() => (pipelineLine() as HTMLElement).click());
     const names = [...rows()].map((r) => r.querySelector('.agent-name')?.textContent);
-    assert.deepEqual(names, ['map_server', 'map_web']);
-    assert.ok(rows()[0]!.querySelector('.agent-what.is-live'), 'each row says it is loading');
-    finish({ subagents: [summary({ status: 'completed' }), summary({ sessionId: 'child-2', stageName: 'map_web', status: 'completed' })] });
+    assert.deepEqual(names, ['map_server']);
+    assert.ok(rows()[0]!.querySelector('.agent-what.is-live'), 'the row says it is loading');
+    finish({ subagents: [summary({ status: 'completed' })] });
     await flush();
     assert.ok(rows()[0]!.textContent?.includes('Done'), 'the loaded status replaces it');
   });
@@ -236,75 +233,24 @@ describe('the subagent tool call (rendered in a DOM)', () => {
     render(subagentTool('in_progress'));
     await flush();
     assert.ok(pipelineLine());
-    assert.equal(rows().length, 2, 'one row per declared stage');
+    assert.equal(rows().length, 1, 'the subagent the call names');
   });
 
-  it('the pending row has no elapsed time shown', async () => {
+  it('shows "Running 1 subagent" while it works, and "Ran 1 subagent" from the subagents_changed event', async () => {
     render(subagentTool('in_progress'));
     await flush();
-    const pendingRow = rows()[1]!;
-    assert.equal(pendingRow.querySelector('.agent-time')?.textContent, '');
-  });
+    assert.equal(pipelineLine()!.textContent, 'Running 1 subagent, 0 done');
 
-  it('shows "Running N subagents, M done" while the call is in progress', async () => {
-    render(subagentTool('in_progress'));
-    await flush();
-    assert.equal(pipelineLine()!.textContent?.includes('Running 2 subagents'), true);
-  });
-
-  it('shows "Ran N subagents" once finished, and updates live from the subagents_changed event', async () => {
-    api.subagents = async () => ({ subagents: [summary({ status: 'completed' })] });
-    render(subagentTool('completed'));
-    await flush();
-    assert.ok(pipelineLine()!.textContent?.startsWith('Ran'), 'past tense once the call is done');
-
-    // The event the server pushes on a list_update; applyEvent folds it straight into
-    // the store the row reads from, with no extra fetch.
+    // The event the server pushes when the subagent ends; applyEvent folds it straight
+    // into the store the row reads from, with no extra fetch.
     act(() => {
       useStore.getState().applyEvent({
         seq: 1,
         ts: Date.now(),
         chatId: 'chat-1',
-        payload: {
-          kind: 'subagents_changed',
-          subagents: [
-            summary({ status: 'completed', activity: undefined }),
-            summary({ sessionId: 'child-2', stageName: 'map_web', status: 'completed', activity: undefined }),
-          ],
-        },
+        payload: { kind: 'subagents_changed', subagents: [summary({ status: 'completed', activity: undefined })] },
       });
     });
-    assert.equal(pipelineLine()!.textContent, 'Ran 2 subagents');
-  });
-
-  // kiro V3 starts one subagent per call, named in its input, rather than a list of stages.
-  describe('a kiro V3 invoke_sub_agent call', () => {
-    const invokeTool = (status: ToolCallView['status']): ToolCallView =>
-      ({
-        id: 'invoke-1',
-        title: 'Sub-agent: context-gatherer',
-        name: 'invoke_sub_agent',
-        kind: 'other',
-        status,
-        content: [],
-        input: { name: 'context-gatherer', prompt: 'Map the server.', explanation: 'why', contextFiles: [] },
-      }) as unknown as ToolCallView;
-
-    it('shows its one subagent by name while the list is still loading', async () => {
-      api.subagents = () => new Promise(() => {});
-      render(invokeTool('in_progress'));
-      assert.equal(pipelineLine()!.textContent, 'Running 1 subagent, 0 done');
-      assert.equal(rows().length, 1);
-      assert.ok(rows()[0]!.textContent?.includes('context-gatherer'));
-    });
-
-    it('shows the row the server lists for it', async () => {
-      api.subagents = async () => ({
-        subagents: [summary({ sessionId: 'sub-1', stageName: 'context-gatherer', toolCallId: 'invoke-1', status: 'completed', activity: undefined })],
-      });
-      render(invokeTool('completed'));
-      await flush();
-      assert.equal(pipelineLine()!.textContent, 'Ran 1 subagent');
-    });
+    assert.equal(pipelineLine()!.textContent, 'Ran 1 subagent');
   });
 });

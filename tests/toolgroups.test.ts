@@ -28,7 +28,7 @@ const choiceItem = (id: string): TranscriptItem =>
     options: [{ label: 'a', prompt: 'a' }, { label: 'b', prompt: 'b' }],
   });
 
-const subagentItem = (id: string): TranscriptItem => toolItem(id, 'subagent', { stages: [] });
+const subagentItem = (id: string): TranscriptItem => toolItem(id, 'invoke_sub_agent', { name: 'context-gatherer' });
 
 type RunEntry = { type: 'run'; members: { type: string; tool?: { id: string } }[] };
 

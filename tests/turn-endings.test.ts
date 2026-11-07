@@ -13,16 +13,13 @@ import { ChatStore } from '../server/src/session/chatStore.js';
 import { hydrateTranscript } from '../server/src/session/kiroFiles.js';
 import { SessionManager } from '../server/src/session/SessionManager.js';
 import { TurnRecorder } from '../server/src/session/TurnRecorder.js';
-import { fakeKiroProcess, noopLogger, waitFor, type FakeProcess } from './helpers.js';
+import { fakeKiroProcess, noopLogger, waitFor, writeV3Session, type FakeProcess, type V3Line } from './helpers.js';
 
 const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-endings-sessions-'));
 const sessionsCwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-endings-cwd-')));
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-endings-data-'));
 (config as { kiroSessionsDir: string }).kiroSessionsDir = sessionsDir;
 (config as { casperDataDir: string }).casperDataDir = dataDir;
-// Where kiro 2.x kept its files, which kiro V3 still reads a session from until it loads it.
-const v2Dir = path.join(sessionsDir, 'cli');
-fs.mkdirSync(v2Dir, { recursive: true });
 
 after(() => {
   closeDb();
@@ -112,19 +109,16 @@ describe('TurnRecorder', () => {
 
 describe('hydrateTranscript with stored turn endings', () => {
   const sid = 'endings-hydrate';
-  const file = path.join(v2Dir, `${sid}.jsonl`);
-  const T = 1_800_000_000; // seconds, as kiro stamps a record
+  const T = 1_800_000_000; // seconds
+  const at = (ts: number) => new Date(ts * 1000).toISOString();
 
-  const prompt = (id: string, text: string, ts: number) => ({
-    kind: 'Prompt',
-    data: { message_id: id, content: [{ kind: 'text', data: text }], meta: { timestamp: ts } },
+  const prompt = (id: string, text: string, ts: number): V3Line => ({ id, timestamp: at(ts), payload: { type: 'user', content: text } });
+  const assistant = (id: string, text: string, ts: number): V3Line => ({
+    id,
+    timestamp: at(ts),
+    payload: { type: 'assistant', operationType: 'Say', content: text },
   });
-  const assistant = (id: string, text: string, ts: number) => ({
-    kind: 'AssistantMessage',
-    data: { message_id: id, content: [{ kind: 'text', data: text }], meta: { timestamp: ts } },
-  });
-  const write = (...lines: unknown[]) =>
-    fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const write = (...messages: V3Line[]) => writeV3Session(sessionsDir, { id: sid, cwd: sessionsCwd, messages });
   const msg = (id: string, role: 'assistant' | 'thinking', text: string): TranscriptItem => ({
     type: 'message',
     message: { id, role, text },
@@ -144,8 +138,6 @@ describe('hydrateTranscript with stored turn endings', () => {
       i.type === 'message' ? `${i.message.role}:${i.message.text}` : i.type === 'turn_error' ? `error:${i.message}` : i.type,
     );
 
-  after(() => fs.rmSync(file, { force: true }));
-  beforeEach(() => fs.rmSync(file, { force: true }));
 
   it('replaces what kiro kept of a failed turn with the stored turn and its error', async () => {
     write(prompt('p1', 'do it', T + 1), assistant('a1', 'Starting.', T + 3));
@@ -176,28 +168,20 @@ describe('hydrateTranscript with stored turn endings', () => {
     assert.deepEqual(shape(items), ['user:do it', 'assistant:Looking now', 'turn_interrupted']);
   });
 
-  // What kiro 2.19 writes when a turn is stopped during a tool call: the text before it, the
-  // call, an errored result and a note. Only the text streamed after the call is missing.
+  // What kiro 3.1 writes when a turn is stopped during a tool call: the text before it, the
+  // call marked failed, and a result saying it was interrupted. The text streamed after the
+  // call is missing.
   it('replaces the records kiro writes for a turn stopped during a tool call', async () => {
-    const toolUse = { kind: 'toolUse', data: { toolUseId: 'tu1', name: 'shell', input: { command: 'sleep 45' } } };
     write(
       prompt('p1', 'do it', T + 1),
+      assistant('a1', "I'm about to wait.", T + 3),
+      { id: 'tu1-call', timestamp: at(T + 3), payload: { type: 'tool_call', toolCallId: 'tu1', toolName: 'execute_bash', kind: 'execute', title: 'Wait', args: { command: 'sleep 45' }, status: 'failed' } },
       {
-        kind: 'AssistantMessage',
-        data: {
-          message_id: 'a1',
-          content: [{ kind: 'text', data: "I'm about to wait." }, toolUse],
-          meta: { timestamp: T + 3 },
-        },
+        id: 'tu1-result',
+        timestamp: at(T + 9),
+        payload: { type: 'tool_result', toolCallId: 'tu1', success: false, content: 'This tool was interrupted before it reported a result, so it may or may not have taken effect.' },
       },
-      {
-        kind: 'ToolResults',
-        data: {
-          message_id: 'r1',
-          content: [{ kind: 'toolResult', data: { toolUseId: 'tu1', status: 'error', content: [] } }],
-        },
-      },
-      assistant('a2', 'Tool uses were interrupted, waiting for the next user prompt', T + 9),
+      { id: 'end', timestamp: at(T + 9), payload: { type: 'turn_end', stopReason: 'cancelled' } },
     );
     const tool: TranscriptItem = {
       type: 'tool_call',
@@ -294,16 +278,7 @@ describe('a turn that ends badly, through SessionManager', () => {
 
   beforeEach(() => {
     // The file kiro keeps for a session, so a manager that has never seen it can open the chat.
-    fs.writeFileSync(
-      path.join(v2Dir, 'endings-live.json'),
-      JSON.stringify({
-        session_id: 'endings-live',
-        title: 'kiro title',
-        cwd: sessionsCwd,
-        created_at: '2026-01-01T00:00:00.000Z',
-        updated_at: '2026-01-02T00:00:00.000Z',
-      }),
-    );
+    writeV3Session(sessionsDir, { id: 'endings-live', cwd: sessionsCwd, title: 'kiro title' });
     proc = fakeKiroProcess({
       sessionId: 'endings-live',
       onPrompt: async () => {

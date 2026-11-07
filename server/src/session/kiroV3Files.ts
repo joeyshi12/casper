@@ -4,9 +4,8 @@ import { kiroToolName, SUBAGENT_TOOL, type KiroUpdateMeta, type TranscriptToolCa
 import { config } from '../config.js';
 import { isValidSessionId } from '../util/paths.js';
 import type { PersistedSession, TranscriptEntry } from './kiroFiles.js';
-import { v2SessionsDir } from './kiroV2Files.js';
 
-// Reads kiro V3's session store: <sessions>/<workspace hash>/<id>/session.json for the
+// Reads kiro's session store: <sessions>/<workspace hash>/<id>/session.json for the
 // metadata, messages.jsonl for the conversation, and sub-executions/<id>.jsonl for each
 // subagent. kiro owns these files; Casper only reads them, and deletes a chat's.
 
@@ -31,8 +30,10 @@ interface V3Line {
 const PLACEHOLDER_TITLE = 'New Session';
 // kiro writes hidden reasoning as this placeholder plus an encrypted signature.
 const HIDDEN_REASONING = '...';
-// How much of the end of messages.jsonl is searched for the latest context usage.
-const CONTEXT_TAIL_BYTES = 256 * 1024;
+// How much of the end of messages.jsonl is searched for the latest context usage, and how
+// much is read at a time.
+const CONTEXT_TAIL_BYTES = 1024 * 1024;
+const CONTEXT_CHUNK_BYTES = 16 * 1024;
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -44,16 +45,18 @@ function iso(value: string | undefined): string | undefined {
   return Number.isNaN(ms) ? value : new Date(ms).toISOString();
 }
 
-/** The workspace directories of the V3 store, skipping the V2 store and kiro's indexes. */
+// kiro 2.x's store, which kiro 3.x leaves in place. It holds directories named by session
+// id too, and V3 copies of the same sessions, so it must not be read as a workspace.
+const V2_STORE = 'cli';
+
+/** The workspace directories of the store, skipping kiro's indexes. */
 async function workspaceDirs(): Promise<string[]> {
   const root = config.kiroSessionsDir;
-  const v2 = v2SessionsDir();
   try {
     const entries = await fs.readdir(root, { withFileTypes: true });
     return entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
-      .map((e) => path.join(root, e.name))
-      .filter((d) => d !== v2);
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== V2_STORE)
+      .map((e) => path.join(root, e.name));
   } catch {
     return [];
   }
@@ -97,7 +100,20 @@ export async function v3SessionDir(sessionId: string): Promise<string | undefine
   return found.find((d) => d !== undefined);
 }
 
-/** The latest context usage kiro recorded, from the end of messages.jsonl. */
+/** The context usage on one line of messages.jsonl, if it records one. */
+function contextUsageOf(line: string): number | undefined {
+  if (!line.includes('"contextUsage"')) return undefined;
+  try {
+    const p = (JSON.parse(line) as V3Line).payload;
+    const value = isRecord(p.value) ? p.value.usagePercentage : undefined;
+    return p.type === 'session_metadata' && p.key === 'contextUsage' && typeof value === 'number' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The latest context usage kiro recorded. kiro writes it several times a turn, so it is
+ *  read backwards from the end of messages.jsonl a chunk at a time, up to a limit. */
 async function lastContextUsage(file: string): Promise<number | undefined> {
   let handle: fs.FileHandle;
   try {
@@ -107,32 +123,28 @@ async function lastContextUsage(file: string): Promise<number | undefined> {
   }
   try {
     const { size } = await handle.stat();
-    const length = Math.min(size, CONTEXT_TAIL_BYTES);
-    const buf = Buffer.alloc(length);
-    await handle.read(buf, 0, length, size - length);
-    const lines = buf.toString('utf8').split('\n');
-    if (length < size) lines.shift(); // cut mid-line
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i]!;
-      if (!line.includes('"contextUsage"')) continue;
-      try {
-        const p = (JSON.parse(line) as V3Line).payload;
-        const value = isRecord(p.value) ? p.value.usagePercentage : undefined;
-        if (p.type === 'session_metadata' && p.key === 'contextUsage' && typeof value === 'number') return value;
-      } catch {
-        /* not a complete line */
+    let end = size;
+    let tail = '';
+    while (end > 0 && size - end < CONTEXT_TAIL_BYTES) {
+      const start = Math.max(0, end - CONTEXT_CHUNK_BYTES);
+      const buf = Buffer.alloc(end - start);
+      await handle.read(buf, 0, buf.length, start);
+      end = start;
+      const lines = (buf.toString('utf8') + tail).split('\n');
+      // The first line may start before this chunk, unless the chunk starts the file.
+      tail = end > 0 ? lines.shift()! : '';
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const value = contextUsageOf(lines[i]!);
+        if (value !== undefined) return value;
       }
     }
-    return undefined;
+    return tail ? contextUsageOf(tail) : undefined;
   } finally {
     await handle.close();
   }
 }
 
-export async function readV3Session(
-  dir: string,
-  opts: { contextUsage?: boolean } = {},
-): Promise<PersistedSession | null> {
+export async function readV3Session(dir: string): Promise<PersistedSession | null> {
   let j: V3SessionJson;
   try {
     j = JSON.parse(await fs.readFile(path.join(dir, 'session.json'), 'utf8')) as V3SessionJson;
@@ -149,9 +161,7 @@ export async function readV3Session(
     updatedAt: iso(j.lastModifiedAt) ?? createdAt,
     agentId: j.agentMode,
     modelId: j.modelId,
-    contextUsagePercentage: opts.contextUsage
-      ? await lastContextUsage(path.join(dir, 'messages.jsonl'))
-      : undefined,
+    contextUsagePercentage: await lastContextUsage(path.join(dir, 'messages.jsonl')),
   };
 }
 
@@ -259,7 +269,8 @@ export async function readV3Entries(file: string): Promise<TranscriptEntry[]> {
         const input = p.toolName === 'tool_call' && isRecord(args) && 'arguments' in args ? args.arguments : args;
         addTool({
           id,
-          // A call kiro copied in from a kiro 2.x session has no kind, only 2.x's tool name.
+          // A call kiro copied in from a kiro 2.x session has no kind, only 2.x's tool name,
+          // which the web renders by.
           name: kiroToolName({ title, _meta: meta }) ?? (p.kind === undefined ? str(p.toolName) : undefined),
           title: title ?? str(p.toolName) ?? id,
           kind: str(p.kind),

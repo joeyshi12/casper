@@ -4,12 +4,6 @@ import type { MessageAttachment, StoredTurnEnding, TranscriptItem } from '@caspe
 import { stripAttachmentsLine } from '@casper/shared';
 import { isValidSessionId } from '../util/paths.js';
 import {
-  deleteV2Session,
-  readV2Entries,
-  readV2Session,
-  v2HasRecordedTurns,
-} from './kiroV2Files.js';
-import {
   readSubExecutions,
   readV3Entries,
   readV3Session,
@@ -20,11 +14,8 @@ import {
 } from './kiroV3Files.js';
 
 // Reads kiro-cli's own session files so Casper can list and hydrate dormant sessions
-// without spawning a process. kiro V3 keeps its own store (kiroV3Files.ts) and copies a
-// V2 session into it the first time it loads one, so a session is read from the V3
-// store when it is there and from the V2 files (kiroV2Files.ts) when it is not yet.
+// without spawning a process. The file layout is in kiroV3Files.ts.
 
-export { listChildSessions, readChildSession } from './kiroV2Files.js';
 export type { SubExecution } from './kiroV3Files.js';
 
 /** kiro's own session file. A chat's identity and overrides live in casper.db. */
@@ -39,61 +30,46 @@ export interface PersistedSession {
   contextUsagePercentage?: number;
 }
 
-/** One child session of a V2 session, as recorded in its own file. */
-export interface ChildSession extends PersistedSession {
-  parentSessionId: string;
-}
-
 /** A transcript before stored turn endings and attachments are merged in. A prompt is
  *  kept apart from the items so the merge can find each turn. */
 export type TranscriptEntry =
   | { kind: 'prompt'; id: string; text: string; atMs?: number; timestamp?: number }
   | { kind: 'item'; item: TranscriptItem };
 
-/** One session's metadata, or null if neither store has it. The context usage needs a
- *  read of the conversation file in V3, so it is only read when asked for. */
-export async function readPersistedSession(
-  sessionId: string,
-  opts: { contextUsage?: boolean } = {},
-): Promise<PersistedSession | null> {
-  if (!isValidSessionId(sessionId)) return null;
+/** One session's metadata, or null if kiro has no such session. */
+export async function readPersistedSession(sessionId: string): Promise<PersistedSession | null> {
   const dir = await v3SessionDir(sessionId);
-  return (dir ? await readV3Session(dir, opts) : null) ?? readV2Session(sessionId);
+  return dir ? readV3Session(dir) : null;
 }
 
-/** Many sessions' metadata at once, keyed by id, scanning the V3 store only once. */
+/** Many sessions' metadata at once, keyed by id, scanning the store only once. */
 export async function readPersistedSessions(sessionIds: string[]): Promise<Map<string, PersistedSession>> {
   const dirs = await v3SessionDirs();
   const out = new Map<string, PersistedSession>();
   await Promise.all(
     sessionIds.filter(isValidSessionId).map(async (id) => {
       const dir = dirs.get(id);
-      const found = (dir ? await readV3Session(dir) : null) ?? (await readV2Session(id));
+      const found = dir ? await readV3Session(dir) : null;
       if (found) out.set(id, found);
     }),
   );
   return out;
 }
 
-/** Deletes a session from both stores. */
 export async function deletePersistedSession(sessionId: string): Promise<void> {
-  if (!isValidSessionId(sessionId)) return;
   const dir = await v3SessionDir(sessionId);
-  await Promise.all([dir ? fs.rm(dir, { recursive: true, force: true }) : undefined, deleteV2Session(sessionId)]);
+  if (dir) await fs.rm(dir, { recursive: true, force: true });
 }
 
-/** Whether kiro can load this session back. kiro V3 loads any session it has stored,
- *  and copies in a V2 one that has a recorded turn. Loading an id it has neither of
- *  starts an empty session under that id instead. */
+/** Whether kiro can load this session back. Loading an id kiro has not stored starts an
+ *  empty session under that id instead. */
 export async function isLoadable(sessionId: string): Promise<boolean> {
-  if (!isValidSessionId(sessionId)) return false;
-  return (await v3SessionDir(sessionId)) !== undefined || v2HasRecordedTurns(sessionId);
+  return (await v3SessionDir(sessionId)) !== undefined;
 }
 
 async function readEntries(sessionId: string): Promise<TranscriptEntry[]> {
-  if (!isValidSessionId(sessionId)) return [];
   const dir = await v3SessionDir(sessionId);
-  return dir ? readV3Entries(path.join(dir, 'messages.jsonl')) : readV2Entries(sessionId);
+  return dir ? readV3Entries(path.join(dir, 'messages.jsonl')) : [];
 }
 
 /** The ordinal the next prompt takes, counted the same way hydrateTranscript does. */
@@ -102,7 +78,7 @@ export async function promptCount(sessionId: string): Promise<number> {
 }
 
 /* A prompt belongs to a stored turn if it was written between the turn's start and end,
-   give or take this much: kiro 2.x stamps a prompt in whole seconds. */
+   give or take this much: kiro stamped prompts in whole seconds before V3. */
 const STAMP_PAD_MS = 2000;
 
 function endingItems(e: StoredTurnEnding): TranscriptItem[] {
@@ -181,13 +157,13 @@ export async function hydrateTranscript(
   return mergeTranscript(await readEntries(sessionId), attachments, endings);
 }
 
-/** The subagents a V3 session started, or null when the session is not in the V3 store. */
+/** The subagents a session started, or null when kiro has no such session. */
 export async function listSubExecutions(sessionId: string): Promise<SubExecution[] | null> {
   const dir = await v3SessionDir(sessionId);
   return dir ? readSubExecutions(dir) : null;
 }
 
-/** One V3 subagent's transcript, or null if the session has no such subagent. Read from
+/** One subagent's transcript, or null if the session has no such subagent. Read from
  *  under the parent's own directory, so a chat can only reach its own subagents. */
 export async function hydrateSubExecution(sessionId: string, subagentId: string): Promise<TranscriptItem[] | null> {
   const dir = await v3SessionDir(sessionId);

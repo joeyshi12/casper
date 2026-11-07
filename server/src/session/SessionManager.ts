@@ -40,16 +40,12 @@ import { EventStore } from './EventStore.js';
 import { TurnState } from './TurnState.js';
 import { TurnRecorder } from './TurnRecorder.js';
 import { SubagentTracker } from './SubagentTracker.js';
-import { showSummaryAsAnswer } from './subagentResult.js';
-import { matchSubagentsFallback, subagentCallsIn } from './subagentFallbackMatch.js';
 import {
   deletePersistedSession,
   hydrateSubExecution,
   hydrateTranscript,
   isLoadable,
-  listChildSessions,
   listSubExecutions,
-  readChildSession,
   promptCount,
   readPersistedSession,
   readPersistedSessions,
@@ -57,7 +53,6 @@ import {
   type SubExecution,
 } from './kiroFiles.js';
 import { ChatStore, type ChatRow } from './chatStore.js';
-import { SubagentLinkStore } from './subagentLinks.js';
 
 // Resolves a cwd to an absolute path, creating it if missing. Confined to
 // config.fileRoot, which the file endpoints are also scoped to.
@@ -237,10 +232,6 @@ export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly log: Logger;
   private readonly store = new ChatStore();
-  private readonly subagentLinks = new SubagentLinkStore();
-  // Children the title fallback already tried and could not match. Matching hydrates the
-  // whole parent transcript (145 MB in one chat), so each child is tried once per process.
-  private readonly unmatchedChildren = new Map<string, Set<string>>();
   private readonly spawnProcess: SpawnProcess;
   private readonly cancelGraceMs: number;
   private readonly defaultModel: () => Promise<string | undefined>;
@@ -385,7 +376,7 @@ export class SessionManager {
     const existing = this.sessions.get(sessionId);
     if (existing) return existing;
 
-    const persisted = await readPersistedSession(sessionId, { contextUsage: true });
+    const persisted = await readPersistedSession(sessionId);
     if (!persisted) throw new Error(`Unknown session: ${sessionId}`);
 
     const effectiveCwd = this.store.getCwd(chatId) ?? persisted.cwd;
@@ -507,7 +498,6 @@ export class SessionManager {
         (s as { sessionId: string }).sessionId = res.sessionId;
         this.sessions.set(res.sessionId, s);
       }
-      await this.restoreMode(s, proc, res);
       s.availableModes = res.modes.availableModes;
       s.currentModeId = res.modes.currentModeId;
       s.agentId = res.modes.currentModeId ?? s.agentId;
@@ -524,23 +514,6 @@ export class SessionManager {
     } catch (err) {
       s.spawning = undefined;
       throw err;
-    }
-  }
-
-  /**
-   * Puts a loaded session back in the chat's agent. kiro keeps the mode a session was
-   * saved with, but gives a session it copied in from kiro 2.x its Default mode, so a
-   * chat that ran the casper agent would lose it.
-   */
-  private async restoreMode(s: Session, proc: ManagedProcess, res: SessionNewResult): Promise<void> {
-    const want = s.agentId;
-    if (!s.hasBeenLive || !want || res.modes.currentModeId === want) return;
-    if (!res.modes.availableModes.some((m) => m.id === want)) return;
-    try {
-      await proc.setMode(s.sessionId, want);
-      res.modes.currentModeId = want;
-    } catch (err) {
-      this.log.warn({ err, sessionId: s.sessionId, modeId: want }, 'could not restore the chat agent');
     }
   }
 
@@ -835,7 +808,7 @@ export class SessionManager {
       sessionId
         ? this.hydrate(chatId, sessionId)
         : Promise.resolve([]),
-      sessionId ? readPersistedSession(sessionId, { contextUsage: true }) : Promise.resolve(null),
+      sessionId ? readPersistedSession(sessionId) : Promise.resolve(null),
     ]);
 
     const s = sessionId ? this.sessions.get(sessionId) : undefined;
@@ -856,56 +829,19 @@ export class SessionManager {
     return transcript.slice(start, end);
   }
 
-  /**
-   * A chat's subagents: the ones kiro V3 recorded in the session's file, the child
-   * sessions kiro 2.x left for its older turns, and live ones from the tracker. A live row
-   * wins over the file's until the file records how the subagent ended.
-   */
+  /** A chat's subagents: the ones kiro recorded in the session's file, and live ones from
+   *  the tracker. A live row wins over the file's until the file records how it ended. */
   async getSubagents(chatId: string): Promise<SubagentSummary[]> {
     const sessionId = this.sessionIdOf(chatId);
     const live = this.sessions.get(sessionId)?.subagents.list() ?? [];
-    const [recorded, children] = await Promise.all([listSubExecutions(sessionId), this.v2Subagents(sessionId)]);
-
-    const byId = new Map<string, SubagentSummary>(children.map((c) => [c.sessionId, c]));
+    const byId = new Map<string, SubagentSummary>();
     const finished = new Set<string>();
-    for (const sub of recorded ?? []) {
+    for (const sub of (await listSubExecutions(sessionId)) ?? []) {
       byId.set(sub.sessionId, subExecutionSummary(sub));
       if (!sub.stopped) finished.add(sub.sessionId);
     }
     for (const a of live) if (!finished.has(a.sessionId)) byId.set(a.sessionId, a);
     return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }
-
-  /**
-   * The child sessions kiro 2.x wrote for a session's subagents. A child the tracker never
-   * saw falls back to a recorded link or title matching (subagentFallbackMatch.ts).
-   */
-  private async v2Subagents(sessionId: string): Promise<SubagentSummary[]> {
-    const onDisk = await listChildSessions(sessionId);
-    if (onDisk.length === 0) return [];
-    const links = this.subagentLinks.forParent(sessionId);
-    const tried = this.unmatchedChildren.get(sessionId) ?? new Set<string>();
-    const unresolved = onDisk.filter((c) => !links.has(c.sessionId) && !tried.has(c.sessionId));
-    const fallback = unresolved.length
-      ? matchSubagentsFallback(subagentCallsIn(await hydrateTranscript(sessionId)), unresolved)
-      : [];
-    const fallbackByChild = new Map(fallback.map((m) => [m.sessionId, m]));
-    // Saved so the parent transcript is not read again for these children.
-    for (const m of fallback) this.subagentLinks.record(m.sessionId, sessionId, m.toolCallId, m.stageName);
-    for (const c of unresolved) if (!fallbackByChild.has(c.sessionId)) tried.add(c.sessionId);
-    this.unmatchedChildren.set(sessionId, tried);
-
-    return onDisk.map((child) => {
-      const link = links.get(child.sessionId) ?? fallbackByChild.get(child.sessionId);
-      return {
-        sessionId: child.sessionId,
-        stageName: link?.stageName ?? (child.title || child.sessionId),
-        toolCallId: link?.toolCallId,
-        status: 'completed',
-        createdAt: child.createdAt,
-        updatedAt: child.updatedAt,
-      };
-    });
   }
 
   /** One subagent's own transcript, hydrated the same way a chat's is. */
@@ -914,26 +850,11 @@ export class SessionManager {
     const parentSessionId = this.sessionIdOf(chatId);
     const live = this.sessions.get(parentSessionId)?.subagents.get(subagentId);
     const recorded = (await listSubExecutions(parentSessionId))?.find((x) => x.sessionId === subagentId);
-    if (live || recorded) {
-      // kiro creates the subagent's file with its first entry, a moment after it starts.
-      const transcript = (await hydrateSubExecution(parentSessionId, subagentId)) ?? [];
-      const subagent = recorded && (!live || !recorded.stopped) ? subExecutionSummary(recorded) : live!;
-      return { subagent, transcript };
-    }
-
-    const child = await readChildSession(subagentId, parentSessionId);
-    if (!child) throw new Error(`Unknown subagent: ${subagentId}`);
-    const link = this.subagentLinks.forParent(parentSessionId).get(subagentId);
-    const summary: SubagentSummary = {
-      sessionId: subagentId,
-      stageName: link?.stageName ?? (child.title || subagentId),
-      toolCallId: link?.toolCallId,
-      status: 'completed',
-      createdAt: child.createdAt,
-      updatedAt: child.updatedAt,
-    };
-    const transcript = showSummaryAsAnswer(await hydrateTranscript(subagentId));
-    return { subagent: summary, transcript };
+    if (!live && !recorded) throw new Error(`Unknown subagent: ${subagentId}`);
+    // kiro creates the subagent's file with its first entry, a moment after it starts.
+    const transcript = (await hydrateSubExecution(parentSessionId, subagentId)) ?? [];
+    const subagent = recorded && (!live || !recorded.stopped) ? subExecutionSummary(recorded) : live!;
+    return { subagent, transcript };
   }
 
   /** One projection, so a dormant session and a live one cannot disagree. */

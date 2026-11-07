@@ -71,38 +71,6 @@ export function agentConfig(prompt: string, mcp: string | null): KiroAgent {
   };
 }
 
-/**
- * Whether kiro's own agent upgrade rewrote Casper's file. kiro rewrites kiro 2.x agents
- * when a V3 chat starts in its terminal UI and on `kiro-cli agent upgrade`, marks the
- * result with `kiroUpgrade`, and keeps the original beside it as `<name>.bak` or
- * `<name>.bak.<n>`. If that original is the file Casper last wrote, the agent is still
- * ours to update.
- */
-function upgradedByKiro(target: string, onDisk: string, stamp: string): boolean {
-  try {
-    const parsed = JSON.parse(onDisk) as unknown;
-    if (typeof parsed !== 'object' || parsed === null || !('kiroUpgrade' in parsed)) return false;
-  } catch {
-    return false;
-  }
-  const dir = path.dirname(target);
-  const prefix = `${path.basename(target)}.bak`;
-  let names: string[];
-  try {
-    names = fs.readdirSync(dir);
-  } catch {
-    return false;
-  }
-  const isBackup = (n: string) => n.startsWith(prefix) && /^(\.\d+)?$/.test(n.slice(prefix.length));
-  return names.filter(isBackup).some((n) => {
-    try {
-      return sha256(fs.readFileSync(path.join(dir, n), 'utf8')) === stamp;
-    } catch {
-      return false;
-    }
-  });
-}
-
 export function installAgentFile(home: string, dataDir: string): AgentResult {
   const target = path.join(home, '.kiro', 'agents', 'casper.json');
   const prompt = agentPrompt();
@@ -141,7 +109,7 @@ export function installAgentFile(home: string, dataDir: string): AgentResult {
 
   const onDisk = fs.readFileSync(target, 'utf8');
   if (sha256(onDisk) === sha256(desired)) return { action: 'unchanged', target };
-  if (stamp !== '' && (sha256(onDisk) === stamp || upgradedByKiro(target, onDisk, stamp))) {
+  if (stamp !== '' && sha256(onDisk) === stamp) {
     write();
     return { action: 'updated', target };
   }

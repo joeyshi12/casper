@@ -1,5 +1,5 @@
-// kiro V3: its session store, and how SessionManager drives a V3 session. The file
-// shapes follow what kiro-cli 3.1 wrote.
+// kiro's session store, and how SessionManager drives a kiro session. The file shapes
+// follow what kiro-cli 3.1 wrote.
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +8,6 @@ import os from 'node:os';
 import path from 'node:path';
 import type { CasperEvent, StoredTurnEnding, TranscriptItem } from '@casper/shared';
 import { config } from '../server/src/config.js';
-import { ChatStore } from '../server/src/session/chatStore.js';
 import { closeDb } from '../server/src/session/db.js';
 import {
   deletePersistedSession,
@@ -26,8 +25,6 @@ const sessionsCwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'caspe
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-v3-data-'));
 (config as { kiroSessionsDir: string }).kiroSessionsDir = sessionsDir;
 (config as { casperDataDir: string }).casperDataDir = dataDir;
-const v2Dir = path.join(sessionsDir, 'cli');
-fs.mkdirSync(v2Dir, { recursive: true });
 closeDb();
 
 after(() => {
@@ -42,23 +39,6 @@ const line = (payload: Record<string, unknown>, timestamp = '2026-11-07T06:39:09
   payload,
 });
 
-/** A kiro 2.x session file, which kiro V3 has not copied into its own store yet. */
-const writeV2Session = (id: string, extra: Record<string, unknown> = {}, jsonl = '') => {
-  fs.writeFileSync(
-    path.join(v2Dir, `${id}.json`),
-    JSON.stringify({
-      session_id: id,
-      cwd: sessionsCwd,
-      created_at: '2026-01-01T00:00:00.000Z',
-      updated_at: '2026-01-01T00:05:00.000Z',
-      title: 'from kiro 2.x',
-      session_state: { agent_name: 'casper', rts_model_state: { model_info: { model_id: 'claude-opus-5.5' } } },
-      ...extra,
-    }),
-  );
-  fs.writeFileSync(path.join(v2Dir, `${id}.jsonl`), jsonl);
-};
-
 const texts = (items: TranscriptItem[]) =>
   items.map((it) =>
     it.type === 'message'
@@ -68,7 +48,7 @@ const texts = (items: TranscriptItem[]) =>
         : it.type,
   );
 
-describe("reading kiro V3's session store", () => {
+describe("reading kiro's session store", () => {
   it('reads the metadata, with no title until kiro names the session', async () => {
     writeV3Session(sessionsDir, { id: 'sess_meta', cwd: sessionsCwd, agentMode: 'casper', modelId: 'claude-haiku-4.5' });
     const s = await readPersistedSession('sess_meta');
@@ -86,30 +66,27 @@ describe("reading kiro V3's session store", () => {
     assert.equal((await readPersistedSession('sess_meta'))?.title, 'Run Shell Command and Verify File');
   });
 
-  it('reads the latest context usage from the end of the conversation, when asked', async () => {
+  it('reads the latest context usage from the end of the conversation', async () => {
     const usage = (usagePercentage: number) => line({ type: 'session_metadata', key: 'contextUsage', value: { usagePercentage } });
-    writeV3Session(sessionsDir, {
-      id: 'sess_usage',
-      cwd: sessionsCwd,
-      messages: [usage(2.3662), line({ type: 'user', content: 'x'.repeat(300_000) }), usage(8.333), line({ type: 'turn_end', stopReason: 'end_turn' })],
-    });
-    assert.equal((await readPersistedSession('sess_usage'))?.contextUsagePercentage, undefined);
-    assert.equal((await readPersistedSession('sess_usage', { contextUsage: true }))?.contextUsagePercentage, 8.333);
+    const big = (n: number) => line({ type: 'user', content: 'x'.repeat(n) });
+    const usageOf = async (messages: V3Line[]) => {
+      writeV3Session(sessionsDir, { id: 'sess_usage', cwd: sessionsCwd, messages });
+      return (await readPersistedSession('sess_usage'))?.contextUsagePercentage;
+    };
+    assert.equal(await usageOf([usage(2.3662), big(300_000), usage(8.333), line({ type: 'turn_end' })]), 8.333);
+    // Behind a line longer than the chunks it is read in.
+    assert.equal(await usageOf([usage(1.5), usage(4.25), big(100_000)]), 4.25);
+    // As the very first line of the file.
+    assert.equal(await usageOf([usage(3.5), big(20_000)]), 3.5);
+    // Not past the limit, and not at all in a session that never recorded one.
+    assert.equal(await usageOf([usage(9), big(2_000_000)]), undefined);
+    assert.equal(await usageOf([line({ type: 'user', content: 'hi' })]), undefined);
   });
 
   it('finds a session whose chat moved to another directory', async () => {
     // kiro files a session under a hash of the cwd it first saw.
     writeV3Session(sessionsDir, { id: 'sess_moved', cwd: '/somewhere/else' });
     assert.equal((await readPersistedSession('sess_moved'))?.cwd, '/somewhere/else');
-  });
-
-  it("prefers kiro V3's copy of a session it imported from kiro 2.x", async () => {
-    writeV2Session('imported-1');
-    assert.equal((await readPersistedSession('imported-1'))?.title, 'from kiro 2.x', 'before the import');
-    writeV3Session(sessionsDir, { id: 'imported-1', cwd: sessionsCwd, title: 'copied by kiro V3' });
-    assert.equal((await readPersistedSession('imported-1'))?.title, 'copied by kiro V3');
-    const many = await readPersistedSessions(['imported-1', 'sess_meta', 'no-such-session', '../escape']);
-    assert.deepEqual([...many.keys()].sort(), ['imported-1', 'sess_meta']);
   });
 
   it('hydrates a conversation the way the live stream draws it', async () => {
@@ -247,23 +224,30 @@ describe("reading kiro V3's session store", () => {
     assert.deepEqual(second.message.attachments, [file]);
   });
 
-  it('can load any session kiro V3 stored, and a kiro 2.x one only with a recorded turn', async () => {
+  it('can load any session kiro stored, even one never prompted', async () => {
     writeV3Session(sessionsDir, { id: 'sess_empty', cwd: sessionsCwd });
-    assert.equal(await isLoadable('sess_empty'), true, 'kiro keeps an empty V3 session');
-    writeV2Session('v2-empty');
-    assert.equal(await isLoadable('v2-empty'), false);
-    writeV2Session('v2-used', {}, '{"kind":"Prompt","data":{}}\n');
-    assert.equal(await isLoadable('v2-used'), true);
+    assert.equal(await isLoadable('sess_empty'), true, 'kiro keeps an empty session');
     assert.equal(await isLoadable('no-such-session'), false);
+    assert.equal(await isLoadable('../escape'), false);
   });
 
-  it('deletes a session from both stores', async () => {
-    writeV2Session('both-stores');
-    const dir = writeV3Session(sessionsDir, { id: 'both-stores', cwd: sessionsCwd, messages: [] });
-    await deletePersistedSession('both-stores');
+  it("deletes a session's directory", async () => {
+    const dir = writeV3Session(sessionsDir, { id: 'to-delete', cwd: sessionsCwd, messages: [] });
+    await deletePersistedSession('to-delete');
     assert.equal(fs.existsSync(dir), false);
-    assert.equal(fs.existsSync(path.join(v2Dir, 'both-stores.json')), false);
-    assert.equal(await readPersistedSession('both-stores'), null);
+    assert.equal(await readPersistedSession('to-delete'), null);
+  });
+
+  it("does not read kiro 2.x's old store as a workspace", async () => {
+    // kiro 3.x leaves kiro 2.x's files in cli/, which has directories named by session id.
+    for (const id of ['sess_meta', 'only-in-cli']) {
+      fs.mkdirSync(path.join(sessionsDir, 'cli', id, 'tasks'), { recursive: true });
+      fs.writeFileSync(path.join(sessionsDir, 'cli', id, 'session.json'), `{"id":"${id}","title":"stale"}`);
+    }
+    assert.equal(await readPersistedSession('only-in-cli'), null);
+    assert.equal((await readPersistedSessions(['only-in-cli'])).size, 0);
+    assert.notEqual((await readPersistedSession('sess_meta'))?.title, 'stale');
+    assert.ok((await readPersistedSessions(['sess_meta'])).get('sess_meta')?.cwd, 'the real copy is found');
   });
 });
 
@@ -281,7 +265,7 @@ const info = (sessionId: string, kiro: Record<string, unknown>, extra: Record<st
 
 const recorded = (events: CasperEvent[]) => events.map((e) => e.payload);
 
-describe('SessionManager: starting a kiro V3 session', () => {
+describe('SessionManager: starting a kiro session', () => {
   it('passes the agent and model as session inputs, and adopts the model kiro reports', async () => {
     const proc = fakeKiroProcess({ sessionId: 'sess_inputs', modelId: 'claude-opus-5.5' });
     const { mgr, detail } = await managerWith(proc, { defaultModel: 'claude-opus-5.5' });
@@ -306,45 +290,9 @@ describe('SessionManager: starting a kiro V3 session', () => {
     }
   });
 
-  it("puts a session kiro imported from kiro 2.x back in the chat's agent", async () => {
-    writeV2Session('restore-mode', {}, '{"kind":"Prompt","data":{}}\n');
-    const modes = [{ id: 'vibe', name: 'Default' }, { id: 'casper', name: 'casper' }];
-    const proc = fakeKiroProcess({ sessionId: 'restore-mode', currentModeId: 'vibe', availableModes: modes });
-    const mgr = new SessionManager(noopLogger(), { spawn: () => proc });
-    try {
-      // A chat bound to the session, as an earlier Casper left it.
-      const store = new ChatStore();
-      store.create('restore-mode-chat');
-      store.bindSession('restore-mode-chat', 'restore-mode');
-      await mgr.runPrompt('restore-mode-chat', [{ type: 'text', text: 'hi' }]);
-      const [load] = proc.args[proc.calls.indexOf('loadSession')] as [{ _meta?: { kiro: { modelId?: string } } }];
-      assert.equal(load._meta?.kiro.modelId, 'claude-opus-5.5', "the model kiro 2.x's file names");
-      assert.deepEqual(proc.args[proc.calls.indexOf('setMode')], ['restore-mode', 'casper']);
-      const detail = await mgr.getDetail('restore-mode-chat');
-      assert.equal(detail.currentModeId, 'casper');
-    } finally {
-      mgr.disposeAll();
-    }
-  });
-
-  it('leaves the mode alone when kiro has no such agent', async () => {
-    writeV2Session('no-such-agent', { session_state: { agent_name: 'gone' } }, '{"kind":"Prompt","data":{}}\n');
-    const proc = fakeKiroProcess({ sessionId: 'no-such-agent', currentModeId: 'vibe', availableModes: [{ id: 'vibe', name: 'Default' }] });
-    const mgr = new SessionManager(noopLogger(), { spawn: () => proc });
-    try {
-      const store = new ChatStore();
-      store.create('no-such-agent-chat');
-      store.bindSession('no-such-agent-chat', 'no-such-agent');
-      await mgr.runPrompt('no-such-agent-chat', [{ type: 'text', text: 'hi' }]);
-      assert.equal(proc.calls.includes('setMode'), false);
-      assert.equal((await mgr.getDetail('no-such-agent-chat')).currentModeId, 'vibe');
-    } finally {
-      mgr.disposeAll();
-    }
-  });
 });
 
-describe("SessionManager: kiro V3's session updates", () => {
+describe("SessionManager: kiro's session updates", () => {
   let mgr: SessionManager;
   let proc: FakeProcess;
   let chatId: string;
@@ -405,7 +353,7 @@ describe("SessionManager: kiro V3's session updates", () => {
   });
 });
 
-describe('SessionManager: compaction under kiro V3', () => {
+describe('SessionManager: compaction', () => {
   it('reports it started, then completed with the summary kiro sends', async () => {
     let finish!: () => void;
     const proc = fakeKiroProcess({ sessionId: 'sess_compact', onCompact: () => new Promise<void>((r) => (finish = r)) });
@@ -455,7 +403,7 @@ describe('SessionManager: compaction under kiro V3', () => {
   });
 });
 
-describe('SessionManager: a dormant kiro V3 session', () => {
+describe('SessionManager: a dormant session', () => {
   it('lists and opens from the V3 file', async () => {
     const proc = fakeKiroProcess({ sessionId: 'sess_dormant' });
     const { mgr, chatId } = await managerWith(proc);

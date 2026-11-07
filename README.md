@@ -41,8 +41,8 @@ Needs Node 24+, since Casper keeps its state in SQLite via the built-in
 Casper is a client for it, so nothing works without it.
 
 **kiro-cli 3.x, tested against 3.1.** Casper runs kiro's V3 engine
-(`kiro-cli acp --agent-engine v3`). Chats from an earlier Casper still open: kiro
-copies each kiro 2.x session into its V3 store the first time Casper loads it.
+(`kiro-cli acp --agent-engine v3`) and reads only its session store, so chats from a
+Casper that ran kiro 2.x do not open.
 
 ```bash
 npm install -g @joeyshi12/casper
@@ -121,7 +121,7 @@ inside it, and `CASPER_WEB_DIST`, which is install layout rather than a preferen
 | `CASPER_TOKEN` | `token` | _(generated)_ | Entered once at login, exchanged for a per-device cookie |
 | `CASPER_SESSION_TTL_SECONDS` | `sessionTtlSeconds` | `604800` | Device-login lifetime, slid forward on activity |
 | `KIRO_BIN` | `kiroBin` | `kiro-cli` | Path to the kiro-cli binary |
-| `CASPER_KIRO_SESSIONS_DIR` | `kiroSessionsDir` | `~/.kiro/sessions` | Where kiro-cli keeps its own session files, which Casper reads. kiro 2.x's are in `cli/` under it |
+| `CASPER_KIRO_SESSIONS_DIR` | `kiroSessionsDir` | `~/.kiro/sessions` | Where kiro-cli keeps its own session files, which Casper reads |
 | `DEFAULT_CWD` | `defaultCwd` | cwd | Working directory for new sessions |
 | `DEFAULT_AGENT` | `defaultAgent` | `casper` | Agent for new sessions, so widgets work out of the box. If it is missing, kiro falls back to its Default mode on its own |
 | `CASPER_FILE_ROOT` | `fileRoot` | `/` | Confines the file browser. Defaults to everything the server can read; narrow it to keep authenticated users out of system files |
