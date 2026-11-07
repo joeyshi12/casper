@@ -64,6 +64,9 @@ export function classifyTool(tool: { name?: string; title?: string; kind?: strin
   if (tool.title === 'grep' || (typeof inp.pattern === 'string' && !has('operations'))) {
     return 'grep';
   }
+  // kiro V3 gives its code search, file search and directory listing kind 'search', and
+  // its web search kind 'other'.
+  if (k === 'search' && tool.title !== 'web_search') return 'grep';
   if (
     k === 'edit' ||
     tool.title === 'write' ||
@@ -124,6 +127,8 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : und
 const baseName = (p: string): string => p.split('/').pop() || p;
 
 function readTarget(input: Block): string | undefined {
+  // kiro V3 reads one file, named by `path`.
+  if (typeof input.path === 'string') return input.path;
   const ops = Array.isArray(input.operations) ? input.operations : [];
   for (const op of ops) {
     const o = isObj(op) ? op : null;
@@ -161,8 +166,10 @@ function toolTarget(tool: ToolLike, kind: ToolKind): string | undefined {
       const p = readTarget(inp);
       return p ? baseName(p) : undefined;
     }
-    case 'grep':
-      return str(inp.pattern);
+    case 'grep': {
+      const p = str(inp.path);
+      return str(inp.pattern) ?? str(inp.query) ?? (p ? baseName(p) : undefined);
+    }
     case 'introspect':
       return str(inp.query) ?? str(inp.doc_path);
     case 'webfetch': {

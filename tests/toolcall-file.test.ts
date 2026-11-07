@@ -304,4 +304,55 @@ describe('shell and web search bodies (rendered in a DOM)', () => {
     assert.deepEqual(sites, ['mcp.so', 'pypi.org']);
     react.act(() => root.unmount());
   });
+
+  // kiro V3 names none of its built-in tools, so these come with a kind and an input only.
+  it('a kiro V3 web search lists the results kiro sent as its raw output', async () => {
+    await open({
+      id: 'web_search_1', title: 'web_search', kind: 'other', status: 'completed',
+      input: { query: 'kiro cli 3.1' },
+      output: { results: [{ title: 'Docs', url: 'https://kiro.dev/docs/cli/' }] },
+      content: [{ type: 'content', content: { type: 'text', text: 'Found 1 search result(s)' } }],
+    });
+    assert.equal(host.querySelector('.toolline-text').textContent, 'Searched the web');
+    click();
+    const sites = [...host.querySelectorAll('.websearch-site')].map((s: Any) => s.textContent);
+    assert.deepEqual(sites, ['kiro.dev']);
+    react.act(() => root.unmount());
+  });
+
+  it('a kiro V3 file read shows the file without the wrapper kiro puts round it', async () => {
+    await open({
+      id: 'rd', title: 'Read File', kind: 'read', status: 'completed',
+      input: { path: '/tmp/out.txt', offset: null, limit: null },
+      content: [{ type: 'content', content: { type: 'text', text: '<file name="/tmp/out.txt" language="plaintext" >\n<content>\nhello\n\n</content>\n</file>' } }],
+    });
+    assert.equal(host.querySelector('.toolline-text').textContent, 'Read out.txt');
+    click();
+    assert.equal(host.querySelector('.toolcall-file-name').textContent, '/tmp/out.txt');
+    const body = host.querySelector('.toolcall-body').textContent;
+    assert.ok(body.includes('hello') && !body.includes('<content>'), body);
+    react.act(() => root.unmount());
+  });
+
+  it('a kiro V3 file write shows the text it wrote', async () => {
+    await open({
+      id: 'wr', title: 'Write File', kind: 'edit', status: 'completed',
+      input: { path: '/tmp/notes.md', text: 'alpha\nbeta' },
+      content: [],
+    });
+    assert.equal(host.querySelector('.toolline-text').textContent, 'Wrote notes.md');
+    click();
+    assert.ok(host.querySelector('.toolcall-body').textContent.includes('alpha'));
+    react.act(() => root.unmount());
+  });
+
+  it('a kiro V3 code search names what it searched for', async () => {
+    await open({
+      id: 'gr', title: 'Grep Search', kind: 'search', status: 'completed',
+      input: { query: 'gamma', explanation: 'find it' },
+      content: [{ type: 'content', content: { type: 'text', text: 'notes.md\n2:gamma' } }],
+    });
+    assert.equal(host.querySelector('.toolline-text').textContent, 'Searched gamma');
+    react.act(() => root.unmount());
+  });
 });

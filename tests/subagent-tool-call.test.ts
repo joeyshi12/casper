@@ -276,4 +276,35 @@ describe('the subagent tool call (rendered in a DOM)', () => {
     });
     assert.equal(pipelineLine()!.textContent, 'Ran 2 subagents');
   });
+
+  // kiro V3 starts one subagent per call, named in its input, rather than a list of stages.
+  describe('a kiro V3 invoke_sub_agent call', () => {
+    const invokeTool = (status: ToolCallView['status']): ToolCallView =>
+      ({
+        id: 'invoke-1',
+        title: 'Sub-agent: context-gatherer',
+        name: 'invoke_sub_agent',
+        kind: 'other',
+        status,
+        content: [],
+        input: { name: 'context-gatherer', prompt: 'Map the server.', explanation: 'why', contextFiles: [] },
+      }) as unknown as ToolCallView;
+
+    it('shows its one subagent by name while the list is still loading', async () => {
+      api.subagents = () => new Promise(() => {});
+      render(invokeTool('in_progress'));
+      assert.equal(pipelineLine()!.textContent, 'Running 1 subagent, 0 done');
+      assert.equal(rows().length, 1);
+      assert.ok(rows()[0]!.textContent?.includes('context-gatherer'));
+    });
+
+    it('shows the row the server lists for it', async () => {
+      api.subagents = async () => ({
+        subagents: [summary({ sessionId: 'sub-1', stageName: 'context-gatherer', toolCallId: 'invoke-1', status: 'completed', activity: undefined })],
+      });
+      render(invokeTool('completed'));
+      await flush();
+      assert.equal(pipelineLine()!.textContent, 'Ran 1 subagent');
+    });
+  });
 });

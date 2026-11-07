@@ -168,7 +168,7 @@ export function Sidebar({
                       {s.title}
                     </span>
                     <span className="srow-sub">
-                      <span className="srow-agent">{s.agentId ?? 'kiro_default'}</span>
+                      <span className="srow-agent">{s.agentId ?? 'vibe'}</span>
                       <span className="srow-dot">·</span>
                       {loadingId === s.chatId && (
                         <Spinner size={11} className="srow-spinner" />

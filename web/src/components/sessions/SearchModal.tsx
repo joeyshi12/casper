@@ -98,7 +98,7 @@ export function SearchModal({ sessions, onOpen, onClose }: Props) {
                 onClick={() => choose(s.chatId)}
               >
                 <span className="search-result-title">{s.title}</span>
-                <span className="search-result-agent">{s.agentId ?? 'kiro_default'}</span>
+                <span className="search-result-agent">{s.agentId ?? 'vibe'}</span>
               </button>
             ))
           )}

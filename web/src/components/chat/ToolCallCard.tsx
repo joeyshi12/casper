@@ -429,7 +429,16 @@ function renderWrite(tool: ToolCallView): ReactNode {
   }
   const d = firstDiff(tool.content);
   if (d) return withPath(<DiffView diff={lineDiff(d.oldText, d.newText)} />);
+  // kiro V3 writes a whole file from `text`; only a live call carries its diff.
+  const text = str(inp?.text);
+  if (text !== undefined) return withPath(<Code code={text} lang={langFromPath(path)} />);
   return withPath(renderGeneric(tool));
+}
+
+/** kiro V3 wraps a file it read in `<file ...><content>...</content></file>`. */
+function unwrapFile(text: string): string {
+  const m = /^\s*<file\b[^>]*>\s*<content>\n?([\s\S]*?)\n?<\/content>\s*<\/file>\s*$/.exec(text);
+  return m ? m[1]! : text;
 }
 
 function renderRead(tool: ToolCallView): ReactNode {
@@ -441,12 +450,14 @@ function renderRead(tool: ToolCallView): ReactNode {
     return renderGeneric(tool);
   }
   const textOp = ops.map(asObj).find((o) => o && o.mode !== 'Image');
-  const path = textOp && typeof textOp.path === 'string' ? textOp.path : '';
-  const lang = textOp?.mode === 'Line' ? langFromPath(path) : 'text';
+  // kiro V3 reads one file, named by `path`.
+  const filePath = textOp ? undefined : str(inp?.path);
+  const path = filePath ?? (textOp && typeof textOp.path === 'string' ? textOp.path : '');
+  const lang = textOp?.mode === 'Line' || filePath ? langFromPath(path) : 'text';
   return (
     <>
       {path && <FileHeading path={path} />}
-      <Code code={text} lang={lang} />
+      <Code code={filePath ? unwrapFile(text) : text} lang={lang} />
     </>
   );
 }
@@ -592,7 +603,8 @@ function searchHits(j: Record<string, unknown> | null): SearchHit[] | null {
 
 function renderWebSearch(tool: ToolCallView): ReactNode {
   const blocks = toolBlocks(tool);
-  const hits = searchHits(firstJsonData(blocks));
+  // kiro V3 sends the results as the call's raw output.
+  const hits = searchHits(firstJsonData(blocks) ?? asObj(tool.output));
   if (!hits) return renderGeneric(tool);
   return (
     <ul className="websearch">
