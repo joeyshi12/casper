@@ -1,4 +1,4 @@
-import type { SessionUpdate, ToolCallProgressUpdate, ToolCallUpdate } from './acp.js';
+import { kiroToolName, type SessionUpdate, type ToolCallProgressUpdate, type ToolCallUpdate } from './acp.js';
 import type { TranscriptItem } from './rest-dto.js';
 
 /** Streamed text is held in the draft and committed as messages by the next tool call or
@@ -60,7 +60,7 @@ export function foldSessionUpdate(
   }
   if (u.sessionUpdate === 'tool_call') {
     const tc = u as ToolCallUpdate;
-    const toolName = (tc as { _meta?: { kiro?: { toolName?: string } } })._meta?.kiro?.toolName;
+    const toolName = kiroToolName(tc);
     return {
       items: [
         ...commitDraft(draft, `s-${seq}`, ts),

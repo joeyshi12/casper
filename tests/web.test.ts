@@ -42,8 +42,11 @@ import {
 } from '../web/src/util/toolRender.js';
 import {
   ATTACHMENTS_PREFIX,
+  emptyDraft,
+  foldSessionUpdate,
   stripAttachmentsLine,
 } from '@casper/shared';
+import { isSubagentCall } from '../web/src/util/subagentCall.js';
 import {
   TranscriptViewport,
   type ViewportContent,
@@ -83,6 +86,48 @@ describe('attachments line (sent for the agent; stripped from the bubble)', () =
   });
 });
 
+// kiro V3 sends no tool name, so the name the widget, choice and subagent renderers key on
+// comes from its metadata.
+describe('tool names from kiro V3 live updates', () => {
+  const fold = (u: Record<string, unknown>) => {
+    const d = foldSessionUpdate(emptyDraft(), { sessionUpdate: 'tool_call', toolCallId: 't1', ...u }, 1, 0);
+    const item = d.items[0];
+    assert.ok(item?.type === 'tool_call');
+    return item.tool;
+  };
+
+  it('an MCP call is named server/tool, so its renderer finds it', () => {
+    const tool = fold({
+      title: '@casper/show_choice',
+      kind: 'other',
+      rawInput: { question: 'Pick one', options: [{ label: 'A' }, { label: 'B' }] },
+      _meta: { kiro: { serverName: 'casper', toolOrigin: 'default' } },
+    });
+    assert.equal(tool.name, 'casper/show_choice');
+    assert.equal(choiceCallOf(tool)?.question, 'Pick one');
+    assert.equal(toolLabel(tool), '@casper/show_choice');
+    const widget = fold({ title: '@casper/show_widget', rawInput: { title: 't', widget_code: '<p>' }, _meta: { kiro: { serverName: 'casper' } } });
+    assert.equal(widgetCallOf(widget)?.code, '<p>');
+  });
+
+  it('the call that starts a subagent is named invoke_sub_agent', () => {
+    const tool = fold({
+      title: 'Sub-agent: context-gatherer',
+      kind: 'other',
+      rawInput: { name: 'context-gatherer', prompt: 'go' },
+      _meta: { kiro: { kind: 'agent-subtask', agentSubtaskId: 'sub-1' } },
+    });
+    assert.equal(tool.name, 'invoke_sub_agent');
+    assert.equal(isSubagentCall(tool), true);
+  });
+
+  it('a built-in tool stays unnamed, even with a title that looks like an MCP tool', () => {
+    const tool = fold({ title: 'npm i @casper/web', kind: 'execute', rawInput: { command: 'npm i @casper/web' }, _meta: { kiro: { toolOrigin: 'default' } } });
+    assert.equal(tool.name, undefined);
+    assert.equal(classifyTool(tool), 'shell');
+  });
+});
+
 describe('tool-call rendering: classifyTool', () => {
   const cls = classifyTool;
   // Canonical name drives classification identically live and hydrated.
@@ -104,7 +149,14 @@ describe('tool-call rendering: classifyTool', () => {
   it('live edit -> write', () => assert.equal(cls({ title: 'Editing app.css', kind: 'edit', input: { command: 'strReplace', path: '/x', oldStr: 'a', newStr: 'b' } }), 'write'));
   it('live search (pattern) -> grep', () => assert.equal(cls({ title: "Searching for 'x'", kind: 'search', input: { pattern: 'x', path: '/y' } }), 'grep'));
   it('web_search (query) -> websearch', () => assert.equal(cls({ title: 'web_search', kind: 'search', input: { query: 'x' } }), 'websearch'));
-  it('live web_search -> websearch', () => assert.equal(cls({ title: 'Searching the web', kind: 'search', input: { query: 'x' } }), 'websearch'));
+  // What kiro V3 sends live, with no tool name: the shape and kind are all there is.
+  it('kiro V3 web search -> websearch', () => assert.equal(cls({ title: 'web_search', kind: 'other', input: { query: 'x' } }), 'websearch'));
+  it('kiro V3 code search -> grep', () => assert.equal(cls({ title: 'Grep Search', kind: 'search', input: { query: 'x' } }), 'grep'));
+  it('kiro V3 file search -> grep', () => assert.equal(cls({ title: 'File Search', kind: 'search', input: { query: '*.md' } }), 'grep'));
+  it('kiro V3 directory listing -> grep', () => assert.equal(cls({ title: 'List Directory', kind: 'search', input: { path: '/z', depth: null } }), 'grep'));
+  it('kiro V3 file write -> write', () => assert.equal(cls({ title: 'Write File', kind: 'edit', input: { path: '/x.md', text: 'y' } }), 'write'));
+  it('kiro V3 file read -> read', () => assert.equal(cls({ title: 'Read File', kind: 'read', input: { path: '/x.md' } }), 'read'));
+  it('kiro V3 shell -> shell', () => assert.equal(cls({ title: 'List the files', kind: 'execute', input: { command: 'ls' } }), 'shell'));
   it('web_fetch (url) -> webfetch', () => assert.equal(cls({ title: 'web_fetch', input: { url: 'https://x' } }), 'webfetch'));
   it('introspect (title) -> introspect', () => assert.equal(cls({ title: 'introspect', input: { query: 'x' } }), 'introspect'));
   it('introspect (doc_path) -> introspect', () => assert.equal(cls({ title: 'Looking it up', input: { doc_path: 'features/x.md' } }), 'introspect'));

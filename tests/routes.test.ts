@@ -28,7 +28,7 @@ import { registerUploadRoutes } from '../server/src/routes/uploads.js';
 import { registerChatRoutes } from '../server/src/routes/chats.js';
 import { registerWorkspaceRoutes } from '../server/src/routes/workspace.js';
 import { KiroProcess } from '../server/src/session/KiroProcess.js';
-import { listAgents, invalidateAgents } from '../server/src/session/agents.js';
+import { listAgents, invalidateAgents, rememberModes } from '../server/src/session/agents.js';
 import {
   confineToRoot,
   isValidSessionId,
@@ -302,22 +302,19 @@ describe('the agent list does not go stale', () => {
     }
   });
 
-  it('always includes the built-in agents, even when kiro reports nothing', async () => {
+  it("always includes kiro's Default mode, even when kiro reports nothing", async () => {
     const prev = config.kiroBin;
     config.kiroBin = path.join(os.tmpdir(), 'casper-no-such-binary');
     try {
       invalidateAgents();
       const ids = (await listAgents()).map((a) => a.id);
-      assert.ok(ids.includes('kiro_default'));
+      assert.deepEqual(ids, ['vibe']);
     } finally {
       config.kiroBin = prev;
       invalidateAgents();
     }
   });
 
-  // kiro's table format has drifted: 2.19 prints its own agents as (Built-in) where 2.11
-  // used Global/Workspace/Local. The parser must accept both, or it silently drops every
-  // built-in agent.
   const agentBin = (table: string) => {
     const p = path.join(os.tmpdir(), `casper-agentlist-${Date.now()}-${Math.random()}.sh`);
     // The table goes to stderr, which is where kiro prints it.
@@ -341,7 +338,9 @@ describe('the agent list does not go stale', () => {
     }
   };
 
-  it("reads kiro 2.19's table, where built-ins are marked (Built-in)", async () => {
+  // kiro 3.1 still prints kiro 2.x's own agents, marked (Built-in), which no V3 session
+  // can run, so picking one would silently start the Default mode instead.
+  it("leaves out kiro 2.x's built-in agents and keeps the user's", async () => {
     const ids = await idsFrom(
       [
         'Workspace: ~/proj/.kiro/agents',
@@ -350,18 +349,30 @@ describe('the agent list does not go stale', () => {
         '* kiro_default    (Built-in)    Default agent',
         '  casper          Global        Casper - a web interface',
         '  kiro_help       (Built-in)    Help agent',
+        '  reviewer        Workspace     Reviews code',
       ].join('\n'),
     );
-    assert.deepEqual(ids, ['kiro_default', 'casper', 'kiro_help']);
+    assert.deepEqual(ids, ['vibe', 'casper', 'reviewer']);
   });
 
-  it("still reads kiro 2.11's table, which had no (Built-in) column", async () => {
-    const ids = await idsFrom(
-      ['* kiro_default   Global     Default agent', '  casper         Global     A web interface'].join(
-        '\n',
-      ),
-    );
-    assert.deepEqual(ids, ['kiro_default', 'casper']);
+  it('lists the modes a kiro session reported, until a reload forgets them', async () => {
+    const prev = config.kiroBin;
+    config.kiroBin = path.join(os.tmpdir(), 'casper-no-such-binary');
+    try {
+      invalidateAgents();
+      rememberModes([
+        { id: 'vibe', name: 'Default' },
+        { id: 'casper', name: 'casper' },
+      ]);
+      assert.deepEqual((await listAgents()).map((a) => a.id), ['vibe', 'casper']);
+      rememberModes([]);
+      assert.deepEqual((await listAgents()).map((a) => a.id), ['vibe', 'casper'], 'an empty report changes nothing');
+      invalidateAgents();
+      assert.deepEqual((await listAgents()).map((a) => a.id), ['vibe']);
+    } finally {
+      config.kiroBin = prev;
+      invalidateAgents();
+    }
   });
 
   it('does not mistake the "Global: <path>" header for an agent', async () => {
@@ -370,7 +381,7 @@ describe('the agent list does not go stale', () => {
         '\n',
       ),
     );
-    assert.deepEqual(ids, ['casper'], 'the header lines are not rows');
+    assert.deepEqual(ids, ['vibe', 'casper'], 'the header lines are not rows');
   });
 });
 

@@ -40,7 +40,9 @@ Needs Node 24+, since Casper keeps its state in SQLite via the built-in
 `node:sqlite`. It also needs [`kiro-cli`](https://kiro.dev) installed and logged in.
 Casper is a client for it, so nothing works without it.
 
-**kiro-cli 2.x, tested against 2.11 to 2.19. Not yet compatible with 3.0.**
+**kiro-cli 3.x, tested against 3.1.** Casper runs kiro's V3 engine
+(`kiro-cli acp --agent-engine v3`) and reads only its session store, so chats from a
+Casper that ran kiro 2.x do not open.
 
 ```bash
 npm install -g @joeyshi12/casper
@@ -119,9 +121,9 @@ inside it, and `CASPER_WEB_DIST`, which is install layout rather than a preferen
 | `CASPER_TOKEN` | `token` | _(generated)_ | Entered once at login, exchanged for a per-device cookie |
 | `CASPER_SESSION_TTL_SECONDS` | `sessionTtlSeconds` | `604800` | Device-login lifetime, slid forward on activity |
 | `KIRO_BIN` | `kiroBin` | `kiro-cli` | Path to the kiro-cli binary |
-| `CASPER_KIRO_SESSIONS_DIR` | `kiroSessionsDir` | `~/.kiro/sessions/cli` | Where kiro-cli keeps its own session files, which Casper reads |
+| `CASPER_KIRO_SESSIONS_DIR` | `kiroSessionsDir` | `~/.kiro/sessions` | Where kiro-cli keeps its own session files, which Casper reads |
 | `DEFAULT_CWD` | `defaultCwd` | cwd | Working directory for new sessions |
-| `DEFAULT_AGENT` | `defaultAgent` | `casper` | Agent for new sessions, so widgets work out of the box. If it is missing, kiro falls back to `kiro_default` on its own |
+| `DEFAULT_AGENT` | `defaultAgent` | `casper` | Agent for new sessions, so widgets work out of the box. If it is missing, kiro falls back to its Default mode on its own |
 | `CASPER_FILE_ROOT` | `fileRoot` | `/` | Confines the file browser. Defaults to everything the server can read; narrow it to keep authenticated users out of system files |
 | `MAX_LIVE_SESSIONS` | `maxLiveSessions` | `6` | Concurrent live kiro processes |
 | `EVENT_BUFFER_SIZE` | `eventBufferSize` | `5000` | Events kept per session for replay on reconnect; a client older than the buffer refetches instead |
@@ -135,9 +137,11 @@ lengthy turns. PWA install and reliable reconnects need HTTPS.
 
 ## Security
 
-Casper launches kiro with `--trust-all-tools` so unattended runs never block on
-approvals. The agent can run commands and write files without asking, so treat
-access to Casper as equivalent to a shell on the machine.
+Casper allows every tool call kiro asks about, once, so unattended runs never block
+on approvals. It never picks "always allow", so no rule is saved that would apply
+outside Casper, and kiro's deny rules still apply. The agent can run commands and
+write files without asking, so treat access to Casper as equivalent to a shell on the
+machine.
 
 `CASPER_FILE_ROOT` is the only limit on what the file endpoints will read, and it defaults
 to everything the server can read. Narrow it if that matters to you.

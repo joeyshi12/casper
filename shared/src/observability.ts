@@ -1,4 +1,4 @@
-/** The folded state Casper derives from kiro's `_kiro.dev/*` notifications. */
+/** The folded state Casper derives from kiro's context-usage and compaction events. */
 
 export type TurnStatus = 'idle' | 'running' | 'cancelling';
 

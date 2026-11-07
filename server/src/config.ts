@@ -158,17 +158,18 @@ export const config = {
   kiroBin: resolveKiroBin(setting('KIRO_BIN', 'kiroBin', 'kiro-cli'), home),
   defaultCwd: setting('DEFAULT_CWD', 'defaultCwd', process.cwd()),
   maxLiveSessions: settingInt('MAX_LIVE_SESSIONS', 'maxLiveSessions', 6),
-  /** The agent Casper installs, with the widget tools. Falls back to kiro_default
-   *  if missing rather than failing. */
+  /** The agent Casper installs, with the widget tools. kiro falls back to its Default
+   *  mode if it is missing rather than failing. */
   defaultAgent: setting('DEFAULT_AGENT', 'defaultAgent', 'casper'),
   /** Filesystem root the file endpoints are confined to. Defaults to /; narrow it
    *  to keep authenticated users out of system files such as /etc or SSH keys. */
   fileRoot: path.resolve(setting('CASPER_FILE_ROOT', 'fileRoot', '/')),
+  /** kiro's session store, one directory per workspace. */
   kiroSessionsDir: path.resolve(
     setting(
       'CASPER_KIRO_SESSIONS_DIR',
       'kiroSessionsDir',
-      path.join(home, '.kiro', 'sessions', 'cli'),
+      path.join(home, '.kiro', 'sessions'),
     ),
   ),
   casperDataDir: dataDirPath(),

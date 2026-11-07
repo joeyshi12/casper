@@ -23,9 +23,9 @@ interface RawModel {
 let cache: ModelInfo[] | null = null;
 
 /**
- * The model kiro starts new chats with, from `settings chat.defaultModel`. This is what
- * a session actually gets when Casper passes no --model, and it differs from the list's
- * own default_model ('auto'), so the picker would otherwise name the wrong one.
+ * The model the user set as kiro's default, from `settings chat.defaultModel`. It
+ * differs from the list's own default_model ('auto'), and Casper gives it to new chats
+ * (see defaultModelId).
  */
 async function configuredDefault(): Promise<string | undefined> {
   try {
@@ -71,6 +71,19 @@ export async function listModels(log: MiniLogger): Promise<ModelInfo[]> {
   }));
   log.info({ count: cache.length, default: preferred }, 'loaded model list');
   return cache;
+}
+
+/**
+ * The model a new chat gets when none was picked: the one the picker marks as default.
+ * kiro V3 does not apply `chat.defaultModel` to an ACP session itself, so Casper passes
+ * it, or every such chat would run on 'auto'.
+ */
+export async function defaultModelId(log: MiniLogger): Promise<string | undefined> {
+  try {
+    return (await listModels(log)).find((m) => m.isDefault)?.modelId;
+  } catch {
+    return undefined; // kiro is unavailable; the session gets kiro's own default
+  }
 }
 
 export async function kiroVersion(): Promise<string | undefined> {

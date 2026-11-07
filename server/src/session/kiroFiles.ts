@@ -1,119 +1,22 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type {
-  TranscriptItem,
-  TranscriptMessage,
-  StoredTurnEnding,
-  TranscriptToolCall,
-} from '@casper/shared';
+import type { MessageAttachment, StoredTurnEnding, TranscriptItem } from '@casper/shared';
 import { stripAttachmentsLine } from '@casper/shared';
-import type { MessageAttachment } from '@casper/shared';
-import { config } from '../config.js';
 import { isValidSessionId } from '../util/paths.js';
+import {
+  readSubExecutions,
+  readV3Entries,
+  readV3Session,
+  subExecutionFile,
+  v3SessionDir,
+  v3SessionDirs,
+  type SubExecution,
+} from './kiroV3Files.js';
 
-// Reads kiro-cli's own on-disk session persistence
-// (~/.kiro/sessions/cli/<id>.{json,jsonl}) so Casper can list and hydrate
-// dormant sessions without spawning a process.
+// Reads kiro-cli's own session files so Casper can list and hydrate dormant sessions
+// without spawning a process. The file layout is in kiroV3Files.ts.
 
-interface KiroMetering {
-  value: number;
-  unit: string;
-  unitPlural: string;
-}
-
-interface KiroTurnMetadata {
-  metering_usage?: KiroMetering[];
-  context_usage_percentage?: number;
-}
-
-interface KiroSessionJson {
-  session_id: string;
-  cwd: string;
-  created_at: string;
-  updated_at: string;
-  title?: string;
-  parent_session_id?: string;
-  session_created_reason?: string;
-  session_state?: {
-    agent_name?: string;
-    rts_model_state?: {
-      model_info?: { model_id?: string; context_window_tokens?: number };
-      context_usage_percentage?: number;
-    };
-    conversation_metadata?: {
-      user_turn_metadatas?: KiroTurnMetadata[];
-    };
-  };
-}
-
-// A content block is always {kind, data}; kept loose and narrowed with runtime
-// guards, since a `kind: string` catch-all widens `data` back to unknown.
-interface KiroContentBlock {
-  kind: string;
-  data: unknown;
-}
-
-interface KiroToolUseData {
-  toolUseId: string;
-  name?: string;
-  input?: unknown;
-}
-interface KiroToolResultData {
-  toolUseId: string;
-  status?: string;
-  content?: unknown;
-}
-
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-
-function isContentBlock(v: unknown): v is KiroContentBlock {
-  return isRecord(v) && typeof v.kind === 'string';
-}
-
-/** The `data` of a `toolUse` block, or null if it isn't one. */
-function toolUseData(b: KiroContentBlock): KiroToolUseData | null {
-  if (b.kind !== 'toolUse' || !isRecord(b.data)) return null;
-  const { toolUseId, name, input } = b.data;
-  if (typeof toolUseId !== 'string') return null;
-  return { toolUseId, name: typeof name === 'string' ? name : undefined, input };
-}
-
-/** The `data` of a `toolResult` block, or null if it isn't one. */
-function toolResultData(b: KiroContentBlock): KiroToolResultData | null {
-  if (b.kind !== 'toolResult' || !isRecord(b.data)) return null;
-  const { toolUseId, status, content } = b.data;
-  if (typeof toolUseId !== 'string') return null;
-  return { toolUseId, status: typeof status === 'string' ? status : undefined, content };
-}
-
-interface KiroJsonlEntry {
-  kind: string;
-  data: {
-    message_id?: string;
-    content?: unknown;
-    meta?: { timestamp?: number };
-    summary?: string;
-  };
-}
-
-/** The well-formed {kind, data} blocks of an entry, skipping anything malformed. */
-function contentBlocks(content: unknown): KiroContentBlock[] {
-  return Array.isArray(content) ? content.filter(isContentBlock) : [];
-}
-
-function blockText(c: KiroContentBlock): string {
-  if (typeof c.data === 'string') return c.data;
-  if (isRecord(c.data) && typeof c.data.text === 'string') return c.data.text;
-  return '';
-}
-
-/** Tool-result blocks worth sending, minus inline images: kiro stores those as a
- *  raw byte array (one page measured 5.1 MB vs ~100 KB without), and nothing
- *  renders them anyway. */
-function renderableBlocks(content: unknown): KiroContentBlock[] {
-  return contentBlocks(content).filter((b) => b.kind !== 'image');
-}
+export type { SubExecution } from './kiroV3Files.js';
 
 /** kiro's own session file. A chat's identity and overrides live in casper.db. */
 export interface PersistedSession {
@@ -127,153 +30,55 @@ export interface PersistedSession {
   contextUsagePercentage?: number;
 }
 
-function summarize(j: KiroSessionJson): PersistedSession {
-  const state = j.session_state;
-  const turns = state?.conversation_metadata?.user_turn_metadatas ?? [];
-  const contextUsagePercentage =
-    state?.rts_model_state?.context_usage_percentage ??
-    turns[turns.length - 1]?.context_usage_percentage;
+/** A transcript before stored turn endings and attachments are merged in. A prompt is
+ *  kept apart from the items so the merge can find each turn. */
+export type TranscriptEntry =
+  | { kind: 'prompt'; id: string; text: string; atMs?: number; timestamp?: number }
+  | { kind: 'item'; item: TranscriptItem };
 
-  return {
-    sessionId: j.session_id,
-    title: j.title?.trim() ?? '',
-    cwd: j.cwd,
-    createdAt: j.created_at,
-    updatedAt: j.updated_at,
-    agentId: state?.agent_name,
-    modelId: state?.rts_model_state?.model_info?.model_id,
-    contextUsagePercentage,
-  };
+/** One session's metadata, or null if kiro has no such session. */
+export async function readPersistedSession(sessionId: string): Promise<PersistedSession | null> {
+  const dir = await v3SessionDir(sessionId);
+  return dir ? readV3Session(dir) : null;
 }
 
-/** Deletes kiro's <id>.{json,jsonl,history,lock} and its per-session <id>/ dir.
- *  .lock is kiro's "active in another process" marker. */
-export async function deletePersistedSession(sessionId: string): Promise<void> {
-  if (!isValidSessionId(sessionId)) return;
-  const targets = [
-    path.join(config.kiroSessionsDir, `${sessionId}.json`),
-    path.join(config.kiroSessionsDir, `${sessionId}.jsonl`),
-    path.join(config.kiroSessionsDir, `${sessionId}.history`),
-    path.join(config.kiroSessionsDir, `${sessionId}.lock`),
-    path.join(config.kiroSessionsDir, sessionId),
-  ];
-  await Promise.all(targets.map((f) => fs.rm(f, { recursive: true, force: true })));
-}
-
-/** Read one session's metadata summary, or null if it doesn't exist. */
-export async function readPersistedSession(
-  sessionId: string,
-): Promise<PersistedSession | null> {
-  if (!isValidSessionId(sessionId)) return null;
-  try {
-    const raw = await fs.readFile(
-      path.join(config.kiroSessionsDir, `${sessionId}.json`),
-      'utf8',
-    );
-    return summarize(JSON.parse(raw) as KiroSessionJson);
-  } catch {
-    return null;
-  }
-}
-
-/** One child session, as recorded in its own file, with the title of its own task. */
-export interface ChildSession extends PersistedSession {
-  parentSessionId: string;
-}
-
-/* kiro stops updating a child's .json updated_at seconds after it starts; the .jsonl is
-   written on every turn, so its mtime is when the subagent last did anything. */
-async function withLastWrite(child: ChildSession): Promise<ChildSession> {
-  try {
-    const st = await fs.stat(path.join(config.kiroSessionsDir, `${child.sessionId}.jsonl`));
-    const mtime = st.mtime.toISOString();
-    return mtime > child.updatedAt ? { ...child, updatedAt: mtime } : child;
-  } catch {
-    return child;
-  }
-}
-
-/** One child session of the given parent, or null if it is missing or belongs elsewhere. */
-export async function readChildSession(childSessionId: string, parentSessionId: string): Promise<ChildSession | null> {
-  if (!isValidSessionId(childSessionId)) return null;
-  try {
-    const raw = await fs.readFile(path.join(config.kiroSessionsDir, `${childSessionId}.json`), 'utf8');
-    const j = JSON.parse(raw) as KiroSessionJson;
-    return j.parent_session_id === parentSessionId ? await withLastWrite({ ...summarize(j), parentSessionId }) : null;
-  } catch {
-    return null;
-  }
-}
-
-export async function listChildSessions(parentSessionId: string): Promise<ChildSession[]> {
-  if (!isValidSessionId(parentSessionId)) return [];
-  let names: string[];
-  try {
-    names = await fs.readdir(config.kiroSessionsDir);
-  } catch {
-    return [];
-  }
-  const out: ChildSession[] = [];
+/** Many sessions' metadata at once, keyed by id, scanning the store only once. */
+export async function readPersistedSessions(sessionIds: string[]): Promise<Map<string, PersistedSession>> {
+  const dirs = await v3SessionDirs();
+  const out = new Map<string, PersistedSession>();
   await Promise.all(
-    names
-      .filter((n) => n.endsWith('.json'))
-      .map(async (n) => {
-        try {
-          const raw = await fs.readFile(path.join(config.kiroSessionsDir, n), 'utf8');
-          const j = JSON.parse(raw) as KiroSessionJson;
-          if (j.parent_session_id === parentSessionId) {
-            out.push(await withLastWrite({ ...summarize(j), parentSessionId }));
-          }
-        } catch {
-          /* unreadable or malformed file; skip it */
-        }
-      }),
+    sessionIds.filter(isValidSessionId).map(async (id) => {
+      const dir = dirs.get(id);
+      const found = dir ? await readV3Session(dir) : null;
+      if (found) out.set(id, found);
+    }),
   );
   return out;
 }
 
+export async function deletePersistedSession(sessionId: string): Promise<void> {
+  const dir = await v3SessionDir(sessionId);
+  if (dir) await fs.rm(dir, { recursive: true, force: true });
+}
+
+/** Whether kiro can load this session back. Loading an id kiro has not stored starts an
+ *  empty session under that id instead. */
+export async function isLoadable(sessionId: string): Promise<boolean> {
+  return (await v3SessionDir(sessionId)) !== undefined;
+}
+
+async function readEntries(sessionId: string): Promise<TranscriptEntry[]> {
+  const dir = await v3SessionDir(sessionId);
+  return dir ? readV3Entries(path.join(dir, 'messages.jsonl')) : [];
+}
+
 /** The ordinal the next prompt takes, counted the same way hydrateTranscript does. */
 export async function promptCount(sessionId: string): Promise<number> {
-  const entries = await readJsonlEntries(sessionId);
-  return entries.filter((e) => e.kind === 'Prompt').length;
+  return (await readEntries(sessionId)).filter((e) => e.kind === 'prompt').length;
 }
 
-/** A session's jsonl as parsed entries, skipping blank and malformed lines. */
-async function readJsonlEntries(sessionId: string): Promise<KiroJsonlEntry[]> {
-  if (!isValidSessionId(sessionId)) return [];
-  let raw: string;
-  try {
-    raw = await fs.readFile(path.join(config.kiroSessionsDir, `${sessionId}.jsonl`), 'utf8');
-  } catch {
-    return [];
-  }
-  const entries: KiroJsonlEntry[] = [];
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      entries.push(JSON.parse(trimmed) as KiroJsonlEntry);
-    } catch {
-      /* a malformed line is skipped */
-    }
-  }
-  return entries;
-}
-
-/** Whether kiro has recorded any conversation for this session; a 0-byte jsonl means
- *  no. Verified against kiro 2.11. */
-export async function hasRecordedTurns(sessionId: string): Promise<boolean> {
-  if (!isValidSessionId(sessionId)) return false;
-  try {
-    const st = await fs.stat(path.join(config.kiroSessionsDir, `${sessionId}.jsonl`));
-    return st.size > 0;
-  } catch {
-    return false;
-  }
-}
-
-/* kiro stamps a prompt in whole seconds; a prompt belongs to a stored turn if it was
-   written between the turn's start and end, give or take this much. */
+/* A prompt belongs to a stored turn if it was written between the turn's start and end,
+   give or take this much: kiro stamped prompts in whole seconds before V3. */
 const STAMP_PAD_MS = 2000;
 
 function endingItems(e: StoredTurnEnding): TranscriptItem[] {
@@ -289,20 +94,16 @@ function endingItems(e: StoredTurnEnding): TranscriptItem[] {
   return items;
 }
 
-/** Hydrates the transcript from kiro's <id>.jsonl, matching the live stream's shape.
- *  Tool uses live in AssistantMessage content; their results arrive in a later
- *  ToolResults entry, matched back by toolUseId.
- *
- *  A stored ending replaces the entries kiro wrote for its turn, found by prompt text and
- *  time. One whose prompt kiro never wrote is placed by time among the prompts. */
-export async function hydrateTranscript(
-  sessionId: string,
-  attachments?: Map<number, MessageAttachment[]>,
-  endings: StoredTurnEnding[] = [],
-): Promise<TranscriptItem[]> {
+/** Merges stored turn endings and attachments into a session's entries. A stored ending
+ *  replaces the entries kiro wrote for its turn, found by prompt text and time. One whose
+ *  prompt kiro never wrote is placed by time among the prompts. */
+function mergeTranscript(
+  entries: TranscriptEntry[],
+  attachments: Map<number, MessageAttachment[]> | undefined,
+  endings: StoredTurnEnding[],
+): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   let userOrdinal = 0;
-  const toolsById = new Map<string, TranscriptToolCall>();
   const waiting = [...endings];
   let replaced = false;
 
@@ -311,79 +112,67 @@ export async function hydrateTranscript(
     ...endingItems(e),
   ];
 
-  for (const entry of await readJsonlEntries(sessionId)) {
-    const content = contentBlocks(entry.data.content);
-    const textOf = (kind: string) =>
-      content.filter((c) => c.kind === kind).map(blockText).join('');
-    const baseId = entry.data.message_id ?? `${items.length}`;
-    const ts = entry.data.meta?.timestamp;
-    const pushMsg = (msg: TranscriptMessage) => items.push({ type: 'message', message: msg });
-
-    if (entry.kind === 'Prompt') {
-      replaced = false;
-      const text = stripAttachmentsLine(textOf('text'));
-      let matched: StoredTurnEnding | undefined;
-      if (ts !== undefined) {
-        const at = ts * 1000;
-        matched = waiting.find(
-          (e) =>
-            e.prompt.trim() === text.trim() &&
-            at >= e.startedAt - STAMP_PAD_MS &&
-            at <= e.endedAt + STAMP_PAD_MS,
-        );
-        while (waiting.length && waiting[0] !== matched && waiting[0]!.endedAt < at - STAMP_PAD_MS) {
-          items.push(...unrecorded(waiting.shift()!));
-        }
-        if (matched) waiting.splice(waiting.indexOf(matched), 1);
+  for (const entry of entries) {
+    if (entry.kind === 'item') {
+      // A compaction is the conversation's, not the turn's, so it outlives a replacement.
+      if (!replaced || entry.item.type === 'compaction') items.push(entry.item);
+      continue;
+    }
+    replaced = false;
+    const text = stripAttachmentsLine(entry.text);
+    let matched: StoredTurnEnding | undefined;
+    const at = entry.atMs;
+    if (at !== undefined) {
+      matched = waiting.find(
+        (e) =>
+          e.prompt.trim() === text.trim() &&
+          at >= e.startedAt - STAMP_PAD_MS &&
+          at <= e.endedAt + STAMP_PAD_MS,
+      );
+      while (waiting.length && waiting[0] !== matched && waiting[0]!.endedAt < at - STAMP_PAD_MS) {
+        items.push(...unrecorded(waiting.shift()!));
       }
-      const attached = attachments?.get(userOrdinal);
-      userOrdinal++;
-      if (text.trim() || attached?.length)
-        pushMsg({ id: `u-${baseId}`, role: 'user', text, timestamp: ts, attachments: attached });
-      if (matched) {
-        items.push(...endingItems(matched));
-        replaced = true;
-      }
-    } else if (entry.kind === 'AssistantMessage') {
-      if (replaced) continue;
-      const thinking = textOf('thinking');
-      if (thinking.trim())
-        pushMsg({ id: `t-${baseId}`, role: 'thinking', text: thinking.trim(), timestamp: ts });
-      const text = textOf('text');
-      if (text.trim())
-        pushMsg({ id: `a-${baseId}`, role: 'assistant', text, timestamp: ts });
-
-      for (const c of content) {
-        const d = toolUseData(c);
-        if (!d) continue;
-        // Completed by default; ToolResults may override it.
-        const tool: TranscriptToolCall = {
-          id: d.toolUseId,
-          name: d.name,
-          title: d.name ?? d.toolUseId,
-          status: 'completed',
-          input: d.input,
-          content: [],
-        };
-        toolsById.set(d.toolUseId, tool);
-        items.push({ type: 'tool_call', tool });
-      }
-    } else if (entry.kind === 'ToolResults') {
-      if (replaced) continue;
-      for (const c of content) {
-        const d = toolResultData(c);
-        if (!d) continue;
-        const tool = toolsById.get(d.toolUseId);
-        if (!tool) continue;
-        tool.status = d.status === 'error' ? 'failed' : 'completed';
-        tool.content = renderableBlocks(d.content);
-      }
-    } else if (entry.kind === 'Compaction') {
-      const summary = entry.data.summary ?? '';
-      if (summary.trim())
-        items.push({ type: 'compaction', id: `c-${baseId}`, summary, timestamp: ts });
+      if (matched) waiting.splice(waiting.indexOf(matched), 1);
+    }
+    const attached = attachments?.get(userOrdinal);
+    userOrdinal++;
+    if (text.trim() || attached?.length) {
+      items.push({ type: 'message', message: { id: `u-${entry.id}`, role: 'user', text, timestamp: entry.timestamp, attachments: attached } });
+    }
+    if (matched) {
+      items.push(...endingItems(matched));
+      replaced = true;
     }
   }
   for (const e of waiting) items.push(...unrecorded(e));
   return items;
+}
+
+/** Hydrates a session's transcript from kiro's files, matching the live stream's shape. */
+export async function hydrateTranscript(
+  sessionId: string,
+  attachments?: Map<number, MessageAttachment[]>,
+  endings: StoredTurnEnding[] = [],
+): Promise<TranscriptItem[]> {
+  return mergeTranscript(await readEntries(sessionId), attachments, endings);
+}
+
+/** The subagents a session started, or null when kiro has no such session. */
+export async function listSubExecutions(sessionId: string): Promise<SubExecution[] | null> {
+  const dir = await v3SessionDir(sessionId);
+  return dir ? readSubExecutions(dir) : null;
+}
+
+/** One subagent's transcript, or null if the session has no such subagent. Read from
+ *  under the parent's own directory, so a chat can only reach its own subagents. */
+export async function hydrateSubExecution(sessionId: string, subagentId: string): Promise<TranscriptItem[] | null> {
+  const dir = await v3SessionDir(sessionId);
+  const file = dir ? subExecutionFile(dir, subagentId) : undefined;
+  if (!file) return null;
+  try {
+    await fs.access(file);
+  } catch {
+    return null;
+  }
+  return mergeTranscript(await readV3Entries(file), undefined, []);
 }

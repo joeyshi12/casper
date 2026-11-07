@@ -1,108 +1,78 @@
-import type { KiroSubagentInfo, SubagentSummary } from '@casper/shared';
-
-/** One stage as declared in a `subagent` tool call's `rawInput.stages[]`. */
-export interface SubagentStageInput {
-  name: string;
-  depends_on?: string[];
-}
+import type { SubagentSummary } from '@casper/shared';
 
 /**
- * Tracks one chat's subagents, kept in memory for the life of the chat's process.
- * The parent's `subagent` tool_call declares every stage up front by name, including
- * ones waiting on a dependency; `_kiro.dev/subagent/list_update` carries the live
- * session id, status and activity for stages that started, but no tool call id of
- * its own. The two are joined by stage name, scoped to the most recent call still running.
+ * Tracks one chat's subagents, kept in memory for the life of the chat's process. kiro
+ * starts each subagent with a tool call of its own, whose `_meta.kiro.agentSubtaskId`
+ * names the subagent, and sends the subagent's own updates on the parent's session
+ * tagged with that id. Each method returns whether the list changed, so the caller
+ * records a `subagents_changed` event only then.
  */
 export class SubagentTracker {
-  private readonly byChild = new Map<string, SubagentSummary>();
-  private readonly pendingCalls: { toolCallId: string; stages: SubagentStageInput[] }[] = [];
+  private readonly byId = new Map<string, SubagentSummary>();
 
-  callStarted(toolCallId: string, stages: SubagentStageInput[]): void {
-    this.pendingCalls.push({ toolCallId, stages });
+  constructor(private readonly now: () => string = () => new Date().toISOString()) {}
+
+  /** The tool call that starts a subagent arrived. */
+  started(subagentId: string, toolCallId: string, name: string): boolean {
+    if (this.byId.has(subagentId)) return false;
+    const at = this.now();
+    this.byId.set(subagentId, {
+      sessionId: subagentId,
+      stageName: name,
+      toolCallId,
+      status: 'working',
+      createdAt: at,
+      updatedAt: at,
+    });
+    return true;
   }
 
-  callFinished(toolCallId: string): void {
-    const i = this.pendingCalls.findIndex((c) => c.toolCallId === toolCallId);
-    if (i >= 0) this.pendingCalls.splice(i, 1);
+  /** One of the subagent's own updates arrived. `activity` is the title of a tool call it
+   *  started, which becomes the row's "what it is doing now". */
+  progressed(subagentId: string, activity?: string): boolean {
+    const s = this.byId.get(subagentId);
+    if (!s || s.status !== 'working') return false;
+    s.updatedAt = this.now();
+    if (!activity || activity === s.activity) return false;
+    s.activity = activity;
+    return true;
   }
 
-  private callFor(stageName: string): { toolCallId: string; stages: SubagentStageInput[] } | undefined {
-    for (let i = this.pendingCalls.length - 1; i >= 0; i--) {
-      if (this.pendingCalls[i]!.stages.some((s) => s.name === stageName)) return this.pendingCalls[i];
+  /** The call that started a subagent finished. */
+  finished(toolCallId: string, ok: boolean): boolean {
+    for (const s of this.byId.values()) {
+      if (s.toolCallId !== toolCallId || s.status !== 'working') continue;
+      s.status = ok ? 'completed' : 'failed';
+      s.activity = undefined;
+      s.updatedAt = this.now();
+      return true;
     }
-    return undefined;
+    return false;
   }
 
-  /** Folds a list_update into the tracked state, returning links newly resolved
-   *  this call, so the caller persists each one once. */
-  apply(
-    subagents: KiroSubagentInfo[],
-    now: () => string = () => new Date().toISOString(),
-  ): { sessionId: string; toolCallId: string; stageName: string }[] {
-    const resolved: { sessionId: string; toolCallId: string; stageName: string }[] = [];
-    for (const info of subagents) {
-      const existing = this.byChild.get(info.sessionId);
-      const nowIso = now();
-      const toolCallId = existing?.toolCallId ?? this.callFor(info.sessionName)?.toolCallId;
-      if (toolCallId && !existing?.toolCallId) {
-        resolved.push({ sessionId: info.sessionId, toolCallId, stageName: info.sessionName });
-      }
-      this.byChild.set(info.sessionId, {
-        sessionId: info.sessionId,
-        stageName: info.sessionName,
-        toolCallId,
-        status: info.status.type === 'terminated' ? 'completed' : 'working',
-        activity: info.status.message,
-        createdAt: existing?.createdAt ?? nowIso,
-        updatedAt: nowIso,
-      });
-    }
-    return resolved;
-  }
-
-  /** Called when the parent turn ends. The `subagent` tool call blocks the turn, so
-   *  any subagent still working was stopped with it, and kiro does not always send a
-   *  list_update saying so. Returns whether anything changed. */
-  turnEnded(now: () => string = () => new Date().toISOString()): boolean {
-    let changed = this.pendingCalls.length > 0;
-    this.pendingCalls.length = 0;
-    for (const s of this.byChild.values()) {
+  /** Called when the parent turn ends. The turn waits on its subagents, so any still
+   *  working was stopped with it, and kiro does not always report that. */
+  turnEnded(): boolean {
+    let changed = false;
+    for (const s of this.byId.values()) {
       if (s.status !== 'working') continue;
       s.status = 'failed';
       s.activity = 'Stopped';
-      s.updatedAt = now();
+      s.updatedAt = this.now();
       changed = true;
     }
     return changed;
   }
 
-  /** Started stages plus a synthetic 'pending' row for each declared stage that
-   *  hasn't started, so a stage waiting on a dependency still shows up. */
-  listForCall(toolCallId: string): SubagentSummary[] {
-    const call = this.pendingCalls.find((c) => c.toolCallId === toolCallId);
-    const started = [...this.byChild.values()].filter((s) => s.toolCallId === toolCallId);
-    if (!call) return started.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-
-    const startedNames = new Set(started.map((s) => s.stageName));
-    const pending: SubagentSummary[] = call.stages
-      .filter((s) => !startedNames.has(s.name))
-      .map((s) => ({
-        sessionId: `pending:${toolCallId}:${s.name}`,
-        stageName: s.name,
-        toolCallId,
-        status: 'pending',
-        activity: s.depends_on?.length ? `Waits for ${s.depends_on.join(' and ')}` : undefined,
-        createdAt: '',
-        updatedAt: '',
-      }));
-    return [...started.sort((a, b) => a.createdAt.localeCompare(b.createdAt)), ...pending];
-  }
-
+  /** Copies, so a recorded event keeps the state it was recorded with. */
   list(): SubagentSummary[] {
-    return [...this.byChild.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return [...this.byId.values()]
+      .map((s) => ({ ...s }))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  get(sessionId: string): SubagentSummary | undefined {
-    return this.byChild.get(sessionId);
+  get(subagentId: string): SubagentSummary | undefined {
+    const s = this.byId.get(subagentId);
+    return s && { ...s };
   }
 }

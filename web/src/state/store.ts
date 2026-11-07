@@ -105,7 +105,7 @@ export const useStore = create<CasperState>((set, get) => ({
   chats: [],
   models: [],
   agents: [],
-  defaultAgentId: 'kiro_default',
+  defaultAgentId: 'vibe',
   activeId: null,
   chatId: null,
   loadingChatId: null,

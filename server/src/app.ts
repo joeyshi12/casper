@@ -6,6 +6,7 @@ import multipart from '@fastify/multipart';
 import { config } from './config.js';
 import { logger } from './util/logger.js';
 import { SessionManager } from './session/SessionManager.js';
+import { defaultModelId } from './session/models.js';
 import { registerAuth } from './routes/auth.js';
 import { registerModelRoutes } from './routes/models.js';
 import { registerAgentRoutes } from './routes/agents.js';
@@ -38,7 +39,7 @@ export async function buildApp(): Promise<CasperApp> {
         : { target: 'pino/file', options: { destination: 2 } },
     },
   });
-  const manager = new SessionManager(logger);
+  const manager = new SessionManager(logger, { defaultModel: () => defaultModelId(logger) });
   const startedAt = Date.now();
 
   await app.register(websocket, {

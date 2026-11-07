@@ -7,9 +7,7 @@ import { config } from '../config.js';
  * Casper's own persistence: one SQLite file for the state kiro doesn't keep. `chats`
  * is the chat itself; `logins` holds device sessions; `message_attachments` records
  * what was attached to each prompt; `turn_endings` holds turns that failed or were
- * stopped; `subagent_links` records which parent tool call
- * and stage name a child session belongs to. node:sqlite is built in, which is why
- * the Node floor is 24.
+ * stopped. node:sqlite is built in, which is why the Node floor is 24.
  *
  * Attachments are keyed by ordinal (the user message's position), the only identity
  * a live message (event seq) and a rebuilt one (kiro's message_id) can agree on.
@@ -49,13 +47,6 @@ CREATE TABLE IF NOT EXISTS turn_endings (
   items      TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS turn_endings_chat ON turn_endings (chat_id);
-CREATE TABLE IF NOT EXISTS subagent_links (
-  child_session_id  TEXT PRIMARY KEY,
-  parent_session_id TEXT NOT NULL,
-  tool_call_id      TEXT NOT NULL,
-  stage_name        TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS subagent_links_parent ON subagent_links (parent_session_id);
 `;
 
 let handle: DatabaseSync | undefined;

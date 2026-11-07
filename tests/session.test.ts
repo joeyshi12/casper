@@ -16,7 +16,7 @@ import { ChatStore } from '../server/src/session/chatStore.js';
 import { LoginStore } from '../server/src/session/logins.js';
 import { hydrateTranscript, promptCount } from '../server/src/session/kiroFiles.js';
 import { bumpChatToTop } from '../web/src/state/chats.js';
-import { noopLogger, fakeKiroProcess, waitFor, type FakeProcess } from './helpers.js';
+import { noopLogger, fakeKiroProcess, waitFor, writeV3Session, type FakeProcess, type V3Line } from './helpers.js';
 import {
   chatDir,
   chatsRoot,
@@ -33,6 +33,10 @@ import { titleFromPrompt } from '@casper/shared';
 const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'casper-kiro-sessions-'));
 const sessionsCwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'casper-session-cwd-')));
 (config as { kiroSessionsDir: string }).kiroSessionsDir = sessionsDir;
+/** kiro's directory for one session, as writeV3Session lays it out. */
+const sessionDir = (id: string, cwd = sessionsCwd) =>
+  path.join(sessionsDir, crypto.createHash('sha256').update(cwd).digest('hex').slice(0, 16), id);
+const removeSession = (id: string) => fs.rmSync(sessionDir(id), { recursive: true, force: true });
 
 // Each test file gets its own data directory, since sharing one casper.db across files
 // contends for its write lock. Set before the first db() call, which is what opens it.
@@ -208,20 +212,27 @@ describe('re-open mid-turn must not drop the prompt', () => {
     assert.equal(detail.head, evSeq - 1);
   });
 
-  it('no rewind when the prompt is already hydrated', async () => {
-    const file = path.join(config.kiroSessionsDir, `${session.sessionId}.jsonl`);
-    fs.writeFileSync(
-      file,
-      JSON.stringify({
-        kind: 'Prompt',
-        data: { message_id: 'u1', content: [{ kind: 'text', data: { text: 'hello there' } }] },
-      }) + '\n',
-    );
+  // kiro writes the prompt at once but each tool call only when it ends, so its copy of
+  // the turn lacks whatever is still running. The turn replays from the event store.
+  it('replays an in-flight turn kiro has started writing, leaving it out of the transcript', async () => {
+    writeV3Session(sessionsDir, {
+      id: session.sessionId,
+      cwd: sessionsCwd,
+      messages: [
+        { id: 'u0', payload: { type: 'user', content: 'earlier' } },
+        { id: 'a0', payload: { type: 'assistant', operationType: 'Say', content: 'done' } },
+        { id: 'u1', payload: { type: 'user', content: 'hello there' } },
+        { id: 'a1', payload: { type: 'assistant', operationType: 'Say', content: 'partial' } },
+      ],
+    });
     try {
       const detail = await mgr.getDetail(chatId);
-      assert.equal(detail.head, session.store.head());
+      assert.equal(detail.head, evSeq - 1);
+      const texts = detail.transcript.flatMap((it) => (it.type === 'message' ? [it.message.text] : []));
+      assert.deepEqual(texts, ['earlier', 'done'], 'the turn comes from the replay, so it shows once');
+      assert.equal(detail.transcriptTotal, 2);
     } finally {
-      fs.rmSync(file, { force: true });
+      removeSession(session.sessionId);
     }
   });
 
@@ -261,136 +272,87 @@ describe('sidebar reorder (prompt floats the active session to the top)', () => 
   });
 });
 
-describe('hydrateTranscript: inline tool-result images are not shipped', () => {
-  const sid = 'hydrate-image-strip-test';
-  const file = path.join(config.kiroSessionsDir, `${sid}.jsonl`);
+/** Writes one session's conversation and returns its id. */
+const conversation = (id: string, messages: V3Line[]) => {
+  writeV3Session(sessionsDir, { id, cwd: sessionsCwd, messages });
+  return id;
+};
+const user = (id: string, content: string): V3Line => ({ id, payload: { type: 'user', content } });
 
+describe('hydrateTranscript: inline tool-result images are not shipped', () => {
+  let sid: string;
   before(() => {
-    fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
-    const lines = [
+    sid = conversation('hydrate-image-strip-test', [
+      { id: 'c1', payload: { type: 'tool_call', toolCallId: 'tu1', toolName: 'read_file', kind: 'read', title: 'Read File', args: { path: '/a.png' }, status: 'completed' } },
       {
-        kind: 'AssistantMessage',
-        data: {
-          message_id: 'm1',
+        id: 'r1',
+        payload: {
+          type: 'tool_result',
+          toolCallId: 'tu1',
+          success: true,
           content: [
-            { kind: 'toolUse', data: { toolUseId: 'tu1', name: 'shell', input: { command: 'ls' } } },
+            { type: 'text', text: 'kept' },
+            { type: 'image', data: 'iVBORw0KGgo', mimeType: 'image/png' },
           ],
         },
       },
-      {
-        kind: 'ToolResults',
-        data: {
-          message_id: 'm2',
-          content: [
-            {
-              kind: 'toolResult',
-              data: {
-                toolUseId: 'tu1',
-                status: 'success',
-                content: [
-                  { kind: 'text', data: { text: 'kept' } },
-                { kind: 'image', data: { format: 'png', source: { kind: 'bytes', data: [1, 2, 3] } } },
-                ],
-              },
-            },
-          ],
-        },
-      },
-    ];
-    fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    ]);
   });
-  after(() => fs.rmSync(file, { force: true }));
+  after(() => removeSession(sid));
 
   it('keeps the tool call and its text block', async () => {
     const items = await hydrateTranscript(sid);
     const call = items.find((i) => i.type === 'tool_call');
     assert.ok(call, 'tool call is hydrated');
     const blocks = (call as { tool: { content?: unknown[] } }).tool.content ?? [];
-    assert.equal(blocks.length, 1, 'only the text block survives');
-    assert.equal((blocks[0] as { kind: string }).kind, 'text');
+    assert.deepEqual(blocks, [{ type: 'text', text: 'kept' }], 'only the text block survives');
   });
 
   it('drops the inline image block entirely', async () => {
-    const items = await hydrateTranscript(sid);
-    const json = JSON.stringify(items);
+    const json = JSON.stringify(await hydrateTranscript(sid));
     assert.ok(!json.includes('"image"'), 'no image block in the hydrated transcript');
-    assert.ok(!json.includes('"png"'), 'no image payload in the hydrated transcript');
+    assert.ok(!json.includes('iVBORw0KGgo'), 'no image payload in the hydrated transcript');
   });
 });
 
 // A thinking block renders pre-wrap, so surrounding whitespace shows as blank lines.
 describe('hydrateTranscript: thinking text is trimmed', () => {
-  const sid = 'hydrate-thinking-trim-test';
-  const file = path.join(config.kiroSessionsDir, `${sid}.jsonl`);
-
-  before(() => {
-    fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
-    const line = {
-      kind: 'AssistantMessage',
-      data: {
-        message_id: 'm1',
-        content: [
-          { kind: 'thinking', data: { text: '\n\n  Weighing the options.\n\n' } },
-          { kind: 'text', data: { text: 'Here is the answer.' } },
-        ],
-      },
-    };
-    fs.writeFileSync(file, JSON.stringify(line) + '\n');
-  });
-  after(() => fs.rmSync(file, { force: true }));
+  const reasoning = (id: string, content: string): V3Line => ({ id, payload: { type: 'assistant', operationType: 'Reasoning', content } });
 
   it('keeps the reasoning without its surrounding blank lines', async () => {
+    const sid = conversation('hydrate-thinking-trim-test', [
+      reasoning('t1', '\n\n  Weighing the options.\n\n'),
+      { id: 'a1', payload: { type: 'assistant', operationType: 'Say', content: 'Here is the answer.' } },
+    ]);
     const items = await hydrateTranscript(sid);
-    const thought = items.find(
-      (i) => i.type === 'message' && i.message.role === 'thinking',
-    );
+    const thought = items.find((i) => i.type === 'message' && i.message.role === 'thinking');
     assert.ok(thought?.type === 'message');
     assert.equal(thought.message.text, 'Weighing the options.');
+    removeSession(sid);
   });
 
-  it('a block of nothing but whitespace is still dropped', async () => {
-    const blank = 'hydrate-thinking-blank-test';
-    const f = path.join(config.kiroSessionsDir, `${blank}.jsonl`);
-    fs.writeFileSync(
-      f,
-      JSON.stringify({
-        kind: 'AssistantMessage',
-        data: { message_id: 'm1', content: [{ kind: 'thinking', data: { text: '\n \n' } }] },
-      }) + '\n',
-    );
-    const items = await hydrateTranscript(blank);
-    assert.equal(
-      items.filter((i) => i.type === 'message' && i.message.role === 'thinking').length,
-      0,
-    );
-    fs.rmSync(f, { force: true });
+  it('drops a block of nothing but whitespace, and the placeholder kiro writes for hidden reasoning', async () => {
+    const sid = conversation('hydrate-thinking-blank-test', [reasoning('t1', '\n \n'), reasoning('t2', '...')]);
+    const items = await hydrateTranscript(sid);
+    assert.equal(items.filter((i) => i.type === 'message' && i.message.role === 'thinking').length, 0);
+    removeSession(sid);
   });
 });
 
 // The identity problem: a live message is keyed by Casper's event seq and a rebuilt one by
-// kiro's message_id, so neither side can use the other's. Position is the only key both can
+// kiro's message id, so neither side can use the other's. Position is the only key both can
 // compute, which makes this the load-bearing test for the whole scheme.
 describe('hydrateTranscript: attachments land on the right message by position', () => {
-  const sid = 'hydrate-attachments-test';
-  const file = path.join(config.kiroSessionsDir, `${sid}.jsonl`);
-  const prompt = (text: string) => ({
-    kind: 'Prompt',
-    data: { content: [{ kind: 'text', data: { text } }] },
-  });
-
+  let sid: string;
   before(() => {
-    fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
-    fs.writeFileSync(
-      file,
-      [
-        JSON.stringify(prompt('first')),
-        JSON.stringify({ kind: 'AssistantMessage', data: { content: [{ kind: 'text', data: { text: 'ok' } }] } }),
-        JSON.stringify(prompt('Attached files: /up/a.zip\nsecond')),
-        JSON.stringify(prompt('third')),
-      ].join('\n'),
-    );
+    sid = conversation('hydrate-attachments-test', [
+      user('u1', 'first'),
+      { id: 'a1', payload: { type: 'assistant', operationType: 'Say', content: 'ok' } },
+      user('u2', 'Attached files: /up/a.zip\nsecond'),
+      user('u3', 'third'),
+    ]);
   });
-  after(() => fs.rmSync(file, { force: true }));
+  after(() => removeSession(sid));
 
   const users = (items: Awaited<ReturnType<typeof hydrateTranscript>>) =>
     items.filter((it) => it.type === 'message' && it.message.role === 'user');
@@ -417,106 +379,77 @@ describe('hydrateTranscript: attachments land on the right message by position',
   });
 
   // The writer and the reader must count the same thing: counting rendered messages while
-  // hydration counts Prompt entries would file an attachment-only prompt, and everything
-  // after it, one message too early.
+  // hydration counts prompts would file an attachment-only prompt, and everything after it,
+  // one message too early.
   it('counts a prompt that carried only an attachment', async () => {
-    const box = path.join(config.kiroSessionsDir, 'ordinal-count-test.jsonl');
-    fs.writeFileSync(
-      box,
-      [
-        JSON.stringify(prompt('Attached files: /up/a.zip\n')),
-        JSON.stringify(prompt('second')),
-      ].join('\n'),
-    );
+    const box = conversation('ordinal-count-test', [user('u1', 'Attached files: /up/a.zip\n'), user('u2', 'second')]);
     try {
-      assert.equal(
-        await promptCount('ordinal-count-test'),
-        2,
-        'both prompts count, so the next attachment is filed at 2',
-      );
+      assert.equal(await promptCount(box), 2, 'both prompts count, so the next attachment is filed at 2');
     } finally {
-      fs.rmSync(box, { force: true });
+      removeSession(box);
     }
   });
 
   it('agrees with the ordinal hydration reads back', async () => {
-    const box = path.join(config.kiroSessionsDir, 'ordinal-agree-test.jsonl');
-    fs.writeFileSync(
-      box,
-      [JSON.stringify(prompt('Attached files: /up/a.zip\n')), JSON.stringify(prompt('second'))].join('\n'),
-    );
+    const box = conversation('ordinal-agree-test', [user('u1', 'Attached files: /up/a.zip\n'), user('u2', 'second')]);
     try {
       const zip = { path: '/up/a.zip', name: 'a.zip', size: 1, kind: 'binary' as const };
-      const items = await hydrateTranscript('ordinal-agree-test', new Map([[0, [zip]]]));
-      const users = items.filter((it) => it.type === 'message' && it.message.role === 'user');
-      assert.equal(users.length, 2);
+      const items = await hydrateTranscript(box, new Map([[0, [zip]]]));
+      const msgs = users(items);
+      assert.equal(msgs.length, 2);
       assert.deepEqual(
-        users[0]!.type === 'message' ? users[0]!.message.attachments : null,
+        msgs[0]!.type === 'message' ? msgs[0]!.message.attachments : null,
         [zip],
         'lands on the attachment-only prompt, not the one after it',
       );
     } finally {
-      fs.rmSync(box, { force: true });
+      removeSession(box);
     }
   });
 
   it('keeps a message that had only an attachment and no text', async () => {
-    const only = path.join(config.kiroSessionsDir, 'attach-only-test.jsonl');
-    fs.writeFileSync(only, JSON.stringify(prompt('Attached files: /up/a.zip\n')));
+    const only = conversation('attach-only-test', [user('u1', 'Attached files: /up/a.zip\n')]);
     try {
       const zip = { path: '/up/a.zip', name: 'a.zip', size: 1, kind: 'binary' as const };
-      const items = await hydrateTranscript('attach-only-test', new Map([[0, [zip]]]));
+      const items = await hydrateTranscript(only, new Map([[0, [zip]]]));
       assert.equal(users(items).length, 1, 'an attachment alone is still a message');
     } finally {
-      fs.rmSync(only, { force: true });
+      removeSession(only);
     }
   });
 });
 
 describe('hydrateTranscript: malformed entries do not crash hydration', () => {
-  const sid = 'hydrate-malformed-test';
-  const file = path.join(config.kiroSessionsDir, `${sid}.jsonl`);
-
+  let sid: string;
   before(() => {
-    fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
-    const lines = [
-      // content isn't an array
-      { kind: 'AssistantMessage', data: { message_id: 'm0', content: 'not-an-array' } },
-      // null and non-object entries mixed in with a real block
-      {
-        kind: 'AssistantMessage',
-        data: {
-          message_id: 'm1',
-          content: [null, 42, 'str', { no_kind: true }, { kind: 'text', data: 'hello' }],
-        },
-      },
-      // toolUse without the id it is keyed by
-      {
-        kind: 'AssistantMessage',
-        data: { message_id: 'm2', content: [{ kind: 'toolUse', data: { name: 'shell' } }] },
-      },
-      // toolResult for a tool that was never announced
-      {
-        kind: 'ToolResults',
-        data: {
-          message_id: 'm3',
-          content: [{ kind: 'toolResult', data: { toolUseId: 'nope', content: [] } }],
-        },
-      },
-    ];
-    fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    sid = 'hydrate-malformed-test';
+    writeV3Session(sessionsDir, {
+      id: sid,
+      cwd: sessionsCwd,
+      messages: [
+        // content that is not text
+        { id: 'm0', payload: { type: 'assistant', operationType: 'Say', content: 42 } },
+        { id: 'm1', payload: { type: 'assistant', operationType: 'Say', content: 'hello' } },
+        // a tool call without the id it is keyed by
+        { id: 'm2', payload: { type: 'tool_call', toolName: 'execute_bash', args: {} } },
+        // a result for a call that was never announced
+        { id: 'm3', payload: { type: 'tool_result', toolCallId: 'nope', content: 'x' } },
+      ],
+    });
+    // A line cut off mid-write, and lines that are not entries at all.
+    fs.appendFileSync(path.join(sessionDir(sid), 'messages.jsonl'), 'null\n42\n{"id":"x"}\n{"id":"half", "payl');
   });
-  after(() => fs.rmSync(file, { force: true }));
+  after(() => removeSession(sid));
 
   it('hydrates without throwing and keeps the valid text', async () => {
     const items = await hydrateTranscript(sid);
     const msg = items.find(
       (i) => i.type === 'message' && (i as { message: { text: string } }).message.text === 'hello',
     );
-    assert.ok(msg, 'the well-formed text block still hydrates');
+    assert.ok(msg, 'the well-formed text still hydrates');
   });
 
-  it('skips a toolUse with no toolUseId', async () => {
+  it('skips a tool call with no id', async () => {
     const items = await hydrateTranscript(sid);
     assert.equal(items.filter((i) => i.type === 'tool_call').length, 0);
   });
@@ -666,9 +599,9 @@ describe('SQLite stores', () => {
 });
 
 describe('default agent', () => {
-  // Asking for an agent that does not exist is safe: kiro-cli acp falls back to
-  // kiro_default instead of failing (verified against kiro 2.11), and reports the choice
-  // in session/new, which SessionManager adopts as s.agentId.
+  // Asking for an agent that does not exist is safe: kiro falls back to its Default mode
+  // ('vibe') instead of failing (verified against kiro 3.1), and reports the choice in
+  // session/new, which SessionManager adopts as s.agentId.
   it('is the casper agent, which is the one carrying the widget tools', () => {
     assert.equal(config.defaultAgent, 'casper');
   });
@@ -970,11 +903,7 @@ describe('process lifecycle', () => {
       await mgr.setChatCwd('chat-side-id', moved);
 
       // What kiro leaves behind: the directory it was spawned in, not the new one.
-      fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(config.kiroSessionsDir, 'kiro-side-id.json'),
-        JSON.stringify({ session_id: 'kiro-side-id', cwd: sessionsCwd }),
-      );
+      writeV3Session(sessionsDir, { id: 'kiro-side-id', cwd: sessionsCwd });
       // Drop it from memory so the next open has to read the override back.
       mgr.disposeAll();
 
@@ -982,7 +911,7 @@ describe('process lifecycle', () => {
       assert.equal(reopened.cwd, moved, 'the override must be found by chat id');
     } finally {
       mgr.disposeAll();
-      fs.rmSync(path.join(config.kiroSessionsDir, 'kiro-side-id.json'), { force: true });
+      removeSession('kiro-side-id');
     }
   });
 
@@ -1115,40 +1044,51 @@ describe('cancel', () => {
       await mgr.createChat({ cwd: sessionsCwd, chatId: 'cancel-subagents' });
       await mgr.runPrompt('cancel-subagents', [{ type: 'text', text: 'spawn' }]);
       const s = await mgr.ensureOpen('cancel-subagents');
+      // kiro V3 starts each subagent with a tool call of its own.
+      for (const [toolCallId, name] of [['crew-1', 'a'], ['crew-2', 'b']] as const) {
+        proc.bus.emit('notification', {
+          method: 'session/update',
+          params: {
+            sessionId: s.sessionId,
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId,
+              title: `Sub-agent: ${name}`,
+              rawInput: { name, prompt: 'go' },
+              _meta: { kiro: { kind: 'agent-subtask', agentSubtaskId: `sub-${name}` } },
+            },
+          },
+        });
+      }
       proc.bus.emit('notification', {
         method: 'session/update',
         params: {
           sessionId: s.sessionId,
           update: {
-            sessionUpdate: 'tool_call',
+            sessionUpdate: 'tool_call_update',
             toolCallId: 'crew-1',
-            title: 'Spawning agent crew',
-            rawInput: { stages: [{ name: 'a' }, { name: 'b', depends_on: ['a'] }] },
-            _meta: { kiro: { toolName: 'subagent' } },
+            status: 'completed',
+            _meta: { kiro: { kind: 'agent-subtask', agentSubtaskId: 'sub-a' } },
           },
         },
       });
-      proc.bus.emit('notification', {
-        method: '_kiro.dev/subagent/list_update',
-        params: {
-          subagents: [{ sessionId: 'crew-child-a', sessionName: 'a', status: { type: 'working' } }],
-          pendingStages: [],
-        },
-      });
       assert.deepEqual(
-        (await mgr.getSubagents('cancel-subagents')).map((a) => a.status),
-        ['working', 'pending'],
+        (await mgr.getSubagents('cancel-subagents')).map((a) => [a.stageName, a.status]),
+        [['a', 'completed'], ['b', 'working']],
       );
 
       mgr.cancel('cancel-subagents');
       await waitFor('the turn to end', () => !s.running);
 
       const after = await mgr.getSubagents('cancel-subagents');
-      assert.deepEqual(after.map((a) => [a.stageName, a.status]), [['a', 'failed']]);
+      assert.deepEqual(after.map((a) => [a.stageName, a.status, a.activity]), [
+        ['a', 'completed', undefined],
+        ['b', 'failed', 'Stopped'],
+      ]);
       const { events } = s.store.getSince(0);
       const last = events.findLast((e) => e.payload.kind === 'subagents_changed')?.payload;
       assert.ok(last?.kind === 'subagents_changed');
-      assert.equal(last.subagents[0]?.status, 'failed', 'connected clients are told too');
+      assert.equal(last.subagents[1]?.status, 'failed', 'connected clients are told too');
     } finally {
       mgr.disposeAll();
     }
@@ -1210,32 +1150,16 @@ describe('reloading a session re-detects its setup', () => {
       },
     });
 
-  // A reload is a load, and kiro can only load a session whose event log has
-  // entries. Stand in for what a completed turn leaves behind.
+  // A reload is a load, and kiro can only load a session it has stored. Stand in for
+  // what kiro leaves behind.
   const persist = (sessionId: string) => {
     const store = new ChatStore();
     store.create(sessionId);
     store.bindSession(sessionId, sessionId);
-    fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(config.kiroSessionsDir, `${sessionId}.json`),
-      JSON.stringify({ session_id: sessionId, cwd: sessionsCwd }),
-    );
-    fs.writeFileSync(
-      path.join(config.kiroSessionsDir, `${sessionId}.jsonl`),
-      JSON.stringify({
-        kind: 'Prompt',
-        data: { message_id: 'm1', content: [{ kind: 'text', data: { text: 'hi' } }] },
-      }) + '\n',
-    );
-  };
-  const unpersist = (sessionId: string) => {
-    for (const ext of ['json', 'jsonl']) {
-      fs.rmSync(path.join(config.kiroSessionsDir, `${sessionId}.${ext}`), { force: true });
-    }
+    writeV3Session(sessionsDir, { id: sessionId, cwd: sessionsCwd, messages: [user('m1', 'hi')] });
   };
 
-  afterEach(() => unpersist('reloadable'));
+  afterEach(() => removeSession('reloadable'));
 
   it('replaces the process and loads the session back into the new one', async () => {
     const spawned: FakeProcess[] = [];
@@ -1350,21 +1274,13 @@ describe('reloading a session re-detects its setup', () => {
     }
   });
 
-  it('refuses a session with no recorded turn, keeping the process it has', async () => {
-    // kiro creates the event log empty at session/new and refuses to load a session
-    // that has nothing in it. Tearing the process down first would replace a working
-    // one with a process that answers "Session not found".
+  it('refuses a session kiro has not stored, keeping the process it has', async () => {
+    // kiro loads an id it has not stored as a new, empty session, so tearing the process
+    // down first would replace a working one with an empty conversation.
     const spawned: FakeProcess[] = [];
     const mgr = managerWithSpawns(spawned);
     try {
       await mgr.createChat({ cwd: sessionsCwd, chatId: 'reloadable' });
-      // The files exist, as kiro's do from creation; the event log is empty.
-      fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(config.kiroSessionsDir, 'reloadable.json'),
-        JSON.stringify({ session_id: 'reloadable', cwd: sessionsCwd }),
-      );
-      fs.writeFileSync(path.join(config.kiroSessionsDir, 'reloadable.jsonl'), '');
 
       await assert.rejects(mgr.reloadChat('reloadable'), /has not saved this session/);
       assert.equal(spawned.length, 1);
@@ -1559,36 +1475,20 @@ describe('session summary: one projection over kiro’s file and live state', ()
     store.bindSession(sessionId, sessionId);
   };
 
-  const writeSessionFile = (
-    sessionId: string,
-    over: Record<string, unknown> = {},
-  ): void => {
-    fs.mkdirSync(config.kiroSessionsDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(config.kiroSessionsDir, `${sessionId}.json`),
-      JSON.stringify({
-        session_id: sessionId,
-        title: 'kiro title',
-        cwd: sessionsCwd,
-        created_at: '2026-01-01T00:00:00.000Z',
-        updated_at: '2026-01-02T00:00:00.000Z',
-        session_state: {
-          agent_name: 'file-agent',
-          rts_model_state: {
-            context_usage_percentage: 42,
-            model_info: { model_id: 'file-model' },
-          },
-          conversation_metadata: {
-            user_turn_metadatas: [{ metering_usage: [{ value: 0.25 }] }],
-          },
-        },
-        ...over,
-      }),
-    );
+  const writeSessionFile = (sessionId: string): void => {
+    writeV3Session(sessionsDir, {
+      id: sessionId,
+      cwd: sessionsCwd,
+      title: 'kiro title',
+      agentMode: 'file-agent',
+      modelId: 'file-model',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      lastModifiedAt: '2026-01-02T00:00:00.000Z',
+      messages: [{ id: 'm1', payload: { type: 'session_metadata', key: 'contextUsage', value: { usagePercentage: 42 } } }],
+    });
   };
 
-  const cleanup = (sessionId: string) =>
-    fs.rmSync(path.join(config.kiroSessionsDir, `${sessionId}.json`), { force: true });
+  const cleanup = (sessionId: string) => removeSession(sessionId);
 
   it('a dormant session reports what kiro’s file says', async () => {
     writeSessionFile('dormant-1');

@@ -1,15 +1,14 @@
 import {
+  ACP_METHODS,
   emptyObservabilitySnapshot,
-  KIRO_NOTIFICATIONS,
+  KIRO_AGENT_NOT_FOUND,
   stripAttachmentsLine,
   type AgentMode,
   type CasperEvent,
   type CasperEventPayload,
+  type KiroUpdateMeta,
   type MessageAttachment,
   type JsonRpcNotification,
-  type KiroCompactionStatusParams,
-  type KiroMetadataParams,
-  type KiroSubagentListUpdateParams,
   type PromptContentBlock,
   type ChatDetail,
   type SessionLoadParams,
@@ -18,6 +17,8 @@ import {
   type SessionPromptParams,
   type SessionPromptResult,
   type ChatSummary,
+  type SessionInfoUpdate,
+  type SessionUpdate,
   type SessionUpdateParams,
   type SubagentDetailResponse,
   type SubagentSummary,
@@ -30,7 +31,7 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { invalidateAgents } from './agents.js';
+import { invalidateAgents, rememberModes } from './agents.js';
 import { createChatWorkspace, isManagedWorkspace, removeChatDir } from './chats.js';
 import type { Logger } from '../util/logger.js';
 import { isWithinRoot, isValidChatId } from '../util/paths.js';
@@ -38,21 +39,20 @@ import { KiroProcess } from './KiroProcess.js';
 import { EventStore } from './EventStore.js';
 import { TurnState } from './TurnState.js';
 import { TurnRecorder } from './TurnRecorder.js';
-import { SubagentTracker, type SubagentStageInput } from './SubagentTracker.js';
-import { showSummaryAsAnswer } from './subagentResult.js';
-import { matchSubagentsFallback, subagentCallsIn } from './subagentFallbackMatch.js';
+import { SubagentTracker } from './SubagentTracker.js';
 import {
   deletePersistedSession,
-  hasRecordedTurns,
+  hydrateSubExecution,
   hydrateTranscript,
-  listChildSessions,
-  readChildSession,
+  isLoadable,
+  listSubExecutions,
   promptCount,
   readPersistedSession,
+  readPersistedSessions,
   type PersistedSession,
+  type SubExecution,
 } from './kiroFiles.js';
 import { ChatStore, type ChatRow } from './chatStore.js';
-import { SubagentLinkStore } from './subagentLinks.js';
 
 // Resolves a cwd to an absolute path, creating it if missing. Confined to
 // config.fileRoot, which the file endpoints are also scoped to.
@@ -91,20 +91,20 @@ export interface ManagedProcess {
   cancel(sessionId: string): void;
   setMode(sessionId: string, modeId: string): Promise<unknown>;
   setModel(sessionId: string, modelId: string): Promise<unknown>;
-  execCommand(sessionId: string, command: string): Promise<unknown>;
+  compact(sessionId: string): Promise<unknown>;
   dispose(): void;
   disposeAndWait(timeoutMs?: number): Promise<void>;
 }
 
-export type SpawnProcess = (
-  opts: { cwd: string; agent?: string; model?: string },
-  log: Logger,
-) => ManagedProcess;
+export type SpawnProcess = (opts: { cwd: string }, log: Logger) => ManagedProcess;
 
 export interface SessionManagerOptions {
   spawn?: SpawnProcess;
   /** How long a cancelled turn may take to end before its kiro process is killed. */
   cancelGraceMs?: number;
+  /** The model a new chat gets when none was picked. None by default, which leaves
+   *  the choice to kiro. */
+  defaultModel?: () => Promise<string | undefined>;
 }
 
 const CANCEL_GRACE_MS = 10_000;
@@ -163,40 +163,52 @@ export class Session {
   }
 }
 
-/** Maps a raw ACP/kiro notification to a durable Casper event payload. */
-function mapNotification(n: JsonRpcNotification): CasperEventPayload | null {
-  switch (n.method) {
-    case 'session/update':
-      return { kind: 'session_update', update: (n.params as SessionUpdateParams).update };
-    case KIRO_NOTIFICATIONS.metadata:
-      return { kind: 'metadata', params: n.params as KiroMetadataParams };
-    case KIRO_NOTIFICATIONS.compactionStatus:
-      return { kind: 'compaction', params: n.params as KiroCompactionStatusParams };
+// The session updates the transcript is built from. kiro sends others, such as its
+// command list and settings, which nothing here reads.
+const TRANSCRIPT_UPDATES = new Set(['agent_message_chunk', 'agent_thought_chunk', 'tool_call', 'tool_call_update']);
+
+function kiroMeta(update: SessionUpdate): KiroUpdateMeta | undefined {
+  return (update as { _meta?: { kiro?: KiroUpdateMeta } })._meta?.kiro;
+}
+
+/** The event Casper records for one of kiro's session-level updates, if any. */
+function sessionInfoEvent(sessionId: string, update: SessionInfoUpdate): CasperEventPayload | null {
+  const info = update._meta?.kiro;
+  switch (info?.kind) {
+    case 'context_usage':
+      return typeof info.usagePercentage === 'number'
+        ? { kind: 'metadata', params: { sessionId, contextUsagePercentage: info.usagePercentage } }
+        : null;
+    case 'summarization_started':
+      return { kind: 'compaction', params: { sessionId, status: { type: 'started' }, summary: null } };
+    case 'summarization_completed':
+      return {
+        kind: 'compaction',
+        params: { sessionId, status: { type: 'completed' }, summary: info.conversationSummary ?? null },
+      };
+    case 'summarization_failed':
+      return { kind: 'compaction', params: { sessionId, status: { type: 'failed' }, summary: null } };
     default:
       return null;
   }
 }
 
-/** The `sessionId` carried in a notification's params, if it has one. */
-function notificationSessionId(n: JsonRpcNotification): string | undefined {
-  const params = n.params as { sessionId?: string } | undefined;
-  return params?.sessionId;
+/** The model kiro reports a session is using. */
+function sessionModel(res: SessionNewResult): string | undefined {
+  return res.configOptions?.find((o) => o.id === 'model')?.currentValue;
 }
 
-function subagentCallStages(update: { sessionUpdate: string; [k: string]: unknown }): {
-  toolCallId: string;
-  stages: SubagentStageInput[];
-} | null {
-  if (update.sessionUpdate !== 'tool_call') return null;
-  const meta = (update as { _meta?: { kiro?: { toolName?: string } } })._meta;
-  if (meta?.kiro?.toolName !== 'subagent') return null;
-  const toolCallId = (update as { toolCallId?: string }).toolCallId;
-  const rawInput = (update as { rawInput?: { stages?: unknown } }).rawInput;
-  if (typeof toolCallId !== 'string' || !Array.isArray(rawInput?.stages)) return null;
-  const stages = rawInput.stages.filter(
-    (s): s is SubagentStageInput => typeof s === 'object' && s !== null && typeof (s as SubagentStageInput).name === 'string',
-  );
-  return { toolCallId, stages };
+/** The row for a subagent read back from its parent's file. */
+function subExecutionSummary(sub: SubExecution): SubagentSummary {
+  return {
+    sessionId: sub.sessionId,
+    stageName: sub.name,
+    toolCallId: sub.toolCallId,
+    status: sub.status,
+    activity: sub.stopped ? 'Stopped' : undefined,
+    createdAt: sub.createdAt,
+    updatedAt: sub.updatedAt,
+  };
 }
 
 // Transcript items per page; a full transcript can be multiple MB.
@@ -220,17 +232,15 @@ export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly log: Logger;
   private readonly store = new ChatStore();
-  private readonly subagentLinks = new SubagentLinkStore();
-  // Children the title fallback already tried and could not match. Matching hydrates the
-  // whole parent transcript (145 MB in one chat), so each child is tried once per process.
-  private readonly unmatchedChildren = new Map<string, Set<string>>();
   private readonly spawnProcess: SpawnProcess;
   private readonly cancelGraceMs: number;
+  private readonly defaultModel: () => Promise<string | undefined>;
 
   constructor(log: Logger, opts: SessionManagerOptions = {}) {
     this.log = log;
     this.spawnProcess = opts.spawn ?? ((o, l) => new KiroProcess(o, l));
     this.cancelGraceMs = opts.cancelGraceMs ?? CANCEL_GRACE_MS;
+    this.defaultModel = opts.defaultModel ?? (async () => undefined);
   }
 
   /** What a session is called, from every read path. */
@@ -310,7 +320,8 @@ export class SessionManager {
 
   /** The reload itself, called with the session's reload claim held. */
   private async replaceProcess(chatId: string, s: Session): Promise<ChatDetail> {
-    if (!(await hasRecordedTurns(s.sessionId))) {
+    // Loading an id kiro has not saved would start an empty session in its place.
+    if (!(await isLoadable(s.sessionId))) {
       throw new Error(
         'kiro has not saved this session yet. Send a message first, then reload.',
       );
@@ -325,9 +336,9 @@ export class SessionManager {
       await old.disposeAndWait().catch(() => {});
     }
     s.availableModes = [];
+    invalidateAgents();
     await this.ensureProc(s);
     s.lastActivity = Date.now();
-    invalidateAgents();
     this.log.info({ sessionId: s.sessionId, cwd: s.cwd }, 'session reloaded');
     return this.getDetail(chatId);
   }
@@ -394,40 +405,33 @@ export class SessionManager {
   private wire(s: Session, proc: ManagedProcess): void {
     proc.on('notification', (n: JsonRpcNotification) => {
       if (s.replaying) return;
-
-      // A per-process broadcast with no sessionId of its own; one kiro-cli
-      // child per chat means it's always this chat's.
-      if (n.method === KIRO_NOTIFICATIONS.subagentListUpdate) {
-        const params = n.params as KiroSubagentListUpdateParams;
-        const resolved = s.subagents.apply(params.subagents);
-        for (const link of resolved) {
-          this.subagentLinks.record(link.sessionId, s.sessionId, link.toolCallId, link.stageName);
-        }
-        s.record({ kind: 'subagents_changed', subagents: s.subagents.list() });
+      if (n.method === KIRO_AGENT_NOT_FOUND) {
+        this.log.warn({ sessionId: s.sessionId, detail: n.params }, 'kiro could not use the requested agent');
         return;
       }
+      if (n.method !== ACP_METHODS.sessionUpdate) return;
+      const params = n.params as SessionUpdateParams | undefined;
+      if (!params?.update || (params.sessionId && params.sessionId !== s.sessionId)) return;
+      const { update } = params;
+      const meta = kiroMeta(update);
+      if (meta?.replay) return;
 
-      const notifSessionId = notificationSessionId(n);
-      if (!notifSessionId || notifSessionId === s.sessionId) {
-        const payload = mapNotification(n);
-        if (!payload) return;
-        if (payload.kind === 'session_update') {
-          const call = subagentCallStages(payload.update as { sessionUpdate: string; [k: string]: unknown });
-          if (call) s.subagents.callStarted(call.toolCallId, call.stages);
-          const update = payload.update as { sessionUpdate: string; toolCallId?: string; status?: string };
-          if (
-            update.sessionUpdate === 'tool_call_update' &&
-            typeof update.toolCallId === 'string' &&
-            (update.status === 'completed' || update.status === 'failed')
-          ) {
-            s.subagents.callFinished(update.toolCallId);
-          }
-        }
-        s.record(payload);
+      if (update.sessionUpdate === 'session_info_update') {
+        const payload = sessionInfoEvent(s.sessionId, update as SessionInfoUpdate);
+        if (payload) s.record(payload);
         return;
       }
+      if (!TRANSCRIPT_UPDATES.has(update.sessionUpdate)) return;
 
-      // A subagent's own notifications aren't recorded here.
+      const subagentId = meta?.agentSubtaskId;
+      if (subagentId && meta.kind !== 'agent-subtask') {
+        // A subagent's own update: it shows on the subagent's row, not in the chat.
+        const title = update.sessionUpdate === 'tool_call' ? (update as { title?: string }).title : undefined;
+        if (s.subagents.progressed(subagentId, title)) this.recordSubagents(s);
+        return;
+      }
+      if (subagentId) this.trackSubagentCall(s, subagentId, update);
+      s.record({ kind: 'session_update', update });
     });
     proc.on('exit', (code: number | null, signal: string | null) => {
       if (s.proc !== proc) return;
@@ -437,6 +441,24 @@ export class SessionManager {
     });
   }
 
+  /** Follows the tool call that starts a subagent, from its start to its result. */
+  private trackSubagentCall(s: Session, subagentId: string, update: SessionUpdate): void {
+    const call = update as { sessionUpdate: string; toolCallId?: string; title?: string; status?: string; rawInput?: { name?: unknown } };
+    if (typeof call.toolCallId !== 'string') return;
+    let changed = false;
+    if (call.sessionUpdate === 'tool_call') {
+      const name = typeof call.rawInput?.name === 'string' ? call.rawInput.name : (call.title ?? subagentId);
+      changed = s.subagents.started(subagentId, call.toolCallId, name);
+    } else if (call.status === 'completed' || call.status === 'failed') {
+      changed = s.subagents.finished(call.toolCallId, call.status === 'completed');
+    }
+    if (changed) this.recordSubagents(s);
+  }
+
+  private recordSubagents(s: Session): void {
+    s.record({ kind: 'subagents_changed', subagents: s.subagents.list() });
+  }
+
   /** Gets or spawns the kiro process for a session. */
   private async ensureProc(s: Session): Promise<ManagedProcess> {
     if (s.proc) return s.proc;
@@ -444,10 +466,7 @@ export class SessionManager {
 
     s.spawning = (async () => {
       await this.ensureCapacity();
-      const proc = this.spawnProcess(
-        { cwd: s.cwd, agent: s.agentId, model: s.modelId },
-        this.log,
-      );
+      const proc = this.spawnProcess({ cwd: s.cwd }, this.log);
       this.wire(s, proc);
       await proc.initialize();
 
@@ -456,12 +475,21 @@ export class SessionManager {
       if (s.hasBeenLive) {
         s.replaying = true;
         try {
-          res = await proc.loadSession({ sessionId: s.sessionId, cwd: s.cwd, mcpServers: [] });
+          res = await proc.loadSession({
+            sessionId: s.sessionId,
+            cwd: s.cwd,
+            mcpServers: [],
+            ...(s.modelId ? { _meta: { kiro: { modelId: s.modelId } } } : {}),
+          });
         } finally {
           s.replaying = false;
         }
       } else {
-        res = await proc.newSession({ cwd: s.cwd, mcpServers: [] });
+        res = await proc.newSession({
+          cwd: s.cwd,
+          mcpServers: [],
+          _meta: { kiro: { modeId: s.agentId, modelId: s.modelId } },
+        });
       }
 
       // A brand-new session adopts kiro's generated id.
@@ -473,6 +501,8 @@ export class SessionManager {
       s.availableModes = res.modes.availableModes;
       s.currentModeId = res.modes.currentModeId;
       s.agentId = res.modes.currentModeId ?? s.agentId;
+      s.modelId = sessionModel(res) ?? s.modelId;
+      rememberModes(res.modes.availableModes);
       s.markLive();
       s.proc = proc;
       s.spawning = undefined;
@@ -524,7 +554,7 @@ export class SessionManager {
     const s = new Session(tempId, store, cwd);
     s.agentId = opts.agentId ?? config.defaultAgent;
     s.currentModeId = s.agentId;
-    s.modelId = opts.modelId;
+    s.modelId = opts.modelId ?? (await this.defaultModel());
     this.sessions.set(tempId, s);
 
     try {
@@ -673,12 +703,31 @@ export class SessionManager {
     s.lastActivity = Date.now();
   }
 
+  /** Runs one of kiro's slash commands. Compaction is the only one Casper offers. It
+   *  returns once kiro has started; its progress arrives as compaction events. */
   async execCommand(chatId: string, command: string): Promise<void> {
+    if (command.replace(/^\//, '') !== 'compact') throw new Error(`Unsupported command: ${command}`);
     const s = await this.ensureOpen(chatId);
     await this.settleReload(s);
+    if (s.turnState.get().compacting) throw new Error('The conversation is already being compacted');
     const proc = await this.ensureProc(s);
-    await proc.execCommand(s.sessionId, command);
     s.lastActivity = Date.now();
+    const status = (type: 'started' | 'completed' | 'failed'): CasperEventPayload => ({
+      kind: 'compaction',
+      params: { sessionId: s.sessionId, status: { type }, summary: null },
+    });
+    // kiro reports only the end of a compaction it was asked for.
+    s.record(status('started'));
+    proc.compact(s.sessionId).then(
+      () => {
+        // Its summary normally arrives first; this covers one that ended without it.
+        if (s.turnState.get().compacting && s.proc === proc) s.record(status('completed'));
+      },
+      (err: Error) => {
+        this.log.warn({ err, sessionId: s.sessionId }, 'compaction failed');
+        if (s.turnState.get().compacting && s.proc === proc) s.record(status('failed'));
+      },
+    );
   }
 
   /** The one place a ChatSummary is assembled, since kiro's file and Casper's
@@ -717,14 +766,14 @@ export class SessionManager {
 
   async listChats(): Promise<ChatSummary[]> {
     const rows = this.store.all();
-    const files = await Promise.all(
-      rows.map((r) => (r.sessionId ? readPersistedSession(r.sessionId) : null)),
+    const files = await readPersistedSessions(
+      rows.map((r) => r.sessionId).filter((id): id is string => !!id),
     );
 
     const out: ChatSummary[] = [];
-    rows.forEach((row, i) => {
+    rows.forEach((row) => {
       const live = row.sessionId ? this.sessions.get(row.sessionId) : undefined;
-      const persisted = files[i] ?? undefined;
+      const persisted = row.sessionId ? files.get(row.sessionId) : undefined;
       if (live && isGhost(live, !!persisted)) {
         this.evict(live.sessionId);
         return;
@@ -780,82 +829,44 @@ export class SessionManager {
     return transcript.slice(start, end);
   }
 
-  /**
-   * A chat's subagents: live ones from the tracker, joined with children found on disk.
-   * A child the tracker never saw falls back to a recorded link or title matching
-   * (subagentFallbackMatch.ts).
-   */
+  /** A chat's subagents: the ones kiro recorded in the session's file, and live ones from
+   *  the tracker. A live row wins over the file's until the file records how it ended. */
   async getSubagents(chatId: string): Promise<SubagentSummary[]> {
     const sessionId = this.sessionIdOf(chatId);
-    const s = this.sessions.get(sessionId);
-    const live = s ? s.subagents.list() : [];
-    const liveToolCalls = new Set(live.map((a) => a.toolCallId).filter((id): id is string => !!id));
-    const pending = s
-      ? [...liveToolCalls].flatMap((id) => s.subagents.listForCall(id).filter((a) => a.status === 'pending'))
-      : [];
-
-    const onDisk = await listChildSessions(sessionId);
-    const links = this.subagentLinks.forParent(sessionId);
-    const liveIds = new Set(live.map((a) => a.sessionId));
-    const tried = this.unmatchedChildren.get(sessionId) ?? new Set<string>();
-    const unresolved = onDisk.filter(
-      (c) => !liveIds.has(c.sessionId) && !links.has(c.sessionId) && !tried.has(c.sessionId),
-    );
-    const fallback = unresolved.length
-      ? matchSubagentsFallback(subagentCallsIn(await hydrateTranscript(sessionId)), unresolved)
-      : [];
-    const fallbackByChild = new Map(fallback.map((m) => [m.sessionId, m]));
-    // Saved so the parent transcript is not read again for these children.
-    for (const m of fallback) this.subagentLinks.record(m.sessionId, sessionId, m.toolCallId, m.stageName);
-    for (const c of unresolved) if (!fallbackByChild.has(c.sessionId)) tried.add(c.sessionId);
-    this.unmatchedChildren.set(sessionId, tried);
-
+    const live = this.sessions.get(sessionId)?.subagents.list() ?? [];
     const byId = new Map<string, SubagentSummary>();
-    for (const child of onDisk) {
-      const link = links.get(child.sessionId) ?? fallbackByChild.get(child.sessionId);
-      byId.set(child.sessionId, {
-        sessionId: child.sessionId,
-        stageName: link?.stageName ?? (child.title || child.sessionId),
-        toolCallId: link?.toolCallId,
-        status: 'completed',
-        createdAt: child.createdAt,
-        updatedAt: child.updatedAt,
-      });
+    const finished = new Set<string>();
+    for (const sub of (await listSubExecutions(sessionId)) ?? []) {
+      byId.set(sub.sessionId, subExecutionSummary(sub));
+      if (!sub.stopped) finished.add(sub.sessionId);
     }
-    for (const a of live) byId.set(a.sessionId, a);
-    const startedThenPending = [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    return [...startedThenPending, ...pending];
+    for (const a of live) if (!finished.has(a.sessionId)) byId.set(a.sessionId, a);
+    return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   /** One subagent's own transcript, hydrated the same way a chat's is. */
-  // Polled while a subagent runs, so it reads only the child's own files.
-  async getSubagentDetail(chatId: string, childSessionId: string): Promise<SubagentDetailResponse> {
+  // Polled while a subagent runs, so it reads only the subagent's own files.
+  async getSubagentDetail(chatId: string, subagentId: string): Promise<SubagentDetailResponse> {
     const parentSessionId = this.sessionIdOf(chatId);
-    const child = await readChildSession(childSessionId, parentSessionId);
-    if (!child) throw new Error(`Unknown subagent: ${childSessionId}`);
-    const live = this.sessions.get(parentSessionId)?.subagents.list().find((a) => a.sessionId === childSessionId);
-    const link = this.subagentLinks.forParent(parentSessionId).get(childSessionId);
-    const summary: SubagentSummary = live ?? {
-      sessionId: childSessionId,
-      stageName: link?.stageName ?? (child.title || childSessionId),
-      toolCallId: link?.toolCallId,
-      status: 'completed',
-      createdAt: child.createdAt,
-      updatedAt: child.updatedAt,
-    };
-    const transcript = showSummaryAsAnswer(await hydrateTranscript(childSessionId));
-    return { subagent: summary, transcript };
+    const live = this.sessions.get(parentSessionId)?.subagents.get(subagentId);
+    const recorded = (await listSubExecutions(parentSessionId))?.find((x) => x.sessionId === subagentId);
+    if (!live && !recorded) throw new Error(`Unknown subagent: ${subagentId}`);
+    // kiro creates the subagent's file with its first entry, a moment after it starts.
+    const transcript = (await hydrateSubExecution(parentSessionId, subagentId)) ?? [];
+    const subagent = recorded && (!live || !recorded.stopped) ? subExecutionSummary(recorded) : live!;
+    return { subagent, transcript };
   }
 
   /** One projection, so a dormant session and a live one cannot disagree. */
   private buildDetail(
     chat: ChatRow,
     s: Session | undefined,
-    transcript: ChatDetail['transcript'],
+    hydrated: ChatDetail['transcript'],
     persisted?: PersistedSession,
   ): ChatDetail {
+    const { transcript, head } = this.resumePoint(s, hydrated);
     return {
-      summary: this.summaryOf(chat, s, persisted, transcript),
+      summary: this.summaryOf(chat, s, persisted, hydrated),
       modes: s?.availableModes ?? [],
       currentModeId: s?.currentModeId ?? persisted?.agentId,
       transcript: transcript.slice(-TRANSCRIPT_PAGE_SIZE),
@@ -864,17 +875,23 @@ export class SessionManager {
         ...emptyObservabilitySnapshot(),
         contextUsagePercentage: persisted?.contextUsagePercentage ?? 0,
       },
-      head: s ? this.replayHead(s, transcript) : 0,
+      head,
     };
   }
 
   /**
-   * The cursor a reconnecting client starts from: the store head, unless the in-flight
-   * turn isn't in kiro's jsonl yet, in which case rewind to its turn_started.
+   * Where a reconnecting client picks up: the transcript, and the cursor its events replay
+   * after. A turn in flight replays whole from its turn_started and is left out of the
+   * transcript, since kiro writes the prompt at once but a tool call only once it ends, so
+   * kiro's copy of the turn lacks whatever is still running.
    */
-  private replayHead(s: Session, transcript: ChatDetail['transcript']): number {
+  private resumePoint(
+    s: Session | undefined,
+    transcript: ChatDetail['transcript'],
+  ): { transcript: ChatDetail['transcript']; head: number } {
+    if (!s) return { transcript, head: 0 };
     const head = s.store.head();
-    if (!s.running) return head;
+    if (!s.running) return { transcript, head };
     const { events } = s.store.getSince(0);
     let started: CasperEvent | undefined;
     for (let i = events.length - 1; i >= 0; i--) {
@@ -883,22 +900,23 @@ export class SessionManager {
         break;
       }
     }
-    if (!started || started.payload.kind !== 'turn_started') return head;
+    // A turn longer than the event buffer can only resume from the files.
+    if (!started || started.payload.kind !== 'turn_started') return { transcript, head };
     const promptText = stripAttachmentsLine(
       started.payload.prompt
         .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
         .map((b) => b.text)
         .join(''),
     ).trim();
-    // Don't replay a prompt the hydrated transcript already ends with.
+    let cut = transcript.length;
     for (let i = transcript.length - 1; i >= 0; i--) {
       const it = transcript[i]!;
       if (it.type === 'message' && it.message.role === 'user') {
-        if (promptText && it.message.text.trim() === promptText) return head;
+        if (promptText && it.message.text.trim() === promptText) cut = i;
         break;
       }
     }
-    return started.seq - 1;
+    return { transcript: transcript.slice(0, cut), head: started.seq - 1 };
   }
 
   evict(sessionId: string): void {

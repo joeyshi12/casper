@@ -13,12 +13,10 @@ interface StageInput {
   name: string;
 }
 
+/** The subagent a call starts, named in its input. */
 function stagesOf(tool: ToolCallView): StageInput[] {
-  const input = tool.input as { stages?: unknown } | undefined;
-  if (!input || !Array.isArray(input.stages)) return [];
-  return input.stages.filter(
-    (s): s is StageInput => typeof s === 'object' && s !== null && typeof (s as StageInput).name === 'string',
-  );
+  const input = tool.input as { name?: unknown } | undefined;
+  return typeof input?.name === 'string' ? [{ name: input.name }] : [];
 }
 
 export function elapsedSeconds(subagent: Pick<SubagentSummary, 'status' | 'createdAt' | 'updatedAt'>): number {

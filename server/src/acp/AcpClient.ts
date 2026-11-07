@@ -114,6 +114,11 @@ export class AcpClient extends EventEmitter {
     this.write({ jsonrpc: '2.0', id, result });
   }
 
+  respondError(id: JsonRpcId, code: number, message: string): void {
+    if (this.closed) return;
+    this.write({ jsonrpc: '2.0', id, error: { code, message } });
+  }
+
   private write(msg: object): void {
     this.writable.write(JSON.stringify(msg) + '\n');
   }

@@ -19,20 +19,17 @@ interface McpServer {
   timeout: number;
 }
 
-/** kiro's agent schema, as far as we set it. */
+/** kiro V3's agent schema, as far as we set it. It has no `allowedTools` or
+ *  `toolsSettings`: kiro V3 skips a file with either as a kiro 2.x agent. */
 export interface KiroAgent {
   name: string;
   description: string;
   prompt: string;
   mcpServers: Record<string, McpServer>;
   tools: string[];
-  toolAliases: Record<string, string>;
-  allowedTools: string[];
   resources: string[];
-  hooks: Record<string, unknown>;
-  toolsSettings: Record<string, unknown>;
+  hooks: unknown[];
   includeMcpJson: boolean;
-  model: string | null;
 }
 
 /** Plain text, read rather than imported, so an edit diffs line by line. */
@@ -68,13 +65,9 @@ export function agentConfig(prompt: string, mcp: string | null): KiroAgent {
         : { command: 'casper', args: ['mcp'], env: {}, timeout: 10000 },
     },
     tools: ['*'],
-    toolAliases: {},
-    allowedTools: [],
     resources: [],
-    hooks: {},
-    toolsSettings: {},
+    hooks: [],
     includeMcpJson: true,
-    model: null,
   };
 }
 
