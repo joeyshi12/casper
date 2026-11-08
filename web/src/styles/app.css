@@ -992,6 +992,122 @@
   flex-shrink: 0;
 }
 
+/* The model picker. Its panel does not scroll, so the effort panel can sit beside it;
+   the model list inside it scrolls. */
+.mp-trigger-effort {
+  color: var(--n4);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.mp-panel {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  width: 300px;
+  max-width: calc(100vw - 2 * var(--gutter));
+  padding: 5px;
+  background: var(--n0);
+  border: 1px solid var(--n2);
+  border-radius: var(--r-md);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  animation: dd-in 0.12s ease;
+}
+.mp-list {
+  max-height: 340px;
+  overflow-y: auto;
+}
+.mp-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  border-radius: var(--r-sm);
+  color: var(--n5);
+  font-size: 13px;
+  cursor: pointer;
+}
+.mp-option.is-active {
+  background: var(--n1);
+}
+.mp-option.is-selected {
+  color: var(--n6);
+}
+.mp-option-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-divider {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--n2);
+}
+.mp-effort-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 9px;
+  border-radius: var(--r-sm);
+  color: var(--n5);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.mp-effort-row.is-active {
+  background: var(--n1);
+}
+.mp-effort-label {
+  flex: 1;
+}
+.mp-effort-value {
+  color: var(--n4);
+}
+.mp-effort-chevron {
+  color: var(--n3);
+}
+/* Beside the panel, level with its bottom edge, where the effort row is. */
+.mp-effort {
+  position: absolute;
+  bottom: -1px;
+  right: calc(100% + 6px);
+  width: 260px;
+  padding: 5px;
+  background: var(--n0);
+  border: 1px solid var(--n2);
+  border-radius: var(--r-md);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  animation: dd-in 0.12s ease;
+}
+/* No room beside it on a phone, so it covers the bottom of the panel instead. */
+@media (max-width: 768px) {
+  .mp-effort {
+    right: -1px;
+    left: -1px;
+    width: auto;
+  }
+}
+.mp-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--frost);
+  background: color-mix(in srgb, var(--frost) 14%, transparent);
+}
+.mp-pill.is-warn {
+  color: var(--aurora-orange);
+  background: color-mix(in srgb, var(--aurora-orange) 14%, transparent);
+}
+
 .transcript-wrap {
   position: relative;
   flex: 1;
@@ -1098,6 +1214,89 @@
 .msg-user-text {
   white-space: pre-wrap;
   word-break: break-word;
+}
+/* The bubble plus its actions. The actions keep their space when hidden, so showing
+   them on hover moves nothing. */
+.msg-user-wrap {
+  align-self: flex-end;
+  max-width: 92%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.msg-user-wrap > .msg {
+  max-width: 100%;
+}
+.msg-user-wrap.is-editing {
+  width: min(560px, 92%);
+}
+.msg-user-wrap.is-editing > .msg {
+  width: 100%;
+}
+.msg-user-actions {
+  display: flex;
+  gap: 2px;
+  height: 24px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.msg-user-wrap:hover .msg-user-actions,
+.msg-user-actions:focus-within {
+  opacity: 1;
+}
+@media (hover: none) {
+  .msg-user-actions {
+    opacity: 1;
+  }
+}
+.msg-action {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--n4);
+  cursor: pointer;
+}
+.msg-action:hover:not(:disabled) {
+  background: var(--n1);
+  color: var(--n6);
+}
+.msg-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.msg-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg-edit-input {
+  width: 100%;
+  resize: none;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--n6);
+  font: inherit;
+}
+.msg-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.msg-edit-actions .btn-primary {
+  padding: 5px 11px;
+  font-size: 12px;
+}
+.msg-edit-actions .btn-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .msg-attachments {
   display: flex;
@@ -1287,6 +1486,12 @@
   color: var(--frost-deep);
 }
 
+.turn-stats {
+  margin-top: -6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--n4);
+}
 .turn-end {
   align-self: stretch;
   width: 100%;
@@ -3153,6 +3358,7 @@ a.websearch-row:hover {
   font-size: 13px;
 }
 .ctx-pop-bar {
+  display: flex;
   height: 4px;
   margin: 9px 0 11px;
   border-radius: 999px;
@@ -3163,6 +3369,29 @@ a.websearch-row:hover {
   display: block;
   height: 100%;
   border-radius: 999px;
+}
+.ctx-pop-bar-part {
+  display: block;
+  height: 100%;
+  flex-shrink: 0;
+}
+.ctx-pop-rows.ctx-pop-parts {
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--n2);
+}
+.ctx-pop-rows.ctx-pop-credits {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--n2);
+}
+.ctx-pop-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  vertical-align: 1px;
 }
 .ctx-pop-rows {
   margin: 0;
@@ -3213,4 +3442,8 @@ a.websearch-row:hover {
 .ctx-pop-compact:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.memory-error {
+  color: var(--aurora-red);
 }

@@ -1290,7 +1290,7 @@ describe('composer placeholder', () => {
   });
 
   it('prefers what is happening now over the invitation', () => {
-    assert.equal(composerPlaceholder({ ...base, running: true }), 'Casper is working…');
+    assert.equal(composerPlaceholder({ ...base, running: true }), 'Casper is working… send a message to steer it');
     assert.equal(composerPlaceholder({ ...base, running: true, uploading: true }), 'Uploading…');
     assert.equal(composerPlaceholder({ ...base, compacting: true }), 'Compacting conversation…');
   });

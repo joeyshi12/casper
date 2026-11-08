@@ -1,13 +1,24 @@
-import { useMemo, useState } from 'react';
-import type { MessageAttachment, TranscriptItem } from '@casper/shared';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { MessageAttachment, TranscriptItem, TranscriptMessage } from '@casper/shared';
 import { useStore } from '../../state/store.js';
-import { sessionController } from '../../state/sessionController.js';
+import { promptsAccepted, sessionController } from '../../state/sessionController.js';
 import { api } from '../../api/rest.js';
 import { formatSize } from '../../util/formatSize.js';
+import { formatCredits } from '../../util/credits.js';
+import { formatElapsed } from '../../util/duration.js';
 import { lazyImageProps } from '../../util/lazyImage.js';
 import { classifyTurnFailure } from '../../util/turnFailure.js';
 import { lastEntryJoinsStreamingThought, type GroupedEntry, type RunMember } from '../../util/toolGroups.js';
-import { ChevronIcon, CompressIcon, FileIcon, InterruptedIcon, RefreshIcon, WarningIcon } from '../common/icons.js';
+import {
+  BranchIcon,
+  ChevronIcon,
+  CompressIcon,
+  FileIcon,
+  InterruptedIcon,
+  PencilIcon,
+  RefreshIcon,
+  WarningIcon,
+} from '../common/icons.js';
 import { Collapse } from './Collapse.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { ToolCallCard, ToolCallGroupCard, ThoughtLineCard, type RunRowInput } from './ToolCallCard.js';
@@ -105,25 +116,18 @@ export function TranscriptEntries({
         return item.type === 'message' ? (
           item.message.role === 'thinking' ? (
             <ThoughtLineCard key={item.message.id} text={item.message.text} live={isLast && lastActive} />
-          ) : (
-            <div key={item.message.id} className={`msg msg-${item.message.role}`}>
-              {item.message.role === 'assistant' ? (
-                <MarkdownRenderer text={item.message.text} />
-              ) : (
-                <>
-                  {chatId && item.message.attachments && item.message.attachments.length > 0 && (
-                    <AttachmentList
-                      chatId={chatId}
-                      attachments={item.message.attachments}
-                      onOpen={onOpenFile}
-                    />
-                  )}
-                  {item.message.text && (
-                    <div className="msg-user-text">{item.message.text}</div>
-                  )}
-                </>
-              )}
+          ) : item.message.role === 'assistant' ? (
+            <div key={item.message.id} className="msg msg-assistant">
+              <MarkdownRenderer text={item.message.text} />
             </div>
+          ) : (
+            <UserMessage
+              key={item.message.id}
+              message={item.message}
+              chatId={chatId}
+              onOpenFile={onOpenFile}
+              readOnly={readOnly}
+            />
           )
         ) : item.type === 'tool_call' ? (
           <ToolCallCard key={item.tool.id} tool={item.tool} arriving={arrivedLive(item.tool.id)} />
@@ -131,11 +135,148 @@ export function TranscriptEntries({
           <TurnEndCard key={item.id} id={item.id} message={item.message} readOnly={readOnly} />
         ) : item.type === 'turn_interrupted' ? (
           <TurnEndCard key={item.id} id={item.id} readOnly={readOnly} />
+        ) : item.type === 'turn_stats' ? (
+          <TurnStatsLine key={item.id} elapsedMs={item.elapsedMs} credits={item.credits} />
         ) : (
           <CompactionBlock key={item.id} summary={item.summary} />
         );
       })}
     </>
+  );
+}
+
+/**
+ * A message the user sent. One kiro has saved can be edited, which cuts the chat back to
+ * before it and sends the new text, or branched, which opens a new chat that keeps the
+ * conversation up to this message's turn.
+ */
+function UserMessage({
+  message,
+  chatId,
+  onOpenFile,
+  readOnly,
+}: {
+  message: TranscriptMessage;
+  chatId: string | null;
+  onOpenFile: (path: string) => void;
+  readOnly: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(message.text);
+  const [busy, setBusy] = useState(false);
+  const idle = useStore((s) => promptsAccepted(s) && s.pending.length === 0);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messageId = message.messageId;
+  const actionable = !readOnly && Boolean(chatId && messageId);
+
+  useEffect(() => {
+    if (!editing) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [editing]);
+
+  // The box fits its text, since it cannot be resized by hand.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!editing || !el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 320)}px`;
+  }, [editing, draft]);
+
+  const attachments = message.attachments ?? [];
+  const canSend = idle && !busy && (draft.trim().length > 0 || attachments.length > 0);
+
+  const submit = async () => {
+    if (!messageId || !canSend) return;
+    setBusy(true);
+    const done = await sessionController.editPrompt(messageId, draft, attachments);
+    // On success this message is gone from the transcript, and this component with it.
+    if (!done) setBusy(false);
+  };
+
+  const branch = async () => {
+    if (!messageId || busy) return;
+    setBusy(true);
+    await sessionController.branchFrom(messageId);
+    setBusy(false);
+  };
+
+  return (
+    <div className={`msg-user-wrap${editing ? ' is-editing' : ''}`}>
+      <div className={`msg msg-user${editing ? ' is-editing' : ''}`}>
+        {chatId && attachments.length > 0 && (
+          <AttachmentList chatId={chatId} attachments={attachments} onOpen={onOpenFile} />
+        )}
+        {editing ? (
+          <div className="msg-edit">
+            <textarea
+              ref={inputRef}
+              className="msg-edit-input"
+              aria-label="Edit message"
+              value={draft}
+              rows={1}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setEditing(false);
+                  setDraft(message.text);
+                } else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  void submit();
+                }
+              }}
+            />
+            <div className="msg-edit-actions">
+              <button
+                type="button"
+                className="btn-sm btn-ghost"
+                onClick={() => {
+                  setEditing(false);
+                  setDraft(message.text);
+                }}
+              >
+                Cancel
+              </button>
+              <button type="button" className="btn-sm btn-primary" disabled={!canSend} onClick={() => void submit()}>
+                {busy ? 'Sending…' : 'Send'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          message.text && <div className="msg-user-text">{message.text}</div>
+        )}
+      </div>
+      {actionable && !editing && (
+        <div className="msg-user-actions">
+          <button
+            type="button"
+            className="msg-action"
+            aria-label="Edit message"
+            title="Edit message"
+            disabled={!idle || busy}
+            onClick={() => {
+              setDraft(message.text);
+              setEditing(true);
+            }}
+          >
+            <PencilIcon size={14} />
+          </button>
+          <button
+            type="button"
+            className="msg-action"
+            aria-label="Branch from here"
+            title="Branch from here: a new chat with the conversation up to this message's reply"
+            disabled={!idle || busy}
+            onClick={() => void branch()}
+          >
+            <BranchIcon size={14} />
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -217,7 +358,7 @@ function TurnEndCard({
   const lastPrompt = useStore((s) => {
     for (let i = s.items.length - 1; i >= 0; i--) {
       const it = s.items[i]!;
-      if (it.type === 'message' && it.message.role === 'user') return it.message.text;
+      if (it.type === 'message' && it.message.role === 'user' && !it.message.steer) return it.message.text;
     }
     return '';
   });
@@ -273,6 +414,16 @@ function TurnEndCard({
       )}
     </div>
   );
+}
+
+/** What a turn took, under its reply. */
+export function TurnStatsLine({ elapsedMs, credits }: { elapsedMs?: number; credits?: number }) {
+  const parts = [
+    ...(elapsedMs ? [elapsedMs < 10_000 ? `${(elapsedMs / 1000).toFixed(1)}s` : formatElapsed(elapsedMs / 1000)] : []),
+    ...(credits ? [`${formatCredits(credits)} credits`] : []),
+  ];
+  if (parts.length === 0) return null;
+  return <div className="turn-stats">{parts.join(' · ')}</div>;
 }
 
 function CompactionBlock({ summary }: { summary: string }) {

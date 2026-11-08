@@ -1,38 +1,45 @@
 import {
   ACP_METHODS,
+  contextBreakdownOf,
   emptyObservabilitySnapshot,
   KIRO_AGENT_NOT_FOUND,
   stripAttachmentsLine,
   type AgentMode,
   type CasperEvent,
+  type AccountUsage,
   type CasperEventPayload,
+  type ChatUsageResponse,
+  type Memory,
   type KiroUpdateMeta,
   type MessageAttachment,
   type JsonRpcNotification,
   type PromptContentBlock,
   type ChatDetail,
+  type SessionForkParams,
   type SessionLoadParams,
   type SessionNewParams,
   type SessionNewResult,
   type SessionPromptParams,
   type SessionPromptResult,
   type ChatSummary,
+  type SessionConfigOption,
   type SessionInfoUpdate,
   type SessionUpdate,
   type SessionUpdateParams,
   type SubagentDetailResponse,
+  type TurnStats,
   type SubagentSummary,
   type TranscriptItem,
   type TurnEnding,
   resolveSessionTitle,
   sanitizeTitle,
-  titleFromPrompt,
 } from '@casper/shared';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { invalidateAgents, rememberModes } from './agents.js';
-import { createChatWorkspace, isManagedWorkspace, removeChatDir } from './chats.js';
+import { chatDir, chatWorkspaceDir, createChatWorkspace, isManagedWorkspace, removeChatDir } from './chats.js';
+import { rememberKiroModels } from './kiroModels.js';
 import type { Logger } from '../util/logger.js';
 import { isWithinRoot, isValidChatId } from '../util/paths.js';
 import { KiroProcess } from './KiroProcess.js';
@@ -47,8 +54,11 @@ import {
   isLoadable,
   listSubExecutions,
   promptCount,
+  promptStamps,
   readPersistedSession,
   readPersistedSessions,
+  sessionCredits,
+  STAMP_PAD_MS,
   type PersistedSession,
   type SubExecution,
 } from './kiroFiles.js';
@@ -91,6 +101,15 @@ export interface ManagedProcess {
   cancel(sessionId: string): void;
   setMode(sessionId: string, modeId: string): Promise<unknown>;
   setModel(sessionId: string, modelId: string): Promise<unknown>;
+  setEffort(sessionId: string, effortLevel: string): Promise<unknown>;
+  forkSession(params: SessionForkParams): Promise<{ sessionId: string }>;
+  steer(sessionId: string, message: string, messageId: string): Promise<string | undefined>;
+  clearSteers(sessionId: string): Promise<unknown>;
+  revertTo(sessionId: string, messageId: string): Promise<boolean>;
+  contextBreakdown(sessionId: string): Promise<Record<string, { percent?: number } | undefined> | undefined>;
+  accountUsage(): Promise<unknown>;
+  listMemories(): Promise<unknown>;
+  deleteMemory(id: string): Promise<unknown>;
   compact(sessionId: string): Promise<unknown>;
   dispose(): void;
   disposeAndWait(timeoutMs?: number): Promise<void>;
@@ -105,6 +124,8 @@ export interface SessionManagerOptions {
   /** The model a new chat gets when none was picked. None by default, which leaves
    *  the choice to kiro. */
   defaultModel?: () => Promise<string | undefined>;
+  /** The effort a new chat on a model gets when none was picked. */
+  defaultEffort?: (modelId: string | undefined) => Promise<string | undefined>;
 }
 
 const CANCEL_GRACE_MS = 10_000;
@@ -120,8 +141,21 @@ export class Session {
   cwd: string;
   agentId?: string;
   modelId?: string;
+  effortLevel?: string;
   currentModeId?: string;
   availableModes: AgentMode[] = [];
+  // Set on a session that starts as a copy of another's conversation, cut after the
+  // turn of the prompt `messageId`.
+  forkOf?: { sessionId: string; messageId: string };
+  // Credits used, as kiro last reported them.
+  credits?: number;
+  // The latest turn: its prompt's id once kiro names it, whether anything came of it, and
+  // whether it failed. A retry rewinds a failed turn that left nothing.
+  lastTurn?: { messageId?: string; output: boolean; failed: boolean };
+  // Messages sent into the running turn that the model has not read yet, by kiro's id.
+  readonly steers = new Map<string, { text: string; clientId?: string }>();
+  // What the running turn took, from kiro's turn_completion.
+  turnStats?: TurnStats;
   title = '';
   createdAt = new Date().toISOString();
   updatedAt = new Date().toISOString();
@@ -175,9 +209,25 @@ function kiroMeta(update: SessionUpdate): KiroUpdateMeta | undefined {
 function sessionInfoEvent(sessionId: string, update: SessionInfoUpdate): CasperEventPayload | null {
   const info = update._meta?.kiro;
   switch (info?.kind) {
-    case 'context_usage':
-      return typeof info.usagePercentage === 'number'
-        ? { kind: 'metadata', params: { sessionId, contextUsagePercentage: info.usagePercentage } }
+    case 'context_usage': {
+      if (typeof info.usagePercentage !== 'number') return null;
+      const contextBreakdown = contextBreakdownOf(info.breakdown);
+      return {
+        kind: 'metadata',
+        params: { sessionId, contextUsagePercentage: info.usagePercentage, ...(contextBreakdown ? { contextBreakdown } : {}) },
+      };
+    }
+    case 'focus_update': {
+      const title = sanitizeTitle(info.title ?? '');
+      return title ? { kind: 'title_changed', title } : null;
+    }
+    case 'session_usage': {
+      const total = (info.credits ?? []).reduce((sum, c) => sum + (typeof c?.usage === 'number' ? c.usage : 0), 0);
+      return info.credits?.length ? { kind: 'metadata', params: { sessionId, sessionCredits: total } } : null;
+    }
+    case 'user_message_id_assigned':
+      return typeof info.userMessageId === 'string' && info.userMessageId
+        ? { kind: 'prompt_id', messageId: info.userMessageId }
         : null;
     case 'summarization_started':
       return { kind: 'compaction', params: { sessionId, status: { type: 'started' }, summary: null } };
@@ -193,9 +243,66 @@ function sessionInfoEvent(sessionId: string, update: SessionInfoUpdate): CasperE
   }
 }
 
-/** The model kiro reports a session is using. */
-function sessionModel(res: SessionNewResult): string | undefined {
-  return res.configOptions?.find((o) => o.id === 'model')?.currentValue;
+/** The model and effort kiro reports a session is using. The effort is null for a model
+ *  without effort levels, since kiro then offers no effort option. */
+function sessionSettings(
+  options: SessionConfigOption[] | undefined,
+): { modelId?: string; effortLevel: string | null } | undefined {
+  if (!options) return undefined;
+  return {
+    modelId: options.find((o) => o.id === 'model')?.currentValue,
+    effortLevel: options.find((o) => o.id === 'effortLevel')?.currentValue ?? null,
+  };
+}
+
+/** What a turn took, from kiro's `turn_completion`. Undefined when it reports neither. */
+function turnStatsOf(info: { promptTurnSummaries?: { usage?: number; unit?: string }[]; elapsedTime?: number }): TurnStats | undefined {
+  const credits = (info.promptTurnSummaries ?? []).reduce(
+    (sum, t) => sum + (typeof t?.usage === 'number' && Number.isFinite(t.usage) ? t.usage : 0),
+    0,
+  );
+  const elapsedMs = typeof info.elapsedTime === 'number' && info.elapsedTime > 0 ? info.elapsedTime : undefined;
+  if (!credits && !elapsedMs) return undefined;
+  return { ...(elapsedMs ? { elapsedMs } : {}), ...(credits > 0 ? { credits } : {}) };
+}
+
+/** The plan in kiro's `_kiro/account/getUsage` answer, if it has one. */
+function accountUsageOf(raw: unknown): AccountUsage | undefined {
+  const data = (raw as { data?: Record<string, unknown> } | undefined)?.data;
+  if (!data || typeof data.planName !== 'string') return undefined;
+  const credits = (Array.isArray(data.usageBreakdowns) ? data.usageBreakdowns : []).find(
+    (b: { resourceType?: unknown }) => b?.resourceType === 'CREDIT',
+  ) as Record<string, unknown> | undefined;
+  if (!credits || typeof credits.used !== 'number') return undefined;
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+  return {
+    planName: data.planName,
+    used: credits.used,
+    ...(credits.hasLimit !== false && num(credits.limit) !== undefined ? { limit: num(credits.limit) } : {}),
+    ...(typeof data.billingCycleReset === 'string' ? { resetsOn: data.billingCycleReset } : {}),
+    ...(num(credits.overageCharges) ? { overageCharges: num(credits.overageCharges) } : {}),
+    ...(typeof credits.currency === 'string' ? { currency: credits.currency } : {}),
+  };
+}
+
+/** The memories in kiro's `_kiro/memory/list` answer. */
+function memoriesOf(raw: unknown): Memory[] {
+  const list = (raw as { memories?: unknown } | undefined)?.memories;
+  if (!Array.isArray(list)) return [];
+  const out: Memory[] = [];
+  for (const m of list as Record<string, unknown>[]) {
+    if (typeof m?.id !== 'string') continue;
+    const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+    out.push({
+      id: m.id,
+      memoryType: str(m.memoryType) ?? '',
+      title: str(m.title) ?? '',
+      summary: str(m.summary) ?? '',
+      ...(Array.isArray(m.scopes) ? { scopes: m.scopes.filter((x): x is string => typeof x === 'string') } : {}),
+      ...(str(m.updatedAt) ?? str(m.createdAt) ? { updatedAt: str(m.updatedAt) ?? str(m.createdAt) } : {}),
+    });
+  }
+  return out;
 }
 
 /** The row for a subagent read back from its parent's file. */
@@ -219,7 +326,7 @@ function newerOf(a: string | undefined, b: string): string {
 }
 
 function firstPromptText(transcript: TranscriptItem[]): string | undefined {
-  const first = transcript.find((it) => it.type === 'message' && it.message.role === 'user');
+  const first = transcript.find((it) => it.type === 'message' && it.message.role === 'user' && !it.message.steer);
   return first?.type === 'message' ? first.message.text : undefined;
 }
 
@@ -235,12 +342,14 @@ export class SessionManager {
   private readonly spawnProcess: SpawnProcess;
   private readonly cancelGraceMs: number;
   private readonly defaultModel: () => Promise<string | undefined>;
+  private readonly defaultEffort: (modelId: string | undefined) => Promise<string | undefined>;
 
   constructor(log: Logger, opts: SessionManagerOptions = {}) {
     this.log = log;
     this.spawnProcess = opts.spawn ?? ((o, l) => new KiroProcess(o, l));
     this.cancelGraceMs = opts.cancelGraceMs ?? CANCEL_GRACE_MS;
     this.defaultModel = opts.defaultModel ?? (async () => undefined);
+    this.defaultEffort = opts.defaultEffort ?? (async () => undefined);
   }
 
   /** What a session is called, from every read path. */
@@ -394,6 +503,7 @@ export class SessionManager {
     s.agentId = persisted.agentId;
     s.currentModeId = persisted.agentId;
     s.modelId = persisted.modelId;
+    s.effortLevel = persisted.effortLevel;
     s.createdAt = persisted.createdAt;
     s.updatedAt = persisted.updatedAt;
     s.markLive();
@@ -404,7 +514,16 @@ export class SessionManager {
 
   private wire(s: Session, proc: ManagedProcess): void {
     proc.on('notification', (n: JsonRpcNotification) => {
-      if (s.replaying) return;
+      // A load replays the session's credits, which nothing else reports until the next turn.
+      const replayed = (n.params as SessionUpdateParams | undefined)?.update;
+      if (s.replaying || kiroMeta(replayed ?? { sessionUpdate: '' })?.replay) {
+        if (replayed?.sessionUpdate === 'session_info_update' && (replayed as SessionInfoUpdate)._meta?.kiro?.kind === 'session_usage') {
+          const payload = sessionInfoEvent(s.sessionId, replayed as SessionInfoUpdate);
+          if (payload?.kind === 'metadata') s.credits = payload.params.sessionCredits;
+          if (payload) s.record(payload);
+        }
+        return;
+      }
       if (n.method === KIRO_AGENT_NOT_FOUND) {
         this.log.warn({ sessionId: s.sessionId, detail: n.params }, 'kiro could not use the requested agent');
         return;
@@ -417,8 +536,38 @@ export class SessionManager {
       if (meta?.replay) return;
 
       if (update.sessionUpdate === 'session_info_update') {
+        const info = (update as SessionInfoUpdate)._meta?.kiro;
+        if (info?.kind === 'steering_injected' || info?.kind === 'steering_cleared') {
+          this.steerSettled(s, info.kind === 'steering_injected', info.kind === 'steering_injected' ? [info.messageId] : (info.messageIds ?? []));
+          return;
+        }
+        if (info?.kind === 'turn_completion') {
+          s.turnStats = turnStatsOf(info);
+          return;
+        }
         const payload = sessionInfoEvent(s.sessionId, update as SessionInfoUpdate);
+        if (payload?.kind === 'prompt_id' && s.lastTurn) s.lastTurn.messageId = payload.messageId;
+        if (payload?.kind === 'metadata' && payload.params.sessionCredits !== undefined) {
+          s.credits = payload.params.sessionCredits;
+        }
+        if (payload?.kind === 'title_changed') {
+          if (payload.title === s.title) return;
+          s.title = payload.title;
+        }
         if (payload) s.record(payload);
+        return;
+      }
+      if (update.sessionUpdate === 'config_option_update') {
+        const options = (update as { configOptions?: SessionConfigOption[] }).configOptions;
+        rememberKiroModels(options);
+        const settings = sessionSettings(options);
+        if (!settings) return;
+        const modelId = settings.modelId ?? s.modelId;
+        const effortLevel = settings.effortLevel ?? undefined;
+        if (modelId === s.modelId && effortLevel === s.effortLevel) return;
+        s.modelId = modelId;
+        s.effortLevel = effortLevel;
+        s.record({ kind: 'settings_changed', modelId, effortLevel: settings.effortLevel });
         return;
       }
       if (!TRANSCRIPT_UPDATES.has(update.sessionUpdate)) return;
@@ -431,6 +580,7 @@ export class SessionManager {
         return;
       }
       if (subagentId) this.trackSubagentCall(s, subagentId, update);
+      if (s.lastTurn) s.lastTurn.output = true;
       s.record({ kind: 'session_update', update });
     });
     proc.on('exit', (code: number | null, signal: string | null) => {
@@ -484,11 +634,27 @@ export class SessionManager {
         } finally {
           s.replaying = false;
         }
+      } else if (s.forkOf) {
+        // kiro answers a fork with the new id alone, so the copy is then loaded for its
+        // modes and settings. Its history is already in kiro's file, so the replay is skipped.
+        const { sessionId } = await proc.forkSession({
+          sessionId: s.forkOf.sessionId,
+          cwd: s.cwd,
+          mcpServers: [],
+          _meta: { kiro: { messageId: s.forkOf.messageId } },
+        });
+        s.replaying = true;
+        try {
+          res = { ...(await proc.loadSession({ sessionId, cwd: s.cwd, mcpServers: [] })), sessionId };
+        } finally {
+          s.replaying = false;
+        }
+        res = await this.applyForkSettings(proc, s, res);
       } else {
         res = await proc.newSession({
           cwd: s.cwd,
           mcpServers: [],
-          _meta: { kiro: { modeId: s.agentId, modelId: s.modelId } },
+          _meta: { kiro: { modeId: s.agentId, modelId: s.modelId, effortLevel: s.effortLevel } },
         });
       }
 
@@ -501,8 +667,13 @@ export class SessionManager {
       s.availableModes = res.modes.availableModes;
       s.currentModeId = res.modes.currentModeId;
       s.agentId = res.modes.currentModeId ?? s.agentId;
-      s.modelId = sessionModel(res) ?? s.modelId;
+      const settings = sessionSettings(res.configOptions);
+      if (settings) {
+        s.modelId = settings.modelId ?? s.modelId;
+        s.effortLevel = settings.effortLevel ?? undefined;
+      }
       rememberModes(res.modes.availableModes);
+      rememberKiroModels(res.configOptions);
       s.markLive();
       s.proc = proc;
       s.spawning = undefined;
@@ -515,6 +686,27 @@ export class SessionManager {
       s.spawning = undefined;
       throw err;
     }
+  }
+
+  /** A fork starts on kiro's default mode and model, so the ones the chat had are set
+   *  again. Returns the session as it now is. */
+  private async applyForkSettings(proc: ManagedProcess, s: Session, res: SessionNewResult): Promise<SessionNewResult> {
+    const got = sessionSettings(res.configOptions);
+    let changed = false;
+    if (s.agentId && res.modes.currentModeId !== s.agentId) {
+      await proc.setMode(res.sessionId, s.agentId);
+      res = { ...res, modes: { ...res.modes, currentModeId: s.agentId } };
+    }
+    if (s.modelId && got?.modelId !== s.modelId) {
+      await proc.setModel(res.sessionId, s.modelId);
+      changed = true;
+    }
+    if (s.effortLevel && (changed || got?.effortLevel !== s.effortLevel)) {
+      await proc.setEffort(res.sessionId, s.effortLevel);
+      changed = true;
+    }
+    // The options kiro sent with the load are out of date now, so the ones just set are kept.
+    return changed ? { ...res, configOptions: undefined } : res;
   }
 
   private async ensureCapacity(): Promise<void> {
@@ -537,50 +729,143 @@ export class SessionManager {
     }
   }
 
-  /** Creates a new session. Spawns immediately to get a real kiro sessionId. */
+  /** Creates a new session. Spawns immediately to get a real kiro sessionId. It has no
+   *  Casper title, so kiro's own title names it once kiro has made one. */
   async createChat(opts: {
     cwd?: string;
     agentId?: string;
     modelId?: string;
+    effortLevel?: string;
     freshWorkspace?: boolean;
-    title?: string;
     chatId?: string;
   }): Promise<ChatDetail> {
     const chatId = isValidChatId(opts.chatId) ? opts.chatId : crypto.randomUUID();
     const cwd = opts.freshWorkspace ? createChatWorkspace(chatId) : resolveCwd(opts.cwd);
-    // Temporary local id until kiro assigns the real one during ensureProc.
-    const tempId = `pending-${Date.now()}-${Math.floor(this.sessions.size)}`;
-    const store = new EventStore(chatId);
-    const s = new Session(tempId, store, cwd);
-    s.agentId = opts.agentId ?? config.defaultAgent;
-    s.currentModeId = s.agentId;
-    s.modelId = opts.modelId ?? (await this.defaultModel());
-    this.sessions.set(tempId, s);
+    const modelId = opts.modelId ?? (await this.defaultModel());
+    const s = await this.startSession(new EventStore(chatId), cwd, {
+      agentId: opts.agentId ?? config.defaultAgent,
+      modelId,
+      effortLevel: opts.effortLevel ?? (await this.defaultEffort(modelId)),
+    });
+    this.store.create(chatId);
+    this.store.bindSession(chatId, s.sessionId);
+    return this.buildDetail(this.store.get(chatId)!, s, []);
+  }
 
+  /** Starts a kiro session, new or forked, and holds it in memory under kiro's id. */
+  private async startSession(
+    store: EventStore,
+    cwd: string,
+    init: { agentId?: string; modelId?: string; effortLevel?: string; forkOf?: Session['forkOf'] },
+  ): Promise<Session> {
+    // Temporary local id until kiro assigns the real one during ensureProc.
+    const tempId = `pending-${crypto.randomUUID()}`;
+    const s = new Session(tempId, store, cwd);
+    s.agentId = init.agentId;
+    s.currentModeId = init.agentId;
+    s.modelId = init.modelId;
+    s.effortLevel = init.effortLevel;
+    s.forkOf = init.forkOf;
+    this.sessions.set(tempId, s);
     try {
       await this.ensureProc(s); // adopts kiro's real sessionId
     } catch (err) {
-      // Drop the orphan so it can't leak or show up as a dead, unopenable row.
-      this.evict(s.sessionId);
+      // Drop the orphan so it can't leak or show up as a dead, unopenable row. The store
+      // may belong to a chat that goes on, so it is left alone.
+      this.sessions.delete(s.sessionId);
+      s.proc?.dispose();
+      throw err;
+    }
+    return s;
+  }
+
+  /**
+   * A new chat holding this chat's conversation up to and including the turn of the
+   * prompt `messageId`. A workspace Casper made is copied with it, so either chat can be
+   * deleted without taking the other's files.
+   */
+  async branchChat(chatId: string, messageId: string): Promise<ChatDetail> {
+    const parent = await this.ensureOpen(chatId);
+    await this.settleReload(parent);
+    const prompts = await promptStamps(parent.sessionId);
+    const at = prompts.findIndex((p) => p.id === messageId);
+    if (at < 0) throw new Error(`Unknown message: ${messageId}`);
+
+    const branchId = crypto.randomUUID();
+    const fromDir = chatDir(chatId);
+    const toDir = chatDir(branchId);
+    const ownWorkspace = parent.cwd === chatWorkspaceDir(chatId);
+    await fs.promises.cp(fromDir, toDir, { recursive: true }).catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== 'ENOENT') throw err;
+    });
+    let s: Session;
+    try {
+      s = await this.startSession(new EventStore(branchId), ownWorkspace ? createChatWorkspace(branchId) : parent.cwd, {
+        agentId: parent.agentId,
+        modelId: parent.modelId,
+        effortLevel: parent.effortLevel,
+        forkOf: { sessionId: parent.sessionId, messageId },
+      });
+    } catch (err) {
+      await removeChatDir(branchId);
       throw err;
     }
 
-    this.store.create(chatId);
-    this.store.bindSession(chatId, s.sessionId);
+    this.store.create(branchId);
+    this.store.bindSession(branchId, s.sessionId);
+    const parentRow = this.store.get(chatId);
+    if (parentRow?.title) this.store.setTitle(branchId, parentRow.title);
+    if (parentRow?.cwd && !ownWorkspace) this.store.setCwd(branchId, parentRow.cwd);
+    const cutAt = prompts[at + 1]?.atMs;
+    this.store.copyHistory(
+      chatId,
+      branchId,
+      { prompts: at + 1, before: cutAt === undefined ? undefined : cutAt - STAMP_PAD_MS },
+      (p) => (p.startsWith(fromDir + path.sep) ? toDir + p.slice(fromDir.length) : p),
+    );
+    return this.getDetail(branchId);
+  }
 
-    const name = sanitizeTitle(opts.title ?? '') || (opts.freshWorkspace ? '' : path.basename(s.cwd));
-    if (name) {
-      this.store.setTitle(chatId, name);
-      s.title = name;
-    }
+  /**
+   * Cuts this chat back to before the prompt `messageId`, so it can be sent again. kiro
+   * cannot shorten a session, so the chat moves to a new kiro session holding the turns
+   * before it, and the old session stays in kiro's store.
+   */
+  async rewindChat(chatId: string, messageId: string): Promise<ChatDetail> {
+    const s = await this.ensureOpen(chatId);
+    await this.settleReload(s);
+    if (s.running) throw new Error('Cannot rewind while a turn is running');
+    if (s.turnState.get().compacting) throw new Error('Cannot rewind while the conversation is being compacted');
+    const prompts = await promptStamps(s.sessionId);
+    const at = prompts.findIndex((p) => p.id === messageId);
+    if (at < 0) throw new Error(`Unknown message: ${messageId}`);
 
-    return this.buildDetail(this.store.get(chatId)!, s, []);
+    const next = await this.startSession(s.store, s.cwd, {
+      agentId: s.agentId,
+      modelId: s.modelId,
+      effortLevel: s.effortLevel,
+      forkOf: at > 0 ? { sessionId: s.sessionId, messageId: prompts[at - 1]!.id } : undefined,
+    });
+    const old = s.proc;
+    s.proc = undefined;
+    this.sessions.delete(s.sessionId);
+
+    this.store.bindSession(chatId, next.sessionId);
+    this.store.dropHistory(chatId, { prompts: at, from: (prompts[at]!.atMs ?? Date.now()) - STAMP_PAD_MS });
+    next.record({ kind: 'history_replaced' });
+    this.log.info({ chatId, from: s.sessionId, to: next.sessionId }, 'chat rewound');
+    // Nothing refers to the old session now. kiro writes its file again on exit, so it is
+    // deleted only once the process is gone, and once more a moment later.
+    await old?.disposeAndWait().catch(() => {});
+    await this.forgetSession(s.sessionId);
+    return this.getDetail(chatId);
   }
 
   async runPrompt(
     chatId: string,
     content: PromptContentBlock[],
     attachments?: MessageAttachment[],
+    opts: { retry?: boolean } = {},
   ): Promise<void> {
     const s = await this.ensureOpen(chatId);
     // A message typed mid-reload lands on the new process, not rejected.
@@ -598,15 +883,9 @@ export class SessionManager {
       s.running = false;
       throw err;
     }
-    // Only when nothing has named it yet.
-    if (!this.store.getTitle(chatId)) {
-      const title = titleFromPrompt(content);
-      if (title) {
-        this.store.setTitle(chatId, title);
-        s.title = title;
-      }
-    }
-
+    if (opts.retry) await this.dropFailedTurn(chatId, s, proc);
+    s.lastTurn = { output: false, failed: false };
+    s.turnStats = undefined;
     let recorded: MessageAttachment[] | undefined;
     if (attachments?.length) {
       const ordinal = await promptCount(s.sessionId);
@@ -618,12 +897,19 @@ export class SessionManager {
 
     proc
       .prompt({ sessionId: s.sessionId, prompt: content })
-      .then((res) => {
+      .then(async (res) => {
         if (res.stopReason === 'cancelled') this.saveEnding(chatId, s.recorder.finish({ kind: 'interrupted' }));
         else s.recorder.discard();
-        s.record({ kind: 'turn_ended', stopReason: res.stopReason });
+        if (s.lastTurn) s.lastTurn.failed = res.stopReason === 'cancelled';
+        await this.dropSteers(s, proc);
+        const stats = s.turnStats;
+        s.turnStats = undefined;
+        s.record({ kind: 'turn_ended', stopReason: res.stopReason, ...(stats ? { stats } : {}) });
       })
-      .catch((err: Error) => {
+      .catch(async (err: Error) => {
+        if (s.lastTurn) s.lastTurn.failed = true;
+        s.turnStats = undefined;
+        await this.dropSteers(s, proc);
         if (s.cancelRequested) {
           // The user stopped the turn and the process had to be killed to do it.
           this.saveEnding(chatId, s.recorder.finish({ kind: 'interrupted' }));
@@ -648,6 +934,74 @@ export class SessionManager {
         s.lastActivity = Date.now();
         if (s.subagents.turnEnded()) s.record({ kind: 'subagents_changed', subagents: s.subagents.list() });
       });
+  }
+
+  /** Sends a message into the running turn. It shows in the chat once the model reads it,
+   *  as a `steer_injected` event; one the turn ends without reading comes back as
+   *  `steer_dropped`. */
+  async steer(chatId: string, text: string, clientId?: string): Promise<void> {
+    const s = this.sessions.get(this.store.sessionIdForChat(chatId) ?? '');
+    const message = text.trim();
+    if (!message) throw new Error('The message is empty');
+    const proc = s?.proc;
+    if (!s || !proc || !s.running || s.cancelRequested) throw new Error('No turn is running');
+    // Registered under the id kiro is given before it is sent, since kiro can read the
+    // message before its answer arrives.
+    const id = crypto.randomUUID();
+    const entry = { text: message, ...(clientId ? { clientId } : {}) };
+    s.steers.set(id, entry);
+    try {
+      const kiroId = await proc.steer(s.sessionId, message, id);
+      if (kiroId && kiroId !== id && s.steers.delete(id)) s.steers.set(kiroId, entry);
+    } catch (err) {
+      s.steers.delete(id);
+      throw err;
+    }
+  }
+
+  /** kiro read the steers `ids` into the turn, or dropped them. kiro names a steer
+   *  `steer-<the id it was given>`. */
+  private steerSettled(s: Session, injected: boolean, ids: (string | undefined)[]): void {
+    for (const raw of ids) {
+      if (!raw) continue;
+      const id = s.steers.has(raw) ? raw : raw.replace(/^steer-/, '');
+      const entry = s.steers.get(id);
+      if (!entry) continue;
+      s.steers.delete(id);
+      s.record({ kind: injected ? 'steer_injected' : 'steer_dropped', text: entry.text, ...(entry.clientId ? { clientId: entry.clientId } : {}) });
+      if (injected && s.lastTurn) s.lastTurn.output = true;
+    }
+  }
+
+  /** At a turn's end, drops the steers the model never read, so none waits in kiro for a
+   *  later turn the user did not mean it for. */
+  private async dropSteers(s: Session, proc: ManagedProcess): Promise<void> {
+    if (s.steers.size === 0) return;
+    await proc.clearSteers(s.sessionId).catch(() => {});
+    this.steerSettled(s, false, [...s.steers.keys()]);
+  }
+
+  /**
+   * Before a retry, removes the failed turn it retries when kiro kept nothing of it but the
+   * prompt, so the model does not read that prompt twice. A turn that did anything is left:
+   * kiro's rewind would also undo the files it changed.
+   */
+  private async dropFailedTurn(chatId: string, s: Session, proc: ManagedProcess): Promise<void> {
+    const last = s.lastTurn;
+    if (!last?.failed || last.output || !last.messageId) return;
+    s.lastTurn = undefined;
+    try {
+      const stamps = await promptStamps(s.sessionId);
+      const ordinal = stamps.findIndex((p) => p.id === last.messageId);
+      if (ordinal < 0 || !(await proc.revertTo(s.sessionId, last.messageId))) return;
+      // The retry takes its place, so what Casper kept of it goes too: its attachments and
+      // the stored ending. Clients refetch the shorter history.
+      this.store.dropHistory(chatId, { prompts: ordinal, from: (stamps[ordinal]!.atMs ?? Date.now()) - STAMP_PAD_MS });
+      s.record({ kind: 'history_replaced' });
+      this.log.info({ chatId, messageId: last.messageId }, 'failed turn removed before its retry');
+    } catch (err) {
+      this.log.warn({ err, chatId }, 'could not remove the failed turn before its retry');
+    }
   }
 
   private saveEnding(chatId: string, ending: TurnEnding | null): void {
@@ -703,6 +1057,70 @@ export class SessionManager {
     s.lastActivity = Date.now();
   }
 
+  async setEffort(chatId: string, effortLevel: string): Promise<void> {
+    const s = await this.ensureOpen(chatId);
+    await this.settleReload(s);
+    const proc = await this.ensureProc(s);
+    await proc.setEffort(s.sessionId, effortLevel);
+    s.effortLevel = effortLevel;
+    s.lastActivity = Date.now();
+  }
+
+  /**
+   * What the chat has cost and the plan it counts against. Asks kiro for the context
+   * breakdown too, which it reports only during a turn, and records it as metadata. Both
+   * need a kiro process, so a dormant chat is started.
+   */
+  async getUsage(chatId: string): Promise<ChatUsageResponse> {
+    const s = await this.ensureOpen(chatId);
+    await this.settleReload(s);
+    const proc = await this.ensureProc(s);
+    s.lastActivity = Date.now();
+    const [raw, account, filed] = await Promise.all([
+      proc.contextBreakdown(s.sessionId).catch(() => undefined),
+      this.accountUsage(proc),
+      sessionCredits(s.sessionId).catch(() => undefined),
+    ]);
+    const contextBreakdown = contextBreakdownOf(raw);
+    if (contextBreakdown) s.record({ kind: 'metadata', params: { sessionId: s.sessionId, contextBreakdown } });
+    const credits = Math.max(s.credits ?? 0, filed ?? 0);
+    return { ...(s.credits !== undefined || filed !== undefined ? { credits } : {}), ...(account ? { account } : {}) };
+  }
+
+  // The plan changes slowly and each read is a call to kiro's service, so it is kept a minute.
+  private account?: { at: number; value: AccountUsage | undefined };
+
+  private async accountUsage(proc: ManagedProcess): Promise<AccountUsage | undefined> {
+    if (this.account && Date.now() - this.account.at < 60_000) return this.account.value;
+    const value = accountUsageOf(await proc.accountUsage().catch(() => undefined));
+    this.account = { at: Date.now(), value };
+    return value;
+  }
+
+  /** kiro's saved memories. They are the user's, not a chat's, so any process will do. */
+  listMemories(): Promise<Memory[]> {
+    return this.withAnyProcess(async (proc) => memoriesOf(await proc.listMemories()));
+  }
+
+  deleteMemory(id: string): Promise<void> {
+    return this.withAnyProcess(async (proc) => {
+      await proc.deleteMemory(id);
+    });
+  }
+
+  /** Runs on a live kiro process, or on one started for the call and stopped after it. */
+  private async withAnyProcess<T>(run: (proc: ManagedProcess) => Promise<T>): Promise<T> {
+    const live = [...this.sessions.values()].find((s) => s.proc)?.proc;
+    if (live) return run(live);
+    const proc = this.spawnProcess({ cwd: config.defaultCwd }, this.log);
+    try {
+      await proc.initialize();
+      return await run(proc);
+    } finally {
+      proc.dispose();
+    }
+  }
+
   /** Runs one of kiro's slash commands. Compaction is the only one Casper offers. It
    *  returns once kiro has started; its progress arrives as compaction events. */
   async execCommand(chatId: string, command: string): Promise<void> {
@@ -745,7 +1163,8 @@ export class SessionManager {
       chatId: chat.chatId,
       sessionId: live?.sessionId ?? chat.sessionId ?? undefined,
       title: this.titleOf(chat, {
-        kiroTitle: persisted?.title || live?.title,
+        // A live session hears kiro's new title before kiro writes its file.
+        kiroTitle: live?.title || persisted?.title,
         firstPrompt: transcript && firstPromptText(transcript),
         cwd,
       }),
@@ -757,6 +1176,7 @@ export class SessionManager {
       liveness: live?.proc ? 'live' : 'dormant',
       agentId: live?.agentId ?? persisted?.agentId,
       modelId: live?.modelId ?? persisted?.modelId,
+      effortLevel: live ? live.effortLevel : persisted?.effortLevel,
       running: live?.running ?? false,
       // A dormant session falls back to kiro's file.
       contextUsagePercentage:
@@ -911,7 +1331,7 @@ export class SessionManager {
     let cut = transcript.length;
     for (let i = transcript.length - 1; i >= 0; i--) {
       const it = transcript[i]!;
-      if (it.type === 'message' && it.message.role === 'user') {
+      if (it.type === 'message' && it.message.role === 'user' && !it.message.steer) {
         if (promptText && it.message.text.trim() === promptText) cut = i;
         break;
       }
@@ -942,7 +1362,14 @@ export class SessionManager {
     await removeChatDir(chatId);
     if (!sessionId) return;
     this.evict(sessionId);
-    await deletePersistedSession(sessionId);
+    await this.forgetSession(sessionId);
+  }
+
+  /** Deletes a session's files from kiro's store. */
+  private async forgetSession(sessionId: string): Promise<void> {
+    await deletePersistedSession(sessionId).catch((err: Error) => {
+      this.log.warn({ err, sessionId }, 'could not delete a kiro session');
+    });
     // kiro-cli's wrapped child can flush just after our delete; sweep once more.
     setTimeout(() => void deletePersistedSession(sessionId).catch(() => {}), 2500).unref?.();
   }

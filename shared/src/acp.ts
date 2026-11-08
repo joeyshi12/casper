@@ -59,6 +59,7 @@ export function isJsonRpcNotification(
 export interface KiroSessionInputs {
   modeId?: string;
   modelId?: string;
+  effortLevel?: string;
 }
 
 // kiro spawns MCP servers itself from its config, so Casper always passes [].
@@ -84,10 +85,20 @@ export interface SessionModes {
   availableModes: AgentMode[];
 }
 
-/** One advertised session setting, such as the model (`id: 'model'`). */
+/** One choice of a session setting. A model's carries its effort levels in `_meta.kiro`. */
+export interface SessionConfigChoice {
+  value: string;
+  name?: string;
+  description?: string;
+  _meta?: { kiro?: { effortLevels?: string[]; defaultEffortLevel?: string; [key: string]: unknown } };
+}
+
+/** One advertised session setting, such as the model (`id: 'model'`) or the effort
+ *  (`id: 'effortLevel'`, only offered for a model that has levels). */
 export interface SessionConfigOption {
   id: string;
   currentValue?: string;
+  options?: SessionConfigChoice[];
   [key: string]: unknown;
 }
 
@@ -102,6 +113,15 @@ export interface SessionLoadParams {
   cwd: string;
   mcpServers: never[];
   _meta?: { kiro: KiroSessionInputs };
+}
+
+/** A new session holding a copy of another's conversation up to and including the turn
+ *  of the prompt `messageId`. kiro answers with only the new session's id. */
+export interface SessionForkParams {
+  sessionId: string;
+  cwd: string;
+  mcpServers: never[];
+  _meta: { kiro: { messageId: string } };
 }
 
 export interface TextContentBlock {
@@ -194,9 +214,11 @@ export interface ToolCallProgressUpdate {
   _meta?: { kiro?: KiroUpdateMeta };
 }
 
-/** kiro's session-level events, told apart by `_meta.kiro.kind`: `context_usage`
- *  carries `usagePercentage`, and `summarization_started`, `summarization_completed`
- *  (with `conversationSummary`) and `summarization_failed` report a compaction. */
+/** kiro's session-level events, told apart by `_meta.kiro.kind`: `context_usage` carries
+ *  `usagePercentage` and usually a `breakdown`, `focus_update` may carry a new `title`,
+ *  `user_message_id_assigned` names the prompt just sent, and `summarization_started`,
+ *  `summarization_completed` (with `conversationSummary`) and `summarization_failed`
+ *  report a compaction. */
 export interface SessionInfoUpdate {
   sessionUpdate: 'session_info_update';
   title?: string;
@@ -204,10 +226,27 @@ export interface SessionInfoUpdate {
     kiro?: {
       kind?: string;
       usagePercentage?: number;
+      breakdown?: Record<string, { tokens?: number; percent?: number } | undefined>;
+      title?: string;
+      userMessageId?: string;
+      /** A steer's id (`steering_injected`), or the steers dropped at a turn's end
+       *  (`steering_cleared`). */
+      messageId?: string;
+      messageIds?: string[];
+      /** A `turn_completion`'s use, per prompt in the turn, and its length. */
+      promptTurnSummaries?: { usage?: number; unit?: string }[];
+      elapsedTime?: number;
+      credits?: { usage?: number; unit?: string }[];
       conversationSummary?: string;
       [key: string]: unknown;
     };
   };
+}
+
+/** kiro's report of the session's settings, sent when one changes. */
+export interface ConfigOptionUpdate {
+  sessionUpdate: 'config_option_update';
+  configOptions: SessionConfigOption[];
 }
 
 export type SessionUpdate =
@@ -216,6 +255,7 @@ export type SessionUpdate =
   | ToolCallUpdate
   | ToolCallProgressUpdate
   | SessionInfoUpdate
+  | ConfigOptionUpdate
   | { sessionUpdate: string; [key: string]: unknown };
 
 export interface SessionUpdateParams {
@@ -261,6 +301,40 @@ export interface RequestPermissionParams {
 export interface KiroMetadataParams {
   sessionId: string;
   contextUsagePercentage?: number;
+  /** What the used context holds, when kiro reports it. */
+  contextBreakdown?: ContextBreakdown;
+  /** Credits the session has used so far. */
+  sessionCredits?: number;
+}
+
+/** Each part of the context window, as a percentage of the whole window. */
+export interface ContextBreakdown {
+  prompts: number;
+  responses: number;
+  tools: number;
+  contextFiles: number;
+  sessionFiles: number;
+  memory: number;
+}
+
+/** The breakdown in a context_usage update, or undefined when it has none. kiro's token
+ *  counts there leave out the system prompt, so only the percentages are kept. */
+export function contextBreakdownOf(
+  raw: Record<string, { percent?: number } | undefined> | undefined,
+): ContextBreakdown | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const pct = (key: string) => {
+    const v = raw[key]?.percent;
+    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
+  };
+  return {
+    prompts: pct('yourPrompts'),
+    responses: pct('kiroResponses'),
+    tools: pct('tools'),
+    contextFiles: pct('contextFiles'),
+    sessionFiles: pct('sessionFiles'),
+    memory: pct('memory'),
+  };
 }
 
 export interface KiroCompactionStatusParams {
@@ -278,9 +352,17 @@ export const ACP_METHODS = {
   sessionCancel: 'session/cancel',
   sessionSetMode: 'session/set_mode',
   sessionSetConfigOption: 'session/set_config_option',
+  sessionFork: 'session/fork',
   sessionUpdate: 'session/update',
   requestPermission: 'session/request_permission',
   compact: '_kiro/session/compact',
+  sessionContext: '_kiro/session/context',
+  accountUsage: '_kiro/account/getUsage',
+  memoryList: '_kiro/memory/list',
+  memoryDelete: '_kiro/memory/delete',
+  steer: '_session/steer',
+  steerClear: '_session/steer/clear',
+  checkpointRevert: '_kiro/checkpoint/revertMultiple',
 } as const;
 
 /** kiro's notice that a requested agent could not be used, so the session fell back to

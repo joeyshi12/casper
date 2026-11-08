@@ -1,10 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import type {
   CreateChatRequest,
+  CutChatRequest,
   PromptRequest,
   RenameChatRequest,
   SetCwdRequest,
   SetModeRequest,
+  SetEffortRequest,
   SetModelRequest,
 } from '@casper/shared';
 import type { SessionManager } from '../session/SessionManager.js';
@@ -24,8 +26,8 @@ export function registerChatRoutes(
         cwd: body.cwd,
         agentId: body.agentId,
         modelId: body.modelId,
+        effortLevel: body.effortLevel,
         freshWorkspace: body.freshWorkspace,
-        title: body.title,
         // Not optional in practice: the client's chat already owns any file uploaded before
         // the session existed, so dropping it here strands those files under an id nothing
         // refers to again.
@@ -90,6 +92,74 @@ export function registerChatRoutes(
       return { ok: true };
     },
   );
+
+  app.post<{ Params: { id: string }; Body: SetEffortRequest }>(
+    '/api/chats/:id/effort',
+    async (req) => {
+      await manager.setEffort(req.params.id, req.body.effortLevel);
+      return { ok: true };
+    },
+  );
+
+  // What the chat has cost, and the plan it counts against.
+  app.get<{ Params: { id: string } }>('/api/chats/:id/usage', async (req, reply) => {
+    try {
+      return await manager.getUsage(req.params.id);
+    } catch (err) {
+      reply.code(400);
+      return { error: (err as Error).message };
+    }
+  });
+
+  // kiro's saved memories, which belong to the user rather than to a chat.
+  app.get('/api/memories', async (_req, reply) => {
+    try {
+      return { memories: await manager.listMemories() };
+    } catch (err) {
+      reply.code(502);
+      return { error: (err as Error).message };
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>('/api/memories/:id', async (req, reply) => {
+    try {
+      await manager.deleteMemory(req.params.id);
+      return { ok: true };
+    } catch (err) {
+      reply.code(400);
+      return { error: (err as Error).message };
+    }
+  });
+
+  // A new chat with this chat's conversation up to and including one prompt's turn.
+  app.post<{ Params: { id: string }; Body: CutChatRequest }>('/api/chats/:id/branch', async (req, reply) => {
+    const messageId = req.body?.messageId;
+    if (typeof messageId !== 'string' || !messageId) {
+      reply.code(400);
+      return { error: 'messageId is required' };
+    }
+    try {
+      return await manager.branchChat(req.params.id, messageId);
+    } catch (err) {
+      reply.code(400);
+      return { error: (err as Error).message };
+    }
+  });
+
+  // This chat cut back to before one prompt.
+  app.post<{ Params: { id: string }; Body: CutChatRequest }>('/api/chats/:id/rewind', async (req, reply) => {
+    const messageId = req.body?.messageId;
+    if (typeof messageId !== 'string' || !messageId) {
+      reply.code(400);
+      return { error: 'messageId is required' };
+    }
+    try {
+      return await manager.rewindChat(req.params.id, messageId);
+    } catch (err) {
+      reply.code(400);
+      return { error: (err as Error).message };
+    }
+  });
 
   app.post<{ Params: { id: string }; Body: SetModeRequest }>(
     '/api/chats/:id/mode',

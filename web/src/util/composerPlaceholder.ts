@@ -22,6 +22,6 @@ export function composerPlaceholder(s: {
   if (s.uploading) return 'Uploading…';
   if (s.cancelling) return 'Stopping…';
   if (s.compacting) return 'Compacting conversation…';
-  if (s.running) return 'Casper is working…';
+  if (s.running) return 'Casper is working… send a message to steer it';
   return 'Ask Casper to build something…';
 }

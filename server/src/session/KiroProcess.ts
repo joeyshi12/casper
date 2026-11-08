@@ -6,6 +6,7 @@ import {
   type JsonRpcNotification,
   type JsonRpcRequest,
   type RequestPermissionParams,
+  type SessionForkParams,
   type SessionLoadParams,
   type SessionNewParams,
   type SessionNewResult,
@@ -49,6 +50,8 @@ export class KiroProcess extends EventEmitter {
   private readonly recentStderr: string[] = [];
   // kiro's optional methods, as advertised by initialize.
   private extensionMethods = new Set<string>();
+  // Whether kiro can rewind a session to before one of its prompts.
+  private checkpoints = false;
 
   constructor(opts: KiroProcessOptions, log: Logger) {
     super();
@@ -119,7 +122,7 @@ export class KiroProcess extends EventEmitter {
   /** The ACP initialize handshake. Keeps the optional methods kiro advertises. */
   async initialize(): Promise<void> {
     const res = await this.client.request<{
-      agentCapabilities?: { _meta?: { kiro?: { extensionMethods?: unknown } } };
+      agentCapabilities?: { _meta?: { kiro?: { extensionMethods?: unknown; checkpoints?: unknown } } };
     }>(ACP_METHODS.initialize, {
       protocolVersion: 1,
       clientCapabilities: {
@@ -132,6 +135,7 @@ export class KiroProcess extends EventEmitter {
     this.extensionMethods = new Set(
       Array.isArray(methods) ? methods.filter((m): m is string => typeof m === 'string') : [],
     );
+    this.checkpoints = res?.agentCapabilities?._meta?.kiro?.checkpoints === true;
   }
 
   newSession(params: SessionNewParams): Promise<SessionNewResult> {
@@ -140,6 +144,10 @@ export class KiroProcess extends EventEmitter {
 
   loadSession(params: SessionLoadParams): Promise<SessionNewResult> {
     return this.client.request<SessionNewResult>(ACP_METHODS.sessionLoad, params);
+  }
+
+  forkSession(params: SessionForkParams): Promise<{ sessionId: string }> {
+    return this.client.request<{ sessionId: string }>(ACP_METHODS.sessionFork, params);
   }
 
   /** Runs a prompt turn to completion. */
@@ -166,6 +174,64 @@ export class KiroProcess extends EventEmitter {
       configId: 'model',
       value: modelId,
     });
+  }
+
+  setEffort(sessionId: string, effortLevel: string): Promise<unknown> {
+    return this.client.request(ACP_METHODS.sessionSetConfigOption, {
+      sessionId,
+      configId: 'effortLevel',
+      value: effortLevel,
+    });
+  }
+
+  /** Sends a message into the running turn. kiro passes it to the model at its next step,
+   *  reporting that as `steering_injected`. Resolves with kiro's id for it. */
+  async steer(sessionId: string, message: string, messageId: string): Promise<string | undefined> {
+    const res = await this.client.request<{ queued?: boolean; messageId?: string }>(ACP_METHODS.steer, {
+      sessionId,
+      message,
+      messageId,
+    });
+    if (res?.queued !== true) throw new Error('kiro did not take the message');
+    return typeof res.messageId === 'string' ? res.messageId : undefined;
+  }
+
+  /** Drops the messages sent into a turn that the model has not read yet. */
+  clearSteers(sessionId: string): Promise<unknown> {
+    return this.client.request(ACP_METHODS.steerClear, { sessionId });
+  }
+
+  /**
+   * Rewinds the session to before the prompt `messageId`, removing it and everything after.
+   * kiro also restores the files changed since, so this is only for a turn that changed
+   * nothing. False when kiro cannot or did not.
+   */
+  async revertTo(sessionId: string, messageId: string): Promise<boolean> {
+    if (!this.checkpoints) return false;
+    const res = await this.client.request<{ success?: boolean }>(ACP_METHODS.checkpointRevert, { sessionId, messageId });
+    return res?.success === true;
+  }
+
+  /** What the session's context holds, as kiro's `/context show` reports it. */
+  async contextBreakdown(sessionId: string): Promise<Record<string, { percent?: number } | undefined> | undefined> {
+    const res = await this.client.request<{ breakdown?: Record<string, { percent?: number } | undefined> } | null>(
+      ACP_METHODS.sessionContext,
+      { sessionId, subcommand: 'show' },
+    );
+    return res?.breakdown;
+  }
+
+  /** The user's plan and its use this billing cycle. Not session-scoped. */
+  accountUsage(): Promise<unknown> {
+    return this.client.request(ACP_METHODS.accountUsage, {});
+  }
+
+  listMemories(): Promise<unknown> {
+    return this.client.request(ACP_METHODS.memoryList, {});
+  }
+
+  deleteMemory(id: string): Promise<unknown> {
+    return this.client.request(ACP_METHODS.memoryDelete, { id });
   }
 
   /** Summarises the conversation so far. Resolves once kiro has finished. */

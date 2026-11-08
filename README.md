@@ -21,7 +21,11 @@ exactly what it missed.
 
 - **Sessions** you can create, search, rename and delete. Live ones run in a
   bounded process pool; idle ones go dormant and resume on demand.
-- **Per-session model and agent**, from the live model list and kiro's agents.
+- **Per-session model, effort and agent**, from the live model list and kiro's agents.
+  The effort level sits in the model picker, for models that have one.
+- **Edit and branch**: edit a sent message to cut the chat back to it and send again, or
+  branch from it into a new chat that keeps the conversation up to its reply.
+- **Titles from kiro**, which names each chat from its first message. A rename wins.
 - **Rich rendering** of Markdown, Mermaid, syntax-highlighted code, and MCP tool
   calls with their status, input and output.
 - **File browser** for the session's workspace, previewing text, images and PDFs.
@@ -31,7 +35,9 @@ exactly what it missed.
 - **Widgets**: the agent calls a `show_widget` tool over MCP and the result renders
   inline as a live page. Charts, simulations, animated diagrams. Sandboxed, and they
   can send a message back.
-- **Context-window usage** shown live, with one tap to compact.
+- **Context-window usage** shown live, split by what fills it, with one tap to compact,
+  and the credits the chat and the month have used.
+- **Memories**: the list of what kiro has saved about you, from the lock menu, with delete.
 - **PWA** that installs to a home screen and reconnects when the network returns.
 
 ## Install

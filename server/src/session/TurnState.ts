@@ -32,6 +32,8 @@ export class TurnState {
           ...s,
           contextUsagePercentage:
             payload.params.contextUsagePercentage ?? s.contextUsagePercentage,
+          contextBreakdown: payload.params.contextBreakdown ?? s.contextBreakdown,
+          sessionCredits: payload.params.sessionCredits ?? s.sessionCredits,
         };
         break;
       case 'compaction':

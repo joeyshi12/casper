@@ -14,6 +14,7 @@ interface V3SessionJson {
   title?: string;
   agentMode?: string;
   modelId?: string;
+  effortLevel?: string;
   workspacePaths?: string[];
   createdAt?: string;
   lastModifiedAt?: string;
@@ -161,6 +162,7 @@ export async function readV3Session(dir: string): Promise<PersistedSession | nul
     updatedAt: iso(j.lastModifiedAt) ?? createdAt,
     agentId: j.agentMode,
     modelId: j.modelId,
+    effortLevel: j.effortLevel,
     contextUsagePercentage: await lastContextUsage(path.join(dir, 'messages.jsonl')),
   };
 }
@@ -183,6 +185,22 @@ async function readLines(file: string, filter?: string): Promise<V3Line[]> {
     }
   }
   return out;
+}
+
+/** The credits a session's turns have used, summed from kiro's per-turn usage lines. */
+export async function readV3Credits(dir: string): Promise<number> {
+  const seen = new Set<string>();
+  let total = 0;
+  for (const line of await readLines(path.join(dir, 'messages.jsonl'), '"usage_summary"')) {
+    const p = line.payload;
+    if (p.type !== 'usage_summary' || seen.has(line.id)) continue;
+    seen.add(line.id);
+    for (const s of Array.isArray(p.promptTurnSummaries) ? p.promptTurnSummaries : []) {
+      const usage = isRecord(s) ? s.usage : undefined;
+      if (typeof usage === 'number' && Number.isFinite(usage)) total += usage;
+    }
+  }
+  return total;
 }
 
 function userText(content: unknown): string {
@@ -233,6 +251,9 @@ export async function readV3Entries(file: string): Promise<TranscriptEntry[]> {
   };
 
   const seen = new Set<string>();
+  // A message sent into a running turn is written when it is sent, and again inside
+  // kiro's own wrapper where the model read it. It is shown at the second place.
+  const steers = new Map<string, string>();
   for (const line of await readLines(file)) {
     const copy = isCompactionCopy(line.id, seen);
     seen.add(line.id);
@@ -242,9 +263,48 @@ export async function readV3Entries(file: string): Promise<TranscriptEntry[]> {
     const at = Number.isNaN(parsed) ? undefined : parsed;
 
     switch (p.type) {
-      case 'user':
+      case 'user': {
+        if (p.source === 'steer') {
+          const text = userText(p.content);
+          if (text.trim()) steers.set(line.id, text);
+          break;
+        }
+        const kiro = isRecord(p._meta) && isRecord(p._meta.kiro) ? p._meta.kiro : undefined;
+        if (kiro?.syntheticUserMessageReason !== undefined) {
+          // A message kiro wrote itself. Only a steer's has anything the user said.
+          const ids = Array.isArray(kiro.steeringConsumedIds) ? kiro.steeringConsumedIds : [];
+          for (const id of ids) {
+            const text = typeof id === 'string' ? steers.get(id) : undefined;
+            if (text === undefined) continue;
+            out.push({ kind: 'item', item: { type: 'message', message: { id: `s-${id}`, role: 'user', text, timestamp: at, steer: true } } });
+          }
+          break;
+        }
         out.push({ kind: 'prompt', id: line.id, text: userText(p.content), atMs: at, timestamp: at });
         break;
+      }
+      case 'tombstone': {
+        // kiro rewound the session to before a prompt: that prompt and everything after it
+        // up to here no longer exist.
+        const from = p.kind === 'checkpoint_revert' ? str(p.effectiveFromMessageId) : undefined;
+        const at = from ? out.findIndex((e) => e.kind === 'prompt' && e.id === from) : -1;
+        if (at >= 0) out.length = at;
+        break;
+      }
+      case 'usage_summary': {
+        const credits = (Array.isArray(p.promptTurnSummaries) ? p.promptTurnSummaries : []).reduce(
+          (sum: number, s: unknown) => sum + (isRecord(s) && typeof s.usage === 'number' && Number.isFinite(s.usage) ? s.usage : 0),
+          0,
+        );
+        const elapsedMs = typeof p.elapsedTime === 'number' && p.elapsedTime > 0 ? p.elapsedTime : undefined;
+        if (credits > 0 || elapsedMs) {
+          out.push({
+            kind: 'item',
+            item: { type: 'turn_stats', id: `u-${line.id}`, ...(elapsedMs ? { elapsedMs } : {}), ...(credits > 0 ? { credits } : {}) },
+          });
+        }
+        break;
+      }
       case 'assistant': {
         const text = str(p.content) ?? '';
         if (!text.trim()) break;

@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
-import type { SessionPromptResult } from '@casper/shared';
+import type { SessionConfigOption, SessionPromptResult } from '@casper/shared';
 import type { ManagedProcess } from '../server/src/session/SessionManager.js';
 
 const DOM_GLOBALS = [
@@ -76,6 +76,16 @@ export function fakeKiroProcess(
     availableModes?: { id: string; name: string }[];
     /** The model kiro reports in its config options. */
     modelId?: string;
+    /** What `_kiro/session/context`, `_kiro/account/getUsage` and `_kiro/memory/list` answer. */
+    breakdown?: Record<string, { percent?: number }>;
+    /** What `_session/steer` answers with: kiro's id for the message. */
+    onSteer?: (sessionId: string, message: string, messageId: string) => Promise<string | undefined>;
+    /** Whether `_kiro/checkpoint/revertMultiple` succeeds. */
+    revert?: boolean;
+    account?: unknown;
+    memories?: unknown[];
+    /** The whole config options kiro reports, in place of the one built from modelId. */
+    configOptions?: SessionConfigOption[];
     onPrompt?: () => Promise<SessionPromptResult>;
     onInitialize?: () => Promise<unknown>;
     /** Hold the shutdown open, so a reload can be observed mid-flight. */
@@ -93,7 +103,11 @@ export function fakeKiroProcess(
       availableModes: opts.availableModes ?? [{ id: 'casper', name: 'casper' }],
       currentModeId: opts.currentModeId ?? 'casper',
     },
-    ...(opts.modelId ? { configOptions: [{ id: 'model', currentValue: opts.modelId }] } : {}),
+    ...(opts.configOptions
+      ? { configOptions: opts.configOptions }
+      : opts.modelId
+        ? { configOptions: [{ id: 'model', currentValue: opts.modelId }] }
+        : {}),
   });
   const log = (name: string, a: unknown[]) => {
     calls.push(name);
@@ -113,9 +127,11 @@ export function fakeKiroProcess(
       log('newSession', a);
       return handshake();
     },
+    // kiro answers a load without the session's id.
     async loadSession(...a: unknown[]) {
       log('loadSession', a);
-      return handshake();
+      const { sessionId: _, ...rest } = await handshake();
+      return rest as Awaited<ReturnType<typeof handshake>>;
     },
     // Recorded even when a test supplies its own onPrompt, so "which process got
     // prompted" is answerable - the reload race turns on exactly that.
@@ -134,6 +150,39 @@ export function fakeKiroProcess(
     },
     async setModel(...a: unknown[]) {
       log('setModel', a);
+    },
+    async setEffort(...a: unknown[]) {
+      log('setEffort', a);
+    },
+    async contextBreakdown(...a: unknown[]) {
+      log('contextBreakdown', a);
+      return opts.breakdown;
+    },
+    async accountUsage(...a: unknown[]) {
+      log('accountUsage', a);
+      return opts.account;
+    },
+    async listMemories(...a: unknown[]) {
+      log('listMemories', a);
+      return { memories: opts.memories ?? [] };
+    },
+    async deleteMemory(...a: unknown[]) {
+      log('deleteMemory', a);
+    },
+    async steer(...a: unknown[]) {
+      log('steer', a);
+      return opts.onSteer ? opts.onSteer(...(a as [string, string, string])) : `steer-${String(a[2])}`;
+    },
+    async clearSteers(...a: unknown[]) {
+      log('clearSteers', a);
+    },
+    async revertTo(...a: unknown[]) {
+      log('revertTo', a);
+      return opts.revert ?? true;
+    },
+    async forkSession(...a: unknown[]) {
+      log('forkSession', a);
+      return { sessionId: (await handshake()).sessionId };
     },
     async compact(...a: unknown[]) {
       log('compact', a);

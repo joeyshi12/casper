@@ -60,6 +60,7 @@ describe("reading kiro's session store", () => {
       updatedAt: '2026-11-07T06:39:15.621Z',
       agentId: 'casper',
       modelId: 'claude-haiku-4.5',
+      effortLevel: undefined,
       contextUsagePercentage: undefined,
     });
     writeV3Session(sessionsDir, { id: 'sess_meta', cwd: sessionsCwd, title: 'Run Shell Command and Verify File' });
@@ -271,7 +272,7 @@ describe('SessionManager: starting a kiro session', () => {
     const { mgr, detail } = await managerWith(proc, { defaultModel: 'claude-opus-5.5' });
     try {
       assert.deepEqual(proc.args[proc.calls.indexOf('newSession')], [
-        { cwd: sessionsCwd, mcpServers: [], _meta: { kiro: { modeId: 'casper', modelId: 'claude-opus-5.5' } } },
+        { cwd: sessionsCwd, mcpServers: [], _meta: { kiro: { modeId: 'casper', modelId: 'claude-opus-5.5', effortLevel: undefined } } },
       ]);
       assert.equal(detail.summary.modelId, 'claude-opus-5.5');
     } finally {

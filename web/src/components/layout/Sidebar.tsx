@@ -6,6 +6,7 @@ import { LockIcon, MoreIcon, PlusIcon, SearchIcon, Spinner } from '../common/ico
 import { PopoverMenu } from '../common/PopoverMenu.js';
 import { SearchModal } from '../sessions/SearchModal.js';
 import { DevicesModal } from '../sessions/DevicesModal.js';
+import { MemoriesModal } from '../sessions/MemoriesModal.js';
 import { ConfirmDialog } from '../common/ConfirmDialog.js';
 import { relTime } from '../../util/relTime.js';
 
@@ -36,6 +37,7 @@ export function Sidebar({
 }: Props) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [devicesOpen, setDevicesOpen] = useState(false);
+  const [memoriesOpen, setMemoriesOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [menuId, setMenuId] = useState<string | null>(null);
   /** The row's ⋮ button, which the portaled menu measures itself against. */
@@ -94,6 +96,15 @@ export function Sidebar({
                   }}
                 >
                   Devices
+                </button>
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    setMemoriesOpen(true);
+                  }}
+                >
+                  Memories
                 </button>
                 <button
                   className="menu-item"
@@ -230,6 +241,8 @@ export function Sidebar({
           onClose={() => setSearchOpen(false)}
         />
       )}
+
+      {memoriesOpen && <MemoriesModal onClose={() => setMemoriesOpen(false)} />}
 
       {devicesOpen && (
         <DevicesModal

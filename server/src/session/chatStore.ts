@@ -10,6 +10,22 @@ export interface ChatRow {
   cwd: string | null;
 }
 
+const COLUMNS = 'chat_id, session_id, title, cwd';
+
+interface RawRow {
+  chat_id: string;
+  session_id: string | null;
+  title: string | null;
+  cwd: string | null;
+}
+
+const rowOf = (r: RawRow): ChatRow => ({
+  chatId: r.chat_id,
+  sessionId: r.session_id,
+  title: r.title,
+  cwd: r.cwd,
+});
+
 /**
  * A chat is a conversation Casper started. The row is Casper's own: kiro's session file
  * holds the transcript, and this holds the chat's identity plus the title and cwd Casper
@@ -17,22 +33,12 @@ export interface ChatRow {
  */
 export class ChatStore {
   all(): ChatRow[] {
-    return (
-      db()
-        .prepare('SELECT chat_id, session_id, title, cwd FROM chats')
-        .all() as { chat_id: string; session_id: string | null; title: string | null; cwd: string | null }[]
-    ).map((r) => ({ chatId: r.chat_id, sessionId: r.session_id, title: r.title, cwd: r.cwd }));
+    return (db().prepare(`SELECT ${COLUMNS} FROM chats`).all() as unknown as RawRow[]).map(rowOf);
   }
 
   get(chatId: string): ChatRow | undefined {
-    const r = db()
-      .prepare('SELECT chat_id, session_id, title, cwd FROM chats WHERE chat_id = ?')
-      .get(chatId) as
-      | { chat_id: string; session_id: string | null; title: string | null; cwd: string | null }
-      | undefined;
-    return r
-      ? { chatId: r.chat_id, sessionId: r.session_id, title: r.title, cwd: r.cwd }
-      : undefined;
+    const r = db().prepare(`SELECT ${COLUMNS} FROM chats WHERE chat_id = ?`).get(chatId) as unknown as RawRow | undefined;
+    return r ? rowOf(r) : undefined;
   }
 
   create(chatId: string): void {
@@ -155,6 +161,34 @@ export class ChatStore {
       }
     }
     return out;
+  }
+
+  /**
+   * Copies what a branch keeps of another chat: the attachments of the first `prompts`
+   * prompts, and the turn endings that started before `before` (all of them if unset).
+   * `movePath` gives an attachment's path in the branch.
+   */
+  copyHistory(
+    from: string,
+    to: string,
+    keep: { prompts: number; before?: number },
+    movePath: (p: string) => string,
+  ): void {
+    for (const [ordinal, files] of this.attachmentsByChat(from)) {
+      if (ordinal < keep.prompts) {
+        this.setAttachments(to, ordinal, files.map((f) => ({ ...f, path: movePath(f.path) })));
+      }
+    }
+    for (const e of this.turnEndingsByChat(from)) {
+      if (keep.before === undefined || e.startedAt < keep.before) this.addTurnEnding(to, e);
+    }
+  }
+
+  /** Drops what a rewind removes: the attachments from prompt `prompts` on, and the turn
+   *  endings that started at or after `from`. */
+  dropHistory(chatId: string, drop: { prompts: number; from: number }): void {
+    db().prepare('DELETE FROM message_attachments WHERE chat_id = ? AND ordinal >= ?').run(chatId, drop.prompts);
+    db().prepare('DELETE FROM turn_endings WHERE chat_id = ? AND started_at >= ?').run(chatId, drop.from);
   }
 
   remove(chatId: string): void {

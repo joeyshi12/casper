@@ -45,6 +45,7 @@ export function Composer({
   const compacting = useStore((s) => s.observability.compacting);
   const currentModeId = useStore((s) => s.currentModeId);
   const currentModelId = useStore((s) => s.currentModelId);
+  const currentEffort = useStore((s) => s.currentEffort);
   const running = turnStatus === 'running';
   const cancelling = turnStatus === 'cancelling';
   const live = draft || connStatus === 'connected';
@@ -118,8 +119,19 @@ export function Composer({
     return content;
   };
 
+  // While a turn runs, a typed message goes into that turn. Files wait for the next prompt.
+  const canSteer = running && live && !compacting && !!text.trim() && attachments.length === 0;
+
   const submit = async () => {
     const trimmed = text.trim();
+    if (canSteer) {
+      sessionController.steer(trimmed);
+      setText('');
+      requestAnimationFrame(() => {
+        if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      });
+      return;
+    }
     if (
       (!trimmed && attachments.length === 0) ||
       running ||
@@ -281,7 +293,23 @@ export function Composer({
           <div className="composer-actions-right">
             <ContextRing />
             <AgentPicker value={currentModeId} onChange={(id) => sessionController.changeAgent(id)} />
-            <ModelPicker value={currentModelId} onChange={(id) => sessionController.changeModel(id)} />
+            <ModelPicker
+              value={currentModelId}
+              effort={currentEffort}
+              draft={draft}
+              onChange={(id) => sessionController.changeModel(id)}
+              onEffortChange={(level) => sessionController.changeEffort(level)}
+            />
+            {canSteer && (
+              <button
+                className="composer-btn composer-send"
+                onClick={submit}
+                title="Send to the running turn"
+                aria-label="Send to the running turn"
+              >
+                <ArrowUpIcon size={17} />
+              </button>
+            )}
             {running ? (
               <button
                 className="composer-btn composer-stop"

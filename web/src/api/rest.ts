@@ -1,6 +1,8 @@
 import type {
   AgentsResponse,
+  ChatUsageResponse,
   CreateChatRequest,
+  MemoryListResponse,
   DevicesResponse,
   DirListing,
   ModelsResponse,
@@ -81,6 +83,13 @@ export const api = {
     req<{ ok: boolean; cwd: string }>('POST', `/api/chats/${id}/cwd`, { cwd }),
   reloadChat: (id: string) =>
     req<ChatDetail>('POST', `/api/chats/${id}/reload`),
+  chatUsage: (id: string) => req<ChatUsageResponse>('GET', `/api/chats/${id}/usage`),
+  memories: () => req<MemoryListResponse>('GET', '/api/memories'),
+  deleteMemory: (id: string) => req<{ ok: boolean }>('DELETE', `/api/memories/${encodeURIComponent(id)}`),
+  branchChat: (id: string, messageId: string) =>
+    req<ChatDetail>('POST', `/api/chats/${id}/branch`, { messageId }),
+  rewindChat: (id: string, messageId: string) =>
+    req<ChatDetail>('POST', `/api/chats/${id}/rewind`, { messageId }),
   tree: (id: string, relativePath = '') =>
     req<TreeResponse>(
       'GET',

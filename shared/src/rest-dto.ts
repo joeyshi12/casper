@@ -13,6 +13,14 @@ export interface ModelInfo {
   rateMultiplier: number;
   rateUnit: string;
   isDefault: boolean;
+  /** Effort levels the model takes, lowest first. Absent for a model without them, and
+   *  until a kiro session has reported them. */
+  effortLevels?: string[];
+  /** The level kiro recommends for the model. */
+  recommendedEffort?: string;
+  /** The level a new chat on this model gets: the user's own default from kiro's
+   *  `chat.modelDefaults`, else the recommended one. */
+  defaultEffort?: string;
 }
 
 export interface ModelsResponse {
@@ -36,6 +44,7 @@ export interface ChatSummary {
   liveness: SessionLiveness;
   agentId?: string;
   modelId?: string;
+  effortLevel?: string;
   running: boolean;
   contextUsagePercentage?: number;
 }
@@ -48,12 +57,10 @@ export interface CreateChatRequest {
   cwd?: string;
   agentId?: string;
   modelId?: string;
+  effortLevel?: string;
   freshWorkspace?: boolean;
   /** The server generates one if absent or malformed. */
   chatId?: string;
-  /** Names the session as it is created, so the row is never listed as untitled
-   *  while the client waits on the first prompt. */
-  title?: string;
 }
 
 /** One file attached to a prompt, recorded per message rather than parsed from the text. */
@@ -70,6 +77,17 @@ export interface TranscriptMessage {
   text: string;
   timestamp?: number;
   attachments?: MessageAttachment[];
+  /** kiro's id for a prompt, which a branch is cut at. */
+  messageId?: string;
+  /** Sent while a turn ran, into that turn. A steer is no prompt of its own, so it cannot
+   *  be edited or branched from. */
+  steer?: boolean;
+}
+
+/** What one turn took, shown under its reply. */
+export interface TurnStats {
+  elapsedMs?: number;
+  credits?: number;
 }
 
 /** A tool-call entry in a session transcript. */
@@ -94,7 +112,8 @@ export type TranscriptItem =
   | { type: 'tool_call'; tool: TranscriptToolCall }
   | { type: 'compaction'; id: string; summary: string; timestamp?: number }
   | { type: 'turn_error'; id: string; message: string; timestamp?: number }
-  | { type: 'turn_interrupted'; id: string; timestamp?: number };
+  | { type: 'turn_interrupted'; id: string; timestamp?: number }
+  | ({ type: 'turn_stats'; id: string } & TurnStats);
 
 /** A turn that failed or was stopped, stored because kiro drops what it had in flight. */
 export interface TurnEnding {
@@ -150,6 +169,48 @@ export interface SubagentDetailResponse {
 
 export interface SetModelRequest {
   modelId: string;
+}
+
+/** The user's kiro plan, and how much of it is used this billing cycle. */
+export interface AccountUsage {
+  planName: string;
+  used: number;
+  limit?: number;
+  /** The day the count starts again, as YYYY-MM-DD. */
+  resetsOn?: string;
+  overageCharges?: number;
+  currency?: string;
+}
+
+/** What a chat has cost, and the plan it counts against. */
+export interface ChatUsageResponse {
+  credits?: number;
+  account?: AccountUsage;
+}
+
+/** One of kiro's saved memories. kiro's list leaves out each one's full text. */
+export interface Memory {
+  id: string;
+  memoryType: string;
+  title: string;
+  summary: string;
+  /** `Global`, `workspace:<name>` or `repo:<provider>/<owner>/<name>`. */
+  scopes?: string[];
+  updatedAt?: string;
+}
+
+export interface MemoryListResponse {
+  memories: Memory[];
+}
+
+export interface SetEffortRequest {
+  effortLevel: string;
+}
+
+/** A user message's `messageId`. Branching keeps that message's turn; rewinding drops
+ *  the message and everything after it. */
+export interface CutChatRequest {
+  messageId: string;
 }
 
 export interface RenameChatRequest {

@@ -5,6 +5,7 @@ import { stripAttachmentsLine } from '@casper/shared';
 import { isValidSessionId } from '../util/paths.js';
 import {
   readSubExecutions,
+  readV3Credits,
   readV3Entries,
   readV3Session,
   subExecutionFile,
@@ -27,6 +28,7 @@ export interface PersistedSession {
   updatedAt: string;
   agentId?: string;
   modelId?: string;
+  effortLevel?: string;
   contextUsagePercentage?: number;
 }
 
@@ -72,14 +74,27 @@ async function readEntries(sessionId: string): Promise<TranscriptEntry[]> {
   return dir ? readV3Entries(path.join(dir, 'messages.jsonl')) : [];
 }
 
+/** The credits a session has used, or undefined if kiro has no such session. */
+export async function sessionCredits(sessionId: string): Promise<number | undefined> {
+  const dir = await v3SessionDir(sessionId);
+  return dir ? readV3Credits(dir) : undefined;
+}
+
 /** The ordinal the next prompt takes, counted the same way hydrateTranscript does. */
 export async function promptCount(sessionId: string): Promise<number> {
-  return (await readEntries(sessionId)).filter((e) => e.kind === 'prompt').length;
+  return (await promptStamps(sessionId)).length;
+}
+
+/** Each prompt's kiro id and the time kiro wrote it, in order. A prompt's index is its
+ *  ordinal. */
+export async function promptStamps(sessionId: string): Promise<{ id: string; atMs?: number }[]> {
+  return (await readEntries(sessionId)).flatMap((e) => (e.kind === 'prompt' ? [{ id: e.id, atMs: e.atMs }] : []));
 }
 
 /* A prompt belongs to a stored turn if it was written between the turn's start and end,
    give or take this much: kiro stamped prompts in whole seconds before V3. */
-const STAMP_PAD_MS = 2000;
+export const STAMP_PAD_MS = 2000;
+
 
 function endingItems(e: StoredTurnEnding): TranscriptItem[] {
   const prefix = `te${e.id}-`;
@@ -137,7 +152,7 @@ function mergeTranscript(
     const attached = attachments?.get(userOrdinal);
     userOrdinal++;
     if (text.trim() || attached?.length) {
-      items.push({ type: 'message', message: { id: `u-${entry.id}`, role: 'user', text, timestamp: entry.timestamp, attachments: attached } });
+      items.push({ type: 'message', message: { id: `u-${entry.id}`, role: 'user', text, timestamp: entry.timestamp, attachments: attached, messageId: entry.id } });
     }
     if (matched) {
       items.push(...endingItems(matched));

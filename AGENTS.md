@@ -96,8 +96,9 @@ npm run typecheck              # all workspaces
 - **Sessions live in kiro's files.** kiro keeps each in `~/.kiro/sessions/<hash of the first
   cwd>/<id>/` (`session.json`, `messages.jsonl`, and `sub-executions/<id>.jsonl` per subagent).
   `casper.db` holds only what kiro doesn't: `chats` (the session binding plus title and cwd
-  overrides), `logins`, `message_attachments`, and `turn_endings` (turns that failed or were
-  stopped, of which kiro keeps only what it had finished). `session/load` of an id kiro has not
+  overrides), `logins`, `message_attachments`, `turn_endings` (turns that failed or were
+  stopped, of which kiro keeps only what it had finished), and `kiro_models` (the name and
+  effort levels kiro last reported per model, which `--list-models` lacks). `session/load` of an id kiro has not
   stored starts an empty session under it, which is what `isLoadable` guards a reload against.
   kiro 2.x's old files sit in `~/.kiro/sessions/cli/`, which is not read. Sessions kiro copied in
   from them repeat, after each old compaction, the turns 2.x kept in context; `kiroV3Files.ts`
@@ -108,6 +109,10 @@ npm run typecheck              # all workspaces
   allowed once, anything else gets a JSON-RPC error. kiro sends a subagent's own updates on the
   parent's session tagged `_meta.kiro.agentSubtaskId`; they update the subagent's row and must
   not reach the chat's event log.
+- **Branch and rewind both use `session/fork`**, which answers with the new id only. The copy
+  then needs a `session/load`, and it starts on model `auto` with no effort, so Casper sets the
+  chat's model and effort again. kiro ignores `chat.modelDefaults` over ACP, so Casper passes
+  the effort itself.
 - **One title resolver**, `shared/src/titles.ts`. Don't add a second precedence chain. The same goes
   for a session summary: `summaryOf` in `SessionManager` is the only place one is assembled.
 - Store updates go through `applyEvent`, which drops anything whose `seq` it has seen. Work that
