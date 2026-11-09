@@ -90,7 +90,9 @@ export interface SessionConfigChoice {
   value: string;
   name?: string;
   description?: string;
-  _meta?: { kiro?: { effortLevels?: string[]; defaultEffortLevel?: string; [key: string]: unknown } };
+  _meta?: {
+    kiro?: { effortLevels?: string[]; defaultEffortLevel?: string; effortSchemaPath?: string; [key: string]: unknown };
+  };
 }
 
 /** One advertised session setting, such as the model (`id: 'model'`) or the effort
@@ -358,8 +360,6 @@ export const ACP_METHODS = {
   compact: '_kiro/session/compact',
   sessionContext: '_kiro/session/context',
   accountUsage: '_kiro/account/getUsage',
-  memoryList: '_kiro/memory/list',
-  memoryDelete: '_kiro/memory/delete',
   steer: '_session/steer',
   steerClear: '_session/steer/clear',
   checkpointRevert: '_kiro/checkpoint/revertMultiple',

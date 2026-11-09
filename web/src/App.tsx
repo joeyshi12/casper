@@ -111,6 +111,7 @@ function Shell({ onLock }: { onLock: () => void }) {
         }}
         onDelete={(id) => void sessionController.deleteChat(id)}
         onRename={(id, title) => void sessionController.renameChat(id, title)}
+        onPin={(id, pinned) => void sessionController.pinChat(id, pinned)}
         onLock={lock}
       />
       {navOpen && (

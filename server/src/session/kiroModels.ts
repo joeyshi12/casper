@@ -6,6 +6,9 @@ export interface KiroModel {
   /** Effort levels, lowest first. Empty for a model without them. */
   levels: string[];
   recommended?: string;
+  /** The section of kiro's `chat.modelDefaults` entry the effort sits under, such as
+   *  `output_config`. */
+  effortKey?: string;
 }
 
 // The last list written, so a session that reports the same models writes nothing.
@@ -19,7 +22,7 @@ let lastWritten = '';
 export function rememberKiroModels(options: SessionConfigOption[] | undefined): void {
   const choices = options?.find((o) => o.id === 'model')?.options;
   if (!choices?.length) return;
-  const rows: [string, string | null, string, string | null][] = [];
+  const rows: [string, string | null, string, string | null, string | null][] = [];
   for (const c of choices) {
     if (typeof c.value !== 'string' || !c.value) continue;
     const kiro = c._meta?.kiro;
@@ -27,7 +30,8 @@ export function rememberKiroModels(options: SessionConfigOption[] | undefined): 
       ? kiro.effortLevels.filter((l): l is string => typeof l === 'string')
       : [];
     const recommended = typeof kiro?.defaultEffortLevel === 'string' ? kiro.defaultEffortLevel : null;
-    rows.push([c.value, typeof c.name === 'string' && c.name ? c.name : null, JSON.stringify(levels), recommended]);
+    const effortKey = typeof kiro?.effortSchemaPath === 'string' && kiro.effortSchemaPath ? kiro.effortSchemaPath : null;
+    rows.push([c.value, typeof c.name === 'string' && c.name ? c.name : null, JSON.stringify(levels), recommended, effortKey]);
   }
   const key = JSON.stringify(rows);
   if (key === lastWritten) return;
@@ -36,7 +40,9 @@ export function rememberKiroModels(options: SessionConfigOption[] | undefined): 
   try {
     // Replaced whole, so a model kiro stopped offering, or one that lost its levels, goes.
     d.prepare('DELETE FROM kiro_models').run();
-    const insert = d.prepare('INSERT INTO kiro_models (model_id, name, levels, recommended) VALUES (?, ?, ?, ?)');
+    const insert = d.prepare(
+      'INSERT INTO kiro_models (model_id, name, levels, recommended, effort_key) VALUES (?, ?, ?, ?, ?)',
+    );
     for (const r of rows) insert.run(...r);
     d.exec('COMMIT');
     lastWritten = key;
@@ -48,11 +54,12 @@ export function rememberKiroModels(options: SessionConfigOption[] | undefined): 
 
 /** The stored models, by model id. */
 export function kiroModels(): Map<string, KiroModel> {
-  const rows = db().prepare('SELECT model_id, name, levels, recommended FROM kiro_models').all() as {
+  const rows = db().prepare('SELECT model_id, name, levels, recommended, effort_key FROM kiro_models').all() as {
     model_id: string;
     name: string | null;
     levels: string;
     recommended: string | null;
+    effort_key: string | null;
   }[];
   const out = new Map<string, KiroModel>();
   for (const r of rows) {
@@ -62,6 +69,7 @@ export function kiroModels(): Map<string, KiroModel> {
         ...(r.name ? { name: r.name } : {}),
         levels,
         ...(r.recommended ? { recommended: r.recommended } : {}),
+        ...(r.effort_key ? { effortKey: r.effort_key } : {}),
       });
     } catch {
       /* an unreadable row is skipped */

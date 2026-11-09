@@ -149,6 +149,48 @@ export async function defaultEffortFor(modelId: string | undefined, log: MiniLog
   }
 }
 
+/** Forgets the model list, so the next read takes kiro's settings again. */
+export function invalidateModels(): void {
+  cache = null;
+}
+
+async function kiroSetting(key: string, value: string): Promise<void> {
+  await execFileAsync(config.kiroBin, ['settings', key, value]);
+}
+
+/** Makes `modelId` kiro's default model, which a new Casper chat gets too. */
+export async function setDefaultModel(modelId: string, log: MiniLogger): Promise<void> {
+  if (!(await listModels(log)).some((m) => m.modelId === modelId)) throw new Error(`Unknown model: ${modelId}`);
+  await kiroSetting('chat.defaultModel', modelId);
+  invalidateModels();
+}
+
+/**
+ * Sets the effort a new chat on `modelId` gets, in kiro's `chat.modelDefaults`. The entry
+ * keeps every other key it has, and the effort goes under the section it is already in,
+ * else the one kiro names for the model.
+ */
+export async function setDefaultEffort(modelId: string, level: string, log: MiniLogger): Promise<void> {
+  const model = (await listModels(log)).find((m) => m.modelId === modelId);
+  if (!model?.effortLevels?.includes(level)) throw new Error(`${modelId} has no effort level ${level}`);
+  let all: Record<string, Record<string, Record<string, unknown>>> = {};
+  try {
+    const { stdout } = await execFileAsync(config.kiroBin, ['settings', 'chat.modelDefaults', '-f', 'json']);
+    const value = JSON.parse(stdout) as unknown;
+    if (value && typeof value === 'object' && !Array.isArray(value)) all = value as typeof all;
+  } catch {
+    /* unset */
+  }
+  const entry = { ...(all[modelId] ?? {}) };
+  const section =
+    Object.keys(entry).find((k) => typeof entry[k]?.effort === 'string') ??
+    kiroModels().get(modelId)?.effortKey ??
+    (modelId.startsWith('claude') ? 'output_config' : 'reasoning');
+  entry[section] = { ...(entry[section] ?? {}), effort: level };
+  await kiroSetting('chat.modelDefaults', JSON.stringify({ ...all, [modelId]: entry }));
+  invalidateModels();
+}
+
 export async function kiroVersion(): Promise<string | undefined> {
   try {
     const { stdout } = await execFileAsync(config.kiroBin, ['--version']);

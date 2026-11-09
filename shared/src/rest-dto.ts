@@ -189,21 +189,6 @@ export interface ChatUsageResponse {
   account?: AccountUsage;
 }
 
-/** One of kiro's saved memories. kiro's list leaves out each one's full text. */
-export interface Memory {
-  id: string;
-  memoryType: string;
-  title: string;
-  summary: string;
-  /** `Global`, `workspace:<name>` or `repo:<provider>/<owner>/<name>`. */
-  scopes?: string[];
-  updatedAt?: string;
-}
-
-export interface MemoryListResponse {
-  memories: Memory[];
-}
-
 export interface SetEffortRequest {
   effortLevel: string;
 }
@@ -257,6 +242,70 @@ export interface DeviceInfo {
 
 export interface DevicesResponse {
   devices: DeviceInfo[];
+}
+
+/** Casper's settings page: the defaults a new chat gets, and how the server runs. */
+export interface SettingsResponse {
+  /** The agent a new chat starts on. The default model and effort are on `ModelInfo`. */
+  defaultAgentId: string;
+  server: ServerInfo;
+}
+
+/** An MCP server in kiro's global `mcp.json`. Its environment values are never sent. */
+export interface McpServerInfo {
+  name: string;
+  command?: string;
+  url?: string;
+  args: string[];
+  envKeys: string[];
+  disabled: boolean;
+}
+
+/** A new server: a command to run, or the URL of one already running. */
+export interface McpServerInput {
+  name: string;
+  command?: string;
+  url?: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+/** A skill in `~/.kiro/skills`. */
+export interface SkillInfo {
+  name: string;
+  description: string;
+  /** Its SKILL.md. */
+  path: string;
+}
+
+export interface ToolsResponse {
+  mcpServers: McpServerInfo[];
+  skills: SkillInfo[];
+}
+
+/** How the server is set up, from its config file and environment. Shown, not edited. */
+export interface ServerInfo {
+  version: string;
+  kiroVersion?: string;
+  kiroBin: string;
+  host: string;
+  port: number;
+  authEnabled: boolean;
+  fileRoot: string;
+  defaultCwd: string;
+  dataDir: string;
+  configFile: string;
+  maxLiveSessions: number;
+  liveSessions: number;
+  uptimeMs: number;
+}
+
+/** A change to the defaults a new chat gets. The model and effort are written to kiro's
+ *  own settings, so the kiro CLI uses them too. */
+export interface UpdateDefaultsRequest {
+  modelId?: string;
+  effort?: { modelId: string; level: string };
+  agentId?: string;
 }
 
 export interface HealthResponse {

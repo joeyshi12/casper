@@ -352,7 +352,7 @@ describe('branching and rewinding a chat', () => {
   });
 });
 
-describe('usage and memories', () => {
+describe('usage', () => {
   it("reports the chat's credits, the plan, and the context breakdown kiro gives on request", async () => {
     const proc = fakeKiroProcess({
       sessionId: 'sess_usage',
@@ -413,21 +413,6 @@ describe('usage and memories', () => {
       assert.deepEqual(payloads(mgr.getStore(summary.chatId)!.getSince(head).events), [
         { kind: 'metadata', params: { sessionId: 'sess_replayed', sessionCredits: 2 } },
       ]);
-    } finally {
-      mgr.disposeAll();
-    }
-  });
-
-  it('lists and deletes memories on a process started for the call', async () => {
-    const proc = fakeKiroProcess({
-      memories: [{ id: 'm1', memoryType: 'USER_PREFERENCE', title: 'tabs', summary: 'Uses tabs', scopes: ['Global'], createdAt: '2026-11-08T11:05:11.776Z' }, { title: 'no id' }],
-    });
-    const mgr = managerOn([proc]);
-    try {
-      assert.deepEqual(await mgr.listMemories(), [
-        { id: 'm1', memoryType: 'USER_PREFERENCE', title: 'tabs', summary: 'Uses tabs', scopes: ['Global'], updatedAt: '2026-11-08T11:05:11.776Z' },
-      ]);
-      assert.ok(proc.disposed(), 'the process started for it is stopped');
     } finally {
       mgr.disposeAll();
     }

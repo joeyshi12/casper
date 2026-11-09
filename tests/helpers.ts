@@ -76,14 +76,13 @@ export function fakeKiroProcess(
     availableModes?: { id: string; name: string }[];
     /** The model kiro reports in its config options. */
     modelId?: string;
-    /** What `_kiro/session/context`, `_kiro/account/getUsage` and `_kiro/memory/list` answer. */
+    /** What `_kiro/session/context` and `_kiro/account/getUsage` answer. */
     breakdown?: Record<string, { percent?: number }>;
     /** What `_session/steer` answers with: kiro's id for the message. */
     onSteer?: (sessionId: string, message: string, messageId: string) => Promise<string | undefined>;
     /** Whether `_kiro/checkpoint/revertMultiple` succeeds. */
     revert?: boolean;
     account?: unknown;
-    memories?: unknown[];
     /** The whole config options kiro reports, in place of the one built from modelId. */
     configOptions?: SessionConfigOption[];
     onPrompt?: () => Promise<SessionPromptResult>;
@@ -161,13 +160,6 @@ export function fakeKiroProcess(
     async accountUsage(...a: unknown[]) {
       log('accountUsage', a);
       return opts.account;
-    },
-    async listMemories(...a: unknown[]) {
-      log('listMemories', a);
-      return { memories: opts.memories ?? [] };
-    },
-    async deleteMemory(...a: unknown[]) {
-      log('deleteMemory', a);
     },
     async steer(...a: unknown[]) {
       log('steer', a);

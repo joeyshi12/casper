@@ -112,26 +112,6 @@ export function registerChatRoutes(
     }
   });
 
-  // kiro's saved memories, which belong to the user rather than to a chat.
-  app.get('/api/memories', async (_req, reply) => {
-    try {
-      return { memories: await manager.listMemories() };
-    } catch (err) {
-      reply.code(502);
-      return { error: (err as Error).message };
-    }
-  });
-
-  app.delete<{ Params: { id: string } }>('/api/memories/:id', async (req, reply) => {
-    try {
-      await manager.deleteMemory(req.params.id);
-      return { ok: true };
-    } catch (err) {
-      reply.code(400);
-      return { error: (err as Error).message };
-    }
-  });
-
   // A new chat with this chat's conversation up to and including one prompt's turn.
   app.post<{ Params: { id: string }; Body: CutChatRequest }>('/api/chats/:id/branch', async (req, reply) => {
     const messageId = req.body?.messageId;

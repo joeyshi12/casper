@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS kiro_models (
   model_id    TEXT PRIMARY KEY,
   name        TEXT,
   levels      TEXT NOT NULL,
-  recommended TEXT
+  recommended TEXT,
+  effort_key  TEXT
 );
 `;
 
@@ -81,6 +82,7 @@ function open(): DatabaseSync {
   d.exec(SCHEMA);
   // A database made before these columns existed.
   const columns = (table: string) => (d.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+  if (!columns('kiro_models').includes('effort_key')) d.exec('ALTER TABLE kiro_models ADD COLUMN effort_key TEXT');
   if (!columns('chats').includes('pinned')) d.exec('ALTER TABLE chats ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
   // Set explicitly on every open: the logins table holds auth hashes, and this
   // also repairs a database created before the restriction existed.

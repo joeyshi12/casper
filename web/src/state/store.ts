@@ -106,6 +106,7 @@ export interface CasperState {
   setCompacting: (compacting: boolean) => void;
   markPendingSending: (id: string) => void;
   renameChatRow: (id: string, title: string) => void;
+  pinChatRow: (id: string, pinned: boolean) => void;
 }
 
 export const useStore = create<CasperState>((set, get) => ({
@@ -180,6 +181,11 @@ export const useStore = create<CasperState>((set, get) => ({
       chats: s.chats.map((sess) =>
         sess.chatId === id ? { ...sess, title } : sess,
       ),
+    })),
+
+  pinChatRow: (id, pinned) =>
+    set((s) => ({
+      chats: s.chats.map((sess) => (sess.chatId === id ? { ...sess, pinned } : sess)),
     })),
 
   bumpFsPath: (path) =>

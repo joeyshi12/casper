@@ -259,44 +259,6 @@ describe('credits', () => {
   });
 });
 
-describe('the memories list (rendered)', () => {
-  it("lists kiro's memories by kind and place, and deletes one", async () => {
-    const { api } = await import('../web/src/api/rest.js');
-    const { MemoriesModal } = await import('../web/src/components/sessions/MemoriesModal.js');
-    const original = { memories: api.memories, deleteMemory: api.deleteMemory };
-    let list = [
-      { id: 'm1', memoryType: 'USER_PREFERENCE', title: 'tabs', summary: 'Uses tabs', scopes: ['Global'] },
-      { id: 'm2', memoryType: 'SEMANTIC', title: 'db', summary: 'Uses Postgres', scopes: ['workspace:casper'] },
-    ];
-    const deleted: string[] = [];
-    Object.assign(api, {
-      memories: async () => ({ memories: list }),
-      deleteMemory: async (id: string) => {
-        deleted.push(id);
-        list = list.filter((m) => m.id !== id);
-        return { ok: true };
-      },
-    });
-    try {
-      await act(async () => {
-        root.render(createElement(MemoriesModal, { onClose() {} }));
-      });
-      const rows = () => [...w.document.querySelectorAll('.search-modal .device-row')];
-      assert.deepEqual(
-        rows().map((r: Any) => r.querySelector('.device-badge')?.textContent),
-        ['Preference · everywhere', 'Fact · casper'],
-      );
-      await act(async () => {
-        (rows()[0]!.querySelector('button') as HTMLElement).dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
-      });
-      assert.deepEqual(deleted, ['m1']);
-      assert.equal(rows().length, 1);
-    } finally {
-      Object.assign(api, original);
-    }
-  });
-});
-
 describe('steering and turn stats (store and render)', () => {
   const apply = (seq: number, payload: unknown) => useStore.getState().applyEvent({ seq, ts: 1000 + seq, chatId: 'c1', payload });
 

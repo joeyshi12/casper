@@ -21,6 +21,7 @@ export interface SessionApi {
   createChat(req: CreateChatRequest): Promise<ChatDetail>;
   deleteChat(id: string): Promise<unknown>;
   renameChat(id: string, title: string): Promise<unknown>;
+  pinChat(id: string, pinned: boolean): Promise<unknown>;
   reloadChat(id: string): Promise<ChatDetail>;
   branchChat(id: string, messageId: string): Promise<ChatDetail>;
   rewindChat(id: string, messageId: string): Promise<ChatDetail>;
@@ -493,6 +494,14 @@ export class SessionController {
     this.state.renameChatRow(id, title);
     await this.api.renameChat(id, title).catch(() => {
       console.error('rename session failed');
+    });
+    this.refreshSessions();
+  }
+
+  async pinChat(id: string, pinned: boolean): Promise<void> {
+    this.state.pinChatRow(id, pinned);
+    await this.api.pinChat(id, pinned).catch(() => {
+      console.error('pin session failed');
     });
     this.refreshSessions();
   }

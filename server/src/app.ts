@@ -15,6 +15,8 @@ import { registerChatRoutes } from './routes/chats.js';
 import { registerSubagentRoutes } from './routes/subagents.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { registerUploadRoutes } from './routes/uploads.js';
+import { registerSettingsRoutes } from './routes/settings.js';
+import { configuredDefaultAgent } from './session/kiroTools.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerWsGateway } from './ws/gateway.js';
 
@@ -42,6 +44,7 @@ export async function buildApp(): Promise<CasperApp> {
   const manager = new SessionManager(logger, {
     defaultModel: () => defaultModelId(logger),
     defaultEffort: (modelId) => defaultEffortFor(modelId, logger),
+    defaultAgent: configuredDefaultAgent,
   });
   const startedAt = Date.now();
 
@@ -55,6 +58,7 @@ export async function buildApp(): Promise<CasperApp> {
   await registerAuth(app);
   registerHealthRoute(app, manager, startedAt);
   registerModelRoutes(app);
+  registerSettingsRoutes(app, manager, startedAt);
   registerAgentRoutes(app);
   registerFsRoutes(app);
   registerChatRoutes(app, manager);

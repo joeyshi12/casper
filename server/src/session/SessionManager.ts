@@ -9,7 +9,6 @@ import {
   type AccountUsage,
   type CasperEventPayload,
   type ChatUsageResponse,
-  type Memory,
   type KiroUpdateMeta,
   type MessageAttachment,
   type JsonRpcNotification,
@@ -108,8 +107,6 @@ export interface ManagedProcess {
   revertTo(sessionId: string, messageId: string): Promise<boolean>;
   contextBreakdown(sessionId: string): Promise<Record<string, { percent?: number } | undefined> | undefined>;
   accountUsage(): Promise<unknown>;
-  listMemories(): Promise<unknown>;
-  deleteMemory(id: string): Promise<unknown>;
   compact(sessionId: string): Promise<unknown>;
   dispose(): void;
   disposeAndWait(timeoutMs?: number): Promise<void>;
@@ -124,6 +121,8 @@ export interface SessionManagerOptions {
   /** The model a new chat gets when none was picked. None by default, which leaves
    *  the choice to kiro. */
   defaultModel?: () => Promise<string | undefined>;
+  /** The agent a new chat starts on when none was picked, if not the config file's. */
+  defaultAgent?: () => Promise<string | undefined>;
   /** The effort a new chat on a model gets when none was picked. */
   defaultEffort?: (modelId: string | undefined) => Promise<string | undefined>;
 }
@@ -285,26 +284,6 @@ function accountUsageOf(raw: unknown): AccountUsage | undefined {
   };
 }
 
-/** The memories in kiro's `_kiro/memory/list` answer. */
-function memoriesOf(raw: unknown): Memory[] {
-  const list = (raw as { memories?: unknown } | undefined)?.memories;
-  if (!Array.isArray(list)) return [];
-  const out: Memory[] = [];
-  for (const m of list as Record<string, unknown>[]) {
-    if (typeof m?.id !== 'string') continue;
-    const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
-    out.push({
-      id: m.id,
-      memoryType: str(m.memoryType) ?? '',
-      title: str(m.title) ?? '',
-      summary: str(m.summary) ?? '',
-      ...(Array.isArray(m.scopes) ? { scopes: m.scopes.filter((x): x is string => typeof x === 'string') } : {}),
-      ...(str(m.updatedAt) ?? str(m.createdAt) ? { updatedAt: str(m.updatedAt) ?? str(m.createdAt) } : {}),
-    });
-  }
-  return out;
-}
-
 /** The row for a subagent read back from its parent's file. */
 function subExecutionSummary(sub: SubExecution): SubagentSummary {
   return {
@@ -343,6 +322,7 @@ export class SessionManager {
   private readonly cancelGraceMs: number;
   private readonly defaultModel: () => Promise<string | undefined>;
   private readonly defaultEffort: (modelId: string | undefined) => Promise<string | undefined>;
+  private readonly defaultAgent: () => Promise<string | undefined>;
 
   constructor(log: Logger, opts: SessionManagerOptions = {}) {
     this.log = log;
@@ -350,6 +330,7 @@ export class SessionManager {
     this.cancelGraceMs = opts.cancelGraceMs ?? CANCEL_GRACE_MS;
     this.defaultModel = opts.defaultModel ?? (async () => undefined);
     this.defaultEffort = opts.defaultEffort ?? (async () => undefined);
+    this.defaultAgent = opts.defaultAgent ?? (async () => undefined);
   }
 
   /** What a session is called, from every read path. */
@@ -747,7 +728,7 @@ export class SessionManager {
     const cwd = opts.freshWorkspace ? createChatWorkspace(chatId) : resolveCwd(opts.cwd);
     const modelId = opts.modelId ?? (await this.defaultModel());
     const s = await this.startSession(new EventStore(chatId), cwd, {
-      agentId: opts.agentId ?? config.defaultAgent,
+      agentId: opts.agentId ?? (await this.defaultAgent()) ?? config.defaultAgent,
       modelId,
       effortLevel: opts.effortLevel ?? (await this.defaultEffort(modelId)),
     });
@@ -1099,30 +1080,6 @@ export class SessionManager {
     const value = accountUsageOf(await proc.accountUsage().catch(() => undefined));
     this.account = { at: Date.now(), value };
     return value;
-  }
-
-  /** kiro's saved memories. They are the user's, not a chat's, so any process will do. */
-  listMemories(): Promise<Memory[]> {
-    return this.withAnyProcess(async (proc) => memoriesOf(await proc.listMemories()));
-  }
-
-  deleteMemory(id: string): Promise<void> {
-    return this.withAnyProcess(async (proc) => {
-      await proc.deleteMemory(id);
-    });
-  }
-
-  /** Runs on a live kiro process, or on one started for the call and stopped after it. */
-  private async withAnyProcess<T>(run: (proc: ManagedProcess) => Promise<T>): Promise<T> {
-    const live = [...this.sessions.values()].find((s) => s.proc)?.proc;
-    if (live) return run(live);
-    const proc = this.spawnProcess({ cwd: config.defaultCwd }, this.log);
-    try {
-      await proc.initialize();
-      return await run(proc);
-    } finally {
-      proc.dispose();
-    }
   }
 
   /** Runs one of kiro's slash commands. Compaction is the only one Casper offers. It

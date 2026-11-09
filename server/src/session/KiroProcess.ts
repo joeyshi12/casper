@@ -226,14 +226,6 @@ export class KiroProcess extends EventEmitter {
     return this.client.request(ACP_METHODS.accountUsage, {});
   }
 
-  listMemories(): Promise<unknown> {
-    return this.client.request(ACP_METHODS.memoryList, {});
-  }
-
-  deleteMemory(id: string): Promise<unknown> {
-    return this.client.request(ACP_METHODS.memoryDelete, { id });
-  }
-
   /** Summarises the conversation so far. Resolves once kiro has finished. */
   compact(sessionId: string): Promise<unknown> {
     if (!this.extensionMethods.has(ACP_METHODS.compact)) {

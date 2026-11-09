@@ -19,8 +19,8 @@ exactly what it missed.
 
 ## Features
 
-- **Sessions** you can create, search, rename and delete. Live ones run in a
-  bounded process pool; idle ones go dormant and resume on demand.
+- **Sessions** you can create, search, rename, pin and delete, listed flat or grouped by
+  date. Live ones run in a bounded process pool; idle ones go dormant and resume on demand.
 - **Per-session model, effort and agent**, from the live model list and kiro's agents.
   The effort level sits in the model picker, for models that have one.
 - **Edit and branch**: edit a sent message to cut the chat back to it and send again, or
@@ -37,7 +37,8 @@ exactly what it missed.
   can send a message back.
 - **Context-window usage** shown live, split by what fills it, with one tap to compact,
   and the credits the chat and the month have used.
-- **Memories**: the list of what kiro has saved about you, from the lock menu, with delete.
+- **Settings** for the default model, effort and agent (written to kiro's own settings),
+  kiro's MCP servers and skills, the logged-in devices, and the server's setup.
 - **PWA** that installs to a home screen and reconnects when the network returns.
 
 ## Install
