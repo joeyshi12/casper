@@ -31,8 +31,8 @@ interface V3Line {
 const PLACEHOLDER_TITLE = 'New Session';
 // kiro writes hidden reasoning as this placeholder plus an encrypted signature.
 const HIDDEN_REASONING = '...';
-// How much of the end of messages.jsonl is searched for the latest context usage, and how
-// much is read at a time.
+// How much of the end of messages.jsonl is searched for the latest context usage and
+// prompt, and how much is read at a time.
 const CONTEXT_TAIL_BYTES = 1024 * 1024;
 const CONTEXT_CHUNK_BYTES = 16 * 1024;
 
@@ -101,32 +101,47 @@ export async function v3SessionDir(sessionId: string): Promise<string | undefine
   return found.find((d) => d !== undefined);
 }
 
-/** The context usage on one line of messages.jsonl, if it records one. */
-function contextUsageOf(line: string): number | undefined {
-  if (!line.includes('"contextUsage"')) return undefined;
+interface TailFacts {
+  contextUsage?: number;
+  /** When the latest prompt was sent. */
+  lastPromptAt?: string;
+}
+
+/** Adds what one line of messages.jsonl records to `facts`, keeping any value already found. */
+function readTailLine(line: string, facts: TailFacts): void {
+  const usage = facts.contextUsage === undefined && line.includes('"contextUsage"');
+  const prompt = facts.lastPromptAt === undefined && line.includes('"user"');
+  if (!usage && !prompt) return;
   try {
-    const p = (JSON.parse(line) as V3Line).payload;
+    const l = JSON.parse(line) as V3Line;
+    const p = l.payload;
     const value = isRecord(p.value) ? p.value.usagePercentage : undefined;
-    return p.type === 'session_metadata' && p.key === 'contextUsage' && typeof value === 'number' ? value : undefined;
+    if (usage && p.type === 'session_metadata' && p.key === 'contextUsage' && typeof value === 'number') {
+      facts.contextUsage = value;
+    }
+    if (prompt && p.type === 'user' && typeof l.timestamp === 'string') facts.lastPromptAt = iso(l.timestamp);
   } catch {
-    return undefined;
+    /* a malformed line is skipped */
   }
 }
 
-/** The latest context usage kiro recorded. kiro writes it several times a turn, so it is
- *  read backwards from the end of messages.jsonl a chunk at a time, up to a limit. */
-async function lastContextUsage(file: string): Promise<number | undefined> {
+/** The latest context usage and prompt time kiro recorded. kiro writes the usage several
+ *  times a turn, so the end of messages.jsonl is read backwards a chunk at a time, up to a
+ *  limit, until both are found. */
+async function readTail(file: string): Promise<TailFacts> {
+  const facts: TailFacts = {};
+  const done = () => facts.contextUsage !== undefined && facts.lastPromptAt !== undefined;
   let handle: fs.FileHandle;
   try {
     handle = await fs.open(file, 'r');
   } catch {
-    return undefined;
+    return facts;
   }
   try {
     const { size } = await handle.stat();
     let end = size;
     let tail = '';
-    while (end > 0 && size - end < CONTEXT_TAIL_BYTES) {
+    while (end > 0 && size - end < CONTEXT_TAIL_BYTES && !done()) {
       const start = Math.max(0, end - CONTEXT_CHUNK_BYTES);
       const buf = Buffer.alloc(end - start);
       await handle.read(buf, 0, buf.length, start);
@@ -134,12 +149,10 @@ async function lastContextUsage(file: string): Promise<number | undefined> {
       const lines = (buf.toString('utf8') + tail).split('\n');
       // The first line may start before this chunk, unless the chunk starts the file.
       tail = end > 0 ? lines.shift()! : '';
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const value = contextUsageOf(lines[i]!);
-        if (value !== undefined) return value;
-      }
+      for (let i = lines.length - 1; i >= 0 && !done(); i--) readTailLine(lines[i]!, facts);
     }
-    return tail ? contextUsageOf(tail) : undefined;
+    if (tail && !done()) readTailLine(tail, facts);
+    return facts;
   } finally {
     await handle.close();
   }
@@ -154,16 +167,19 @@ export async function readV3Session(dir: string): Promise<PersistedSession | nul
   }
   const title = j.title?.trim() ?? '';
   const createdAt = iso(j.createdAt) ?? new Date(0).toISOString();
+  const tail = await readTail(path.join(dir, 'messages.jsonl'));
   return {
     sessionId: j.id,
     title: title === PLACEHOLDER_TITLE ? '' : title,
     cwd: j.workspacePaths?.[0] ?? '',
     createdAt,
-    updatedAt: iso(j.lastModifiedAt) ?? createdAt,
+    // The latest prompt, not lastModifiedAt: kiro's 2.x-to-V3 migration set lastModifiedAt,
+    // and the time on every reply, to the moment it ran. Prompts kept their real times.
+    updatedAt: tail.lastPromptAt ?? iso(j.lastModifiedAt) ?? createdAt,
     agentId: j.agentMode,
     modelId: j.modelId,
     effortLevel: j.effortLevel,
-    contextUsagePercentage: await lastContextUsage(path.join(dir, 'messages.jsonl')),
+    contextUsagePercentage: tail.contextUsage,
   };
 }
 
