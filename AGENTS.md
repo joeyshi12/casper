@@ -95,8 +95,8 @@ npm run typecheck              # all workspaces
 
 - **Sessions live in kiro's files.** kiro keeps each in `~/.kiro/sessions/<hash of the first
   cwd>/<id>/` (`session.json`, `messages.jsonl`, and `sub-executions/<id>.jsonl` per subagent).
-  `casper.db` holds only what kiro doesn't: `chats` (the session binding plus title and cwd
-  overrides), `logins`, `message_attachments`, `turn_endings` (turns that failed or were
+  `casper.db` holds only what kiro doesn't: `chats` (the session binding, title and cwd
+  overrides, and the pin), `logins`, `message_attachments`, `turn_endings` (turns that failed or were
   stopped, of which kiro keeps only what it had finished), and `kiro_models` (the name and
   effort levels kiro last reported per model, which `--list-models` lacks). `session/load` of an id kiro has not
   stored starts an empty session under it, which is what `isLoadable` guards a reload against.

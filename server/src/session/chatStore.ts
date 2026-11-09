@@ -8,15 +8,17 @@ export interface ChatRow {
   sessionId: string | null;
   title: string | null;
   cwd: string | null;
+  pinned: boolean;
 }
 
-const COLUMNS = 'chat_id, session_id, title, cwd';
+const COLUMNS = 'chat_id, session_id, title, cwd, pinned';
 
 interface RawRow {
   chat_id: string;
   session_id: string | null;
   title: string | null;
   cwd: string | null;
+  pinned: number;
 }
 
 const rowOf = (r: RawRow): ChatRow => ({
@@ -24,6 +26,7 @@ const rowOf = (r: RawRow): ChatRow => ({
   sessionId: r.session_id,
   title: r.title,
   cwd: r.cwd,
+  pinned: r.pinned === 1,
 });
 
 /**
@@ -77,6 +80,12 @@ export class ChatStore {
 
   setCwd(chatId: string, cwd: string): void {
     this.write(chatId, 'cwd', cwd);
+  }
+
+  /** Returns false when there is no such chat. */
+  setPinned(chatId: string, pinned: boolean): boolean {
+    const r = db().prepare('UPDATE chats SET pinned = ? WHERE chat_id = ?').run(pinned ? 1 : 0, chatId);
+    return Number(r.changes) > 0;
   }
 
   /** What was attached to one prompt, keyed by ordinal (see db.ts). */

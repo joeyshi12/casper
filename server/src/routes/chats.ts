@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type {
   CreateChatRequest,
   CutChatRequest,
+  PinChatRequest,
   PromptRequest,
   RenameChatRequest,
   SetCwdRequest,
@@ -174,6 +175,23 @@ export function registerChatRoutes(
     async (req) => {
       manager.renameChat(req.params.id, req.body.title);
       return { ok: true };
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: PinChatRequest }>(
+    '/api/chats/:id/pin',
+    async (req, reply) => {
+      if (typeof req.body?.pinned !== 'boolean') {
+        reply.code(400);
+        return { error: 'pinned must be true or false' };
+      }
+      try {
+        manager.pinChat(req.params.id, req.body.pinned);
+        return { ok: true };
+      } catch (err) {
+        reply.code(404);
+        return { error: (err as Error).message };
+      }
     },
   );
 

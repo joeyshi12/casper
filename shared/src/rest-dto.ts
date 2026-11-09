@@ -46,6 +46,7 @@ export interface ChatSummary {
   modelId?: string;
   effortLevel?: string;
   running: boolean;
+  pinned: boolean;
   contextUsagePercentage?: number;
 }
 
@@ -215,6 +216,10 @@ export interface CutChatRequest {
 
 export interface RenameChatRequest {
   title: string;
+}
+
+export interface PinChatRequest {
+  pinned: boolean;
 }
 
 export interface SetCwdRequest {

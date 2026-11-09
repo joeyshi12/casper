@@ -372,6 +372,10 @@ export class SessionManager {
     if (s) s.title = clean || s.title;
   }
 
+  pinChat(chatId: string, pinned: boolean): void {
+    if (!this.store.setPinned(chatId, pinned)) throw new Error(`Unknown chat: ${chatId}`);
+  }
+
   // A live process was spawned with the old cwd, so it's disposed and the next
   // turn respawns.
   async setChatCwd(chatId: string, input: string): Promise<string> {
@@ -1178,6 +1182,7 @@ export class SessionManager {
       modelId: live?.modelId ?? persisted?.modelId,
       effortLevel: live ? live.effortLevel : persisted?.effortLevel,
       running: live?.running ?? false,
+      pinned: chat.pinned,
       // A dormant session falls back to kiro's file.
       contextUsagePercentage:
         snap?.contextUsagePercentage || persisted?.contextUsagePercentage,
