@@ -19,144 +19,72 @@ exactly what it missed.
 
 ## Features
 
-- **Sessions** you can create, search, rename, pin and delete, listed flat or grouped by
-  date. Live ones run in a bounded process pool; idle ones go dormant and resume on demand.
-- **Per-session model, effort and agent**, from the live model list and kiro's agents.
-  The effort level sits in the model picker, for models that have one.
-- **Edit and branch**: edit a sent message to cut the chat back to it and send again, or
-  branch from it into a new chat that keeps the conversation up to its reply.
-- **Titles from kiro**, which names each chat from its first message. A rename wins.
-- **Rich rendering** of Markdown, Mermaid, syntax-highlighted code, and MCP tool
-  calls with their status, input and output.
-- **File browser** for the session's workspace, previewing text, images and PDFs.
-  HTML renders as a live page, sandboxed, and either can go fullscreen.
-- **Subagents** listed under the call that started them, each opening to its own
-  transcript, read back from kiro's session files so they survive a reload.
-- **Widgets**: the agent calls a `show_widget` tool over MCP and the result renders
-  inline as a live page. Charts, simulations, animated diagrams. Sandboxed, and they
-  can send a message back.
-- **Context-window usage** shown live, split by what fills it, with one tap to compact,
-  and the credits the chat and the month have used.
-- **Settings** for the default model, effort and agent (written to kiro's own settings),
-  kiro's MCP servers and skills, the logged-in devices, and the server's setup.
-- **PWA** that installs to a home screen and reconnects when the network returns.
+- **Chats** you can search, rename, pin, group by date, edit and branch. Idle ones go
+  dormant and resume on demand.
+- **Model, effort and agent** per chat, with titles from kiro and live context usage
+  and credits.
+- **Rich rendering** of Markdown, Mermaid, code and tool calls, a file browser for the
+  workspace, subagent transcripts, and inline widgets from a `show_widget` MCP tool.
+- **Settings** for kiro's defaults, MCP servers and skills, and your logged-in devices.
+- **PWA** that installs to a home screen.
 
 ## Install
 
-Needs Node 24+, since Casper keeps its state in SQLite via the built-in
-`node:sqlite`. It also needs [`kiro-cli`](https://kiro.dev) installed and logged in.
-Casper is a client for it, so nothing works without it.
-
-**kiro-cli 3.x, tested against 3.1.** Casper runs kiro's V3 engine
-(`kiro-cli acp --agent-engine v3`) and reads only its session store, so chats from a
-Casper that ran kiro 2.x do not open.
+Needs Node 24+ and [`kiro-cli`](https://kiro.dev) 3.x, installed and logged in.
 
 ```bash
 npm install -g @joeyshi12/casper
-casper
+casper                     # prints an access token and the URL to open
+casper service install     # optional: a systemd user service that survives reboots
 ```
-
-The first run generates an access token, prints it in a bordered block, and drops
-the `casper` agent into `~/.kiro/agents`. Open the printed URL and paste the token.
-
-To survive reboots, install the systemd user service:
-
-```bash
-casper service install
-```
-
-systemd is optional. Without it, run `casper` from your own init system, under
-`nohup`, or in tmux.
 
 | Command | |
 |---|---|
-| `casper` | Run the server in the foreground |
 | `casper token` | Print the access token |
 | `casper reset-token [value]` | Set a new token and sign every device out |
 | `casper doctor` | Check kiro-cli, settings, data directory, web app and MCP server |
 | `casper mcp` | Run the widget MCP server on stdio (kiro spawns this for you) |
-| `casper service install` | Run as a systemd user service |
-| `casper service uninstall` | Remove the service, keeping settings and sessions |
-| `casper service status` | Show the service status |
+| `casper service install \| uninstall \| status` | Manage the systemd user service |
 
-The `casper` agent gets the widget tools automatically. To give them to another
-agent, point it at the same server:
+The `casper` agent gets the widget tools. To give them to another agent:
+`kiro-cli mcp add --name casper --agent <agent> --command casper --args mcp`.
 
-```bash
-kiro-cli mcp add --name casper --agent <agent> --command casper --args mcp
-```
-
-To update, `npm install -g @joeyshi12/casper@latest`. Re-run
-`casper service install` afterwards if you use the service: the unit records
-absolute node and package paths, and both move on upgrade. Your token and sessions
-survive.
-
-To remove it:
-
-```bash
-casper service uninstall
-npm uninstall -g @joeyshi12/casper
-rm -rf ~/.casper ~/.config/casper   # only if you want sessions and settings gone too
-```
+To update, install `@joeyshi12/casper@latest` and re-run `casper service install`,
+since the unit records paths that move on upgrade. To remove it, run
+`casper service uninstall`, `npm uninstall -g @joeyshi12/casper`, and delete
+`~/.casper` and `~/.config/casper` if you want the data gone.
 
 ## Configuration
 
-Settings live in `~/.config/casper/config.json` (or `$XDG_CONFIG_HOME/casper/`),
-written `0600` because it holds the token:
-
-```json
-{
-  "port": 4319,
-  "defaultCwd": "/home/you/projects",
-  "fileRoot": "/home/you",
-  "defaultAgent": "casper"
-}
-```
-
-A missing or malformed file is ignored with a warning rather than failing startup,
-and unrecognised keys are reported so a typo doesn't pass silently.
-
-Every setting also works as an environment variable, and **the environment wins**,
-which is handy for containers and one-off runs. Two are environment-only:
-`CASPER_DATA_DIR`, because it says where data lives and so can't be read from
-inside it, and `CASPER_WEB_DIST`, which is install layout rather than a preference.
+Settings live in `~/.config/casper/config.json` (written `0600`). Each also works as
+an environment variable, and the environment wins.
 
 | Variable | Config key | Default | |
 |---|---|---|---|
 | `HOST` | `host` | `0.0.0.0` | Bind address |
 | `PORT` | `port` | `4319` | Server port |
-| `CASPER_TOKEN` | `token` | _(generated)_ | Entered once at login, exchanged for a per-device cookie |
-| `CASPER_SESSION_TTL_SECONDS` | `sessionTtlSeconds` | `604800` | Device-login lifetime, slid forward on activity |
-| `KIRO_BIN` | `kiroBin` | `kiro-cli` | Path to the kiro-cli binary |
-| `CASPER_KIRO_SESSIONS_DIR` | `kiroSessionsDir` | `~/.kiro/sessions` | Where kiro-cli keeps its own session files, which Casper reads |
-| `DEFAULT_CWD` | `defaultCwd` | cwd | Working directory for new sessions |
-| `DEFAULT_AGENT` | `defaultAgent` | `casper` | Agent for new sessions, so widgets work out of the box. If it is missing, kiro falls back to its Default mode on its own |
-| `CASPER_FILE_ROOT` | `fileRoot` | `/` | Confines the file browser. Defaults to everything the server can read; narrow it to keep authenticated users out of system files |
-| `MAX_LIVE_SESSIONS` | `maxLiveSessions` | `6` | Concurrent live kiro processes |
-| `EVENT_BUFFER_SIZE` | `eventBufferSize` | `5000` | Events kept per session for replay on reconnect; a client older than the buffer refetches instead |
-| `CASPER_MAX_UPLOAD_BYTES` | `maxUploadBytes` | `104857600` | Largest single uploaded file |
-| `CASPER_DATA_DIR` | _(env only)_ | `~/.casper` | Where `casper.db` and uploaded files live |
+| `CASPER_TOKEN` | `token` | _(generated)_ | Exchanged at login for a per-device cookie |
+| `CASPER_SESSION_TTL_SECONDS` | `sessionTtlSeconds` | `604800` | Device-login lifetime, extended on activity |
+| `KIRO_BIN` | `kiroBin` | `kiro-cli` | Path to kiro-cli |
+| `CASPER_KIRO_SESSIONS_DIR` | `kiroSessionsDir` | `~/.kiro/sessions` | kiro's session files, which Casper reads |
+| `DEFAULT_CWD` | `defaultCwd` | cwd | Working directory for new chats |
+| `DEFAULT_AGENT` | `defaultAgent` | `casper` | Agent for new chats when kiro's `chat.defaultAgent` is unset |
+| `CASPER_FILE_ROOT` | `fileRoot` | `/` | The only folder the file browser can read |
+| `MAX_LIVE_SESSIONS` | `maxLiveSessions` | `6` | Concurrent kiro processes |
+| `EVENT_BUFFER_SIZE` | `eventBufferSize` | `5000` | Events kept per chat for replay on reconnect |
+| `CASPER_MAX_UPLOAD_BYTES` | `maxUploadBytes` | `104857600` | Largest uploaded file |
+| `CASPER_DATA_DIR` | _(env only)_ | `~/.casper` | Where `casper.db` and uploads live |
 | `CASPER_WEB_DIST` | _(env only)_ | beside the bundle | Built web app to serve |
 
-Beyond your LAN, put a TLS-terminating reverse proxy in front of
-`http://127.0.0.1:4319`, forwarding WebSocket upgrades with a long read timeout for
-lengthy turns. PWA install and reliable reconnects need HTTPS.
+Beyond your LAN, put a TLS reverse proxy in front that forwards WebSocket upgrades
+with a long read timeout. The PWA needs HTTPS.
 
 ## Security
 
-Casper allows every tool call kiro asks about, once, so unattended runs never block
-on approvals. It never picks "always allow", so no rule is saved that would apply
-outside Casper, and kiro's deny rules still apply. The agent can run commands and
-write files without asking, so treat access to Casper as equivalent to a shell on the
-machine.
-
-`CASPER_FILE_ROOT` is the only limit on what the file endpoints will read, and it defaults
-to everything the server can read. Narrow it if that matters to you.
-
-The token is 24 random bytes, generated for you and exchanged at login for a
-per-device cookie; only its hash is stored. Comparison is constant-time, and
-`/api/login` allows ten failures per quarter hour per address before answering 429.
-The settings file and the database are both `0600`.
+Casper allows every tool call kiro asks about, once, so treat access to Casper as a
+shell on the machine. kiro's deny rules still apply, and no "always allow" rule is
+saved. The token is stored only as a hash, and `/api/login` allows ten failures per
+quarter hour per address.
 
 ## Develop
 
@@ -167,9 +95,5 @@ npm test
 npm run e2e                    # prompt, disconnect mid-turn, reconnect, replay
 ```
 
-`unset NODE_ENV` first if you have it set: a stray `production` breaks installs and
-builds here.
-
-The repo is an npm workspace: `shared/` for types, `web/` for the React app, and
-`server/`, which is the package published to npm. `npm run build` bundles the server
-with esbuild and copies the built web app in beside it.
+`shared/` holds the types, `web/` the React app, and `server/` the published package.
+See [AGENTS.md](AGENTS.md) for the rest.
