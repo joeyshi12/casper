@@ -291,14 +291,17 @@
 .srow.is-active .srow-dot {
   border-color: var(--n4);
 }
+/* A long title fades out over its last 28px instead of ending in an ellipsis. A short
+   title never reaches the fade, so it is unchanged. */
 .srow-title {
   flex: 1;
   min-width: 0;
   font-size: 14px;
   color: var(--n5);
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
 }
 .srow.is-active .srow-title {
   color: var(--n6);
