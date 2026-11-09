@@ -8,7 +8,6 @@ import type { ConnStatus } from '../../api/SessionSocket.js';
 import { PlusIcon, ArrowUpIcon, StopIcon, Spinner } from '../common/icons.js';
 import { AgentPicker, ModelPicker } from '../controls/Pickers.js';
 import { ContextRing } from '../observability/ContextRing.js';
-import { composerPlaceholder } from '../../util/composerPlaceholder.js';
 
 /** Image MIME types that can be inlined as ACP image content blocks. */
 const IMAGE_TYPES = new Set([
@@ -226,15 +225,6 @@ export function Composer({
     };
   }, []);
 
-  const placeholder = composerPlaceholder({
-    live,
-    connStatus,
-    uploading,
-    cancelling,
-    compacting,
-    running,
-  });
-
   const canSend =
     (text.trim() || attachments.length > 0) &&
     !running &&
@@ -277,7 +267,7 @@ export function Composer({
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          placeholder={placeholder}
+          placeholder="Write a message…"
           rows={1}
         />
         <div className="composer-actions">
@@ -300,7 +290,8 @@ export function Composer({
               onChange={(id) => sessionController.changeModel(id)}
               onEffortChange={(level) => sessionController.changeEffort(level)}
             />
-            {canSteer && (
+            {/* While a turn runs, the one button stops it, or sends typed text into it. */}
+            {canSteer ? (
               <button
                 className="composer-btn composer-send"
                 onClick={submit}
@@ -309,8 +300,7 @@ export function Composer({
               >
                 <ArrowUpIcon size={17} />
               </button>
-            )}
-            {running ? (
+            ) : running ? (
               <button
                 className="composer-btn composer-stop"
                 onClick={() => sessionController.cancel()}

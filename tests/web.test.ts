@@ -21,7 +21,6 @@ import { matchPath } from 'react-router';
 import { CHAT_ROUTE, DRAFT_PATH, pathForChat } from '../web/src/util/route.js';
 import { choiceCallOf, choiceOutcome } from '../web/src/util/choiceCall.js';
 import { upsertChat } from '../web/src/state/chats.js';
-import { composerPlaceholder } from '../web/src/util/composerPlaceholder.js';
 import { groupByDate } from '../web/src/util/chatGroups.js';
 import { splitWords, rehypeFadeWords } from '../web/src/util/rehypeFadeWords.js';
 import { widgetCallOf } from '../web/src/util/widgetCall.js';
@@ -1289,38 +1288,6 @@ describe('session list', () => {
       ],
     );
     assert.deepEqual(groupByDate([row('x', 'x', at(20))], now).map((g) => g.label), ['Today']);
-  });
-});
-
-describe('composer placeholder', () => {
-  const base = {
-    live: true,
-    connStatus: 'connected' as const,
-    uploading: false,
-    cancelling: false,
-    compacting: false,
-    running: false,
-  };
-
-  it('invites a prompt when there is nothing else to say', () => {
-    assert.equal(composerPlaceholder(base), 'Ask Casper to build something…');
-  });
-
-  it('reports the connection only when there is one to report', () => {
-    // A draft passes live: true with a closed socket, because sending is what creates the
-    // session - it must not claim to be offline.
-    assert.equal(composerPlaceholder({ ...base, connStatus: 'closed' }), 'Ask Casper to build something…');
-    assert.equal(
-      composerPlaceholder({ ...base, live: false, connStatus: 'closed' }),
-      'Offline - reconnecting when possible',
-    );
-    assert.equal(composerPlaceholder({ ...base, live: false, connStatus: 'connecting' }), 'Connecting…');
-  });
-
-  it('prefers what is happening now over the invitation', () => {
-    assert.equal(composerPlaceholder({ ...base, running: true }), 'Casper is working… send a message to steer it');
-    assert.equal(composerPlaceholder({ ...base, running: true, uploading: true }), 'Uploading…');
-    assert.equal(composerPlaceholder({ ...base, compacting: true }), 'Compacting conversation…');
   });
 });
 

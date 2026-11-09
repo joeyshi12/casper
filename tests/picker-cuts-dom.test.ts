@@ -338,7 +338,7 @@ describe('steering and turn stats (store and render)', () => {
 });
 
 describe('the composer while a turn runs', () => {
-  it('sends typed text into the turn, and keeps Stop', async () => {
+  it('turns Stop into Send while there is text, and sends it into the turn', async () => {
     const { Composer } = await import('../web/src/components/chat/Composer.js');
     const original = sessionController.steer;
     const steered: string[] = [];
@@ -347,17 +347,21 @@ describe('the composer while a turn runs', () => {
       useStore.setState({ activeId: 'c1', chatId: 'c1', observability: { ...useStore.getState().observability, turnStatus: 'running', compacting: false } });
       render(createElement(Composer, { chatId: 'c1', connStatus: 'connected' }));
       assert.equal(host.querySelector('[aria-label="Send to the running turn"]'), null, 'nothing to send yet');
+      assert.ok(host.querySelector('[aria-label="Stop"]'), 'an empty box shows Stop');
       const input = host.querySelector('textarea.composer-input') as HTMLTextAreaElement;
+      assert.equal(input.placeholder, 'Write a message…', 'the same text while a turn runs');
       act(() => {
         Object.getOwnPropertyDescriptor(w.HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Also do X');
         input.dispatchEvent(new w.Event('input', { bubbles: true }));
       });
-      assert.ok(host.querySelector('[aria-label="Stop"]'));
+      assert.equal(host.querySelector('[aria-label="Stop"]'), null, 'one button, now Send');
+      assert.equal(host.querySelectorAll('.composer-btn').length, 1);
       await act(async () => {
         (host.querySelector('[aria-label="Send to the running turn"]') as HTMLElement).dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
       });
       assert.deepEqual(steered, ['Also do X']);
       assert.equal(input.value, '');
+      assert.ok(host.querySelector('[aria-label="Stop"]'), 'Stop is back once the box is empty');
     } finally {
       sessionController.steer = original;
     }
