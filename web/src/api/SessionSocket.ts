@@ -193,8 +193,11 @@ export class SessionSocket {
     return false;
   }
 
-  prompt(content: PromptContentBlock[], attachments?: MessageAttachment[]): boolean {
-    return this.send({ type: 'prompt', content, attachments });
+  prompt(content: PromptContentBlock[], attachments?: MessageAttachment[], retry = false): boolean {
+    return this.send({ type: 'prompt', content, attachments, ...(retry ? { retry } : {}) });
+  }
+  steer(text: string, clientId: string): boolean {
+    return this.send({ type: 'steer', text, clientId });
   }
   cancel(): void {
     this.send({ type: 'cancel' });
@@ -204,6 +207,9 @@ export class SessionSocket {
   }
   setModel(modelId: string): void {
     this.send({ type: 'set_model', modelId });
+  }
+  setEffort(effortLevel: string): void {
+    this.send({ type: 'set_effort', effortLevel });
   }
   watchPaths(paths: string[]): void {
     this.send({ type: 'watch_paths', paths });

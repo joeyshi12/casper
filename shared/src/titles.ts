@@ -39,9 +39,8 @@ const UNNAMED_SESSION = 'New session';
 
 /**
  * The one decision about what a session is called, so it cannot read one way in the sidebar
- * and another in the header, or rename itself on going dormant. In order: a Casper title (a
- * rename, or one supplied at creation), kiro's own title, the first prompt, the folder it
- * works in. Anything left has no name and no content, so it is a new session.
+ * and another in the header, or rename itself on going dormant. In order: the user's rename,
+ * kiro's own title, the first prompt, the folder it works in. Anything left has no name and no content, so it is a new session.
  */
 export function resolveSessionTitle(parts: {
   override?: string;

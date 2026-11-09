@@ -1119,7 +1119,7 @@ describe('POST /api/chats forwards the whole request', () => {
       agentId: 'casper',
       modelId: 'claude-4',
       freshWorkspace: true,
-      title: 'a title',
+      effortLevel: 'high',
       chatId: 'c0ffee00-0000-4000-8000-000000000000',
     };
     const res = await app.inject({ method: 'POST', url: '/api/chats', payload: body });

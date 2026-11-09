@@ -164,7 +164,7 @@ describe('the subagent tool call (rendered in a DOM)', () => {
     await flush();
   };
   const stepsLine = () => [...host.querySelectorAll('.agent-transcript > div > .toolline')][0] as HTMLElement;
-  const stepCount = () => host.querySelectorAll('.agent-steps > .toolline-wrap, .agent-steps > .msg').length;
+  const stepCount = () => host.querySelectorAll('.agent-steps > .toolline-wrap, .agent-steps > .msg, .agent-steps > .msg-user-wrap').length;
 
   it('a finished row shows its answer, with the steps behind a closed totals line', async () => {
     await openRow('completed', longTranscript());

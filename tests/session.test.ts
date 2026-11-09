@@ -1573,6 +1573,24 @@ describe('session summary: one projection over kiro’s file and live state', ()
     }
   });
 
+  it('a pin is kept on the chat and reported in the list', async () => {
+    writeSessionFile('pin-1');
+    linkChat('pin-1');
+    const mgr = new SessionManager(noopLogger());
+    try {
+      const pinnedOf = async () => (await mgr.listChats()).find((s) => s.chatId === 'pin-1')?.pinned;
+      assert.equal(await pinnedOf(), false);
+      mgr.pinChat('pin-1', true);
+      assert.equal(await pinnedOf(), true);
+      mgr.pinChat('pin-1', false);
+      assert.equal(await pinnedOf(), false);
+      assert.throws(() => mgr.pinChat('no-such-chat', true), /Unknown chat/);
+    } finally {
+      mgr.disposeAll();
+      cleanup('pin-1');
+    }
+  });
+
   it('the later of kiro’s timestamp and our own activity wins', async () => {
     // kiro's file says the 2nd; a live event now is later, so the list must not
     // report a time older than the session's real last activity.

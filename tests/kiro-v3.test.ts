@@ -60,6 +60,7 @@ describe("reading kiro's session store", () => {
       updatedAt: '2026-11-07T06:39:15.621Z',
       agentId: 'casper',
       modelId: 'claude-haiku-4.5',
+      effortLevel: undefined,
       contextUsagePercentage: undefined,
     });
     writeV3Session(sessionsDir, { id: 'sess_meta', cwd: sessionsCwd, title: 'Run Shell Command and Verify File' });
@@ -81,6 +82,28 @@ describe("reading kiro's session store", () => {
     // Not past the limit, and not at all in a session that never recorded one.
     assert.equal(await usageOf([usage(9), big(2_000_000)]), undefined);
     assert.equal(await usageOf([line({ type: 'user', content: 'hi' })]), undefined);
+  });
+
+  it('dates a session by its latest prompt, not by when kiro last wrote the file', async () => {
+    const updatedAtOf = async (messages?: V3Line[]) => {
+      const id = messages ? 'sess_dated' : 'sess_dated_empty';
+      // As kiro's 2.x-to-V3 migration left it: the file and the replies carry the migration time.
+      writeV3Session(sessionsDir, { id, cwd: sessionsCwd, lastModifiedAt: '2026-11-07T18:12:09.240Z', messages });
+      return (await readPersistedSession(id))?.updatedAt;
+    };
+    const migrated = '2026-11-07T18:12:09.189Z';
+    assert.equal(
+      await updatedAtOf([
+        line({ type: 'user', content: 'first' }, '2026-09-14T16:44:38Z'),
+        line({ type: 'assistant', content: 'a' }, migrated),
+        line({ type: 'user', content: 'second' }, '2026-09-14T16:47:07Z'),
+        line({ type: 'assistant', content: 'b' }, migrated),
+        line({ type: 'session_metadata', key: 'contextUsage', value: { usagePercentage: 2 } }, migrated),
+      ]),
+      '2026-09-14T16:47:07.000Z',
+    );
+    // With no prompt to go by, kiro's own time is used.
+    assert.equal(await updatedAtOf(), '2026-11-07T18:12:09.240Z');
   });
 
   it('finds a session whose chat moved to another directory', async () => {
@@ -271,7 +294,7 @@ describe('SessionManager: starting a kiro session', () => {
     const { mgr, detail } = await managerWith(proc, { defaultModel: 'claude-opus-5.5' });
     try {
       assert.deepEqual(proc.args[proc.calls.indexOf('newSession')], [
-        { cwd: sessionsCwd, mcpServers: [], _meta: { kiro: { modeId: 'casper', modelId: 'claude-opus-5.5' } } },
+        { cwd: sessionsCwd, mcpServers: [], _meta: { kiro: { modeId: 'casper', modelId: 'claude-opus-5.5', effortLevel: undefined } } },
       ]);
       assert.equal(detail.summary.modelId, 'claude-opus-5.5');
     } finally {

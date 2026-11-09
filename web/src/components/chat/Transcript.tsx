@@ -37,7 +37,10 @@ export const Transcript = memo(function Transcript() {
   const items = useStore((s) => s.items);
   const streamingText = useStore((s) => s.streamingText);
   const streamingThought = useStore((s) => s.streamingThought);
-  const pending = useStore((s) => s.pending);
+  const allPending = useStore((s) => s.pending);
+  // Messages sent into the running turn wait at the bottom, below what the turn is doing.
+  const pending = useMemo(() => allPending.filter((pm) => !pm.steer), [allPending]);
+  const steers = useMemo(() => allPending.filter((pm) => pm.steer), [allPending]);
   const waitingToStart = pending.some((pm) => pm.status === 'sending');
   const turnStatus = useStore((s) => s.observability.turnStatus);
   const compacting = useStore((s) => s.observability.compacting);
@@ -68,6 +71,26 @@ export const Transcript = memo(function Transcript() {
     (!!streamingThought && pending.length === 0) || (lastActive && shimmersWhenLast(grouped.at(-1)));
   const showDots = (turnStatus === 'running' || waitingToStart) && !streamingText && !progressShown;
 
+  const pendingBubble = (pm: (typeof allPending)[number]) => (
+    <div
+      key={pm.id}
+      className={`msg msg-user msg-pending ${pm.status === 'failed' ? 'is-failed' : ''}`}
+    >
+      {activeId && pm.attachments && pm.attachments.length > 0 && (
+        <AttachmentList chatId={activeId} attachments={pm.attachments} onOpen={openFilePreview} />
+      )}
+      {pm.text && <div className="msg-user-text">{pm.text}</div>}
+      {pm.status === 'failed' && (
+        <div className="msg-failed">
+          <span className="msg-failed-why">{pm.error ?? 'Failed to send.'}</span>
+          <button className="msg-retry" onClick={() => sessionController.retrySend(pm.id)}>
+            Retry
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const [flags, setFlags] = useState<ViewportFlags>({
     loadingOlder: false,
@@ -97,10 +120,10 @@ export const Transcript = memo(function Transcript() {
     viewport.onContent({
       chatId: activeId,
       itemCount: items.length,
-      pendingCount: pending.length,
+      pendingCount: allPending.length,
       remainingOlder,
     });
-  }, [items, streamingText, streamingThought, pending, activeId, compacting, remainingOlder, viewport]);
+  }, [items, streamingText, streamingThought, allPending, activeId, compacting, remainingOlder, viewport]);
 
   // Must run before paint, or a prepend shows as a jump.
   useLayoutEffect(() => {
@@ -138,25 +161,7 @@ export const Transcript = memo(function Transcript() {
         onOpenFile={openFilePreview}
       />
 
-      {pending.map((pm) => (
-        <div
-          key={pm.id}
-          className={`msg msg-user msg-pending ${pm.status === 'failed' ? 'is-failed' : ''}`}
-        >
-          {activeId && pm.attachments && pm.attachments.length > 0 && (
-            <AttachmentList chatId={activeId} attachments={pm.attachments} onOpen={openFilePreview} />
-          )}
-          {pm.text && <div className="msg-user-text">{pm.text}</div>}
-          {pm.status === 'failed' && (
-            <div className="msg-failed">
-              <span className="msg-failed-why">{pm.error ?? 'Failed to send.'}</span>
-              <button className="msg-retry" onClick={() => sessionController.retrySend(pm.id)}>
-                Retry
-              </button>
-            </div>
-          )}
-        </div>
-      ))}
+      {pending.map(pendingBubble)}
 
       {streamingThought && !lastEntryJoinsStreamingThought(grouped.at(-1)) && pending.length === 0 && (
         <ThoughtLineCard text={streamingThought} live />
@@ -175,6 +180,8 @@ export const Transcript = memo(function Transcript() {
           <span className="thinking-dot" />
         </div>
       )}
+
+      {steers.map(pendingBubble)}
 
       {compacting && (
         <div className="compaction compaction-live">

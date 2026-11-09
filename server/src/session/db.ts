@@ -5,9 +5,11 @@ import { config } from '../config.js';
 
 /**
  * Casper's own persistence: one SQLite file for the state kiro doesn't keep. `chats`
- * is the chat itself; `logins` holds device sessions; `message_attachments` records
- * what was attached to each prompt; `turn_endings` holds turns that failed or were
- * stopped. node:sqlite is built in, which is why the Node floor is 24.
+ * is the chat itself, with any title, cwd or pin the user set; `logins` holds device
+ * sessions; `message_attachments` records what was attached to each prompt;
+ * `turn_endings` holds turns that failed or were stopped; `kiro_models` keeps the name
+ * and effort levels kiro last reported for each model, so the picker has them before any
+ * session has started. node:sqlite is built in, which is why the Node floor is 24.
  *
  * Attachments are keyed by ordinal (the user message's position), the only identity
  * a live message (event seq) and a rebuilt one (kiro's message_id) can agree on.
@@ -17,7 +19,8 @@ CREATE TABLE IF NOT EXISTS chats (
   chat_id    TEXT PRIMARY KEY,
   session_id TEXT UNIQUE,
   title      TEXT,
-  cwd        TEXT
+  cwd        TEXT,
+  pinned     INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS logins (
   id           TEXT PRIMARY KEY,
@@ -47,6 +50,13 @@ CREATE TABLE IF NOT EXISTS turn_endings (
   items      TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS turn_endings_chat ON turn_endings (chat_id);
+CREATE TABLE IF NOT EXISTS kiro_models (
+  model_id    TEXT PRIMARY KEY,
+  name        TEXT,
+  levels      TEXT NOT NULL,
+  recommended TEXT,
+  effort_key  TEXT
+);
 `;
 
 let handle: DatabaseSync | undefined;
@@ -70,6 +80,10 @@ function open(): DatabaseSync {
   // so each test file points casperDataDir elsewhere.
   d.exec('PRAGMA journal_mode = WAL');
   d.exec(SCHEMA);
+  // A database made before these columns existed.
+  const columns = (table: string) => (d.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+  if (!columns('kiro_models').includes('effort_key')) d.exec('ALTER TABLE kiro_models ADD COLUMN effort_key TEXT');
+  if (!columns('chats').includes('pinned')) d.exec('ALTER TABLE chats ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
   // Set explicitly on every open: the logins table holds auth hashes, and this
   // also repairs a database created before the restriction existed.
   restrict(config.casperDataDir, 0o700);

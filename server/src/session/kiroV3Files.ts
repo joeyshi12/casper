@@ -14,6 +14,7 @@ interface V3SessionJson {
   title?: string;
   agentMode?: string;
   modelId?: string;
+  effortLevel?: string;
   workspacePaths?: string[];
   createdAt?: string;
   lastModifiedAt?: string;
@@ -30,8 +31,8 @@ interface V3Line {
 const PLACEHOLDER_TITLE = 'New Session';
 // kiro writes hidden reasoning as this placeholder plus an encrypted signature.
 const HIDDEN_REASONING = '...';
-// How much of the end of messages.jsonl is searched for the latest context usage, and how
-// much is read at a time.
+// How much of the end of messages.jsonl is searched for the latest context usage and
+// prompt, and how much is read at a time.
 const CONTEXT_TAIL_BYTES = 1024 * 1024;
 const CONTEXT_CHUNK_BYTES = 16 * 1024;
 
@@ -100,32 +101,47 @@ export async function v3SessionDir(sessionId: string): Promise<string | undefine
   return found.find((d) => d !== undefined);
 }
 
-/** The context usage on one line of messages.jsonl, if it records one. */
-function contextUsageOf(line: string): number | undefined {
-  if (!line.includes('"contextUsage"')) return undefined;
+interface TailFacts {
+  contextUsage?: number;
+  /** When the latest prompt was sent. */
+  lastPromptAt?: string;
+}
+
+/** Adds what one line of messages.jsonl records to `facts`, keeping any value already found. */
+function readTailLine(line: string, facts: TailFacts): void {
+  const usage = facts.contextUsage === undefined && line.includes('"contextUsage"');
+  const prompt = facts.lastPromptAt === undefined && line.includes('"user"');
+  if (!usage && !prompt) return;
   try {
-    const p = (JSON.parse(line) as V3Line).payload;
+    const l = JSON.parse(line) as V3Line;
+    const p = l.payload;
     const value = isRecord(p.value) ? p.value.usagePercentage : undefined;
-    return p.type === 'session_metadata' && p.key === 'contextUsage' && typeof value === 'number' ? value : undefined;
+    if (usage && p.type === 'session_metadata' && p.key === 'contextUsage' && typeof value === 'number') {
+      facts.contextUsage = value;
+    }
+    if (prompt && p.type === 'user' && typeof l.timestamp === 'string') facts.lastPromptAt = iso(l.timestamp);
   } catch {
-    return undefined;
+    /* a malformed line is skipped */
   }
 }
 
-/** The latest context usage kiro recorded. kiro writes it several times a turn, so it is
- *  read backwards from the end of messages.jsonl a chunk at a time, up to a limit. */
-async function lastContextUsage(file: string): Promise<number | undefined> {
+/** The latest context usage and prompt time kiro recorded. kiro writes the usage several
+ *  times a turn, so the end of messages.jsonl is read backwards a chunk at a time, up to a
+ *  limit, until both are found. */
+async function readTail(file: string): Promise<TailFacts> {
+  const facts: TailFacts = {};
+  const done = () => facts.contextUsage !== undefined && facts.lastPromptAt !== undefined;
   let handle: fs.FileHandle;
   try {
     handle = await fs.open(file, 'r');
   } catch {
-    return undefined;
+    return facts;
   }
   try {
     const { size } = await handle.stat();
     let end = size;
     let tail = '';
-    while (end > 0 && size - end < CONTEXT_TAIL_BYTES) {
+    while (end > 0 && size - end < CONTEXT_TAIL_BYTES && !done()) {
       const start = Math.max(0, end - CONTEXT_CHUNK_BYTES);
       const buf = Buffer.alloc(end - start);
       await handle.read(buf, 0, buf.length, start);
@@ -133,12 +149,10 @@ async function lastContextUsage(file: string): Promise<number | undefined> {
       const lines = (buf.toString('utf8') + tail).split('\n');
       // The first line may start before this chunk, unless the chunk starts the file.
       tail = end > 0 ? lines.shift()! : '';
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const value = contextUsageOf(lines[i]!);
-        if (value !== undefined) return value;
-      }
+      for (let i = lines.length - 1; i >= 0 && !done(); i--) readTailLine(lines[i]!, facts);
     }
-    return tail ? contextUsageOf(tail) : undefined;
+    if (tail && !done()) readTailLine(tail, facts);
+    return facts;
   } finally {
     await handle.close();
   }
@@ -153,15 +167,19 @@ export async function readV3Session(dir: string): Promise<PersistedSession | nul
   }
   const title = j.title?.trim() ?? '';
   const createdAt = iso(j.createdAt) ?? new Date(0).toISOString();
+  const tail = await readTail(path.join(dir, 'messages.jsonl'));
   return {
     sessionId: j.id,
     title: title === PLACEHOLDER_TITLE ? '' : title,
     cwd: j.workspacePaths?.[0] ?? '',
     createdAt,
-    updatedAt: iso(j.lastModifiedAt) ?? createdAt,
+    // The latest prompt, not lastModifiedAt: kiro's 2.x-to-V3 migration set lastModifiedAt,
+    // and the time on every reply, to the moment it ran. Prompts kept their real times.
+    updatedAt: tail.lastPromptAt ?? iso(j.lastModifiedAt) ?? createdAt,
     agentId: j.agentMode,
     modelId: j.modelId,
-    contextUsagePercentage: await lastContextUsage(path.join(dir, 'messages.jsonl')),
+    effortLevel: j.effortLevel,
+    contextUsagePercentage: tail.contextUsage,
   };
 }
 
@@ -183,6 +201,22 @@ async function readLines(file: string, filter?: string): Promise<V3Line[]> {
     }
   }
   return out;
+}
+
+/** The credits a session's turns have used, summed from kiro's per-turn usage lines. */
+export async function readV3Credits(dir: string): Promise<number> {
+  const seen = new Set<string>();
+  let total = 0;
+  for (const line of await readLines(path.join(dir, 'messages.jsonl'), '"usage_summary"')) {
+    const p = line.payload;
+    if (p.type !== 'usage_summary' || seen.has(line.id)) continue;
+    seen.add(line.id);
+    for (const s of Array.isArray(p.promptTurnSummaries) ? p.promptTurnSummaries : []) {
+      const usage = isRecord(s) ? s.usage : undefined;
+      if (typeof usage === 'number' && Number.isFinite(usage)) total += usage;
+    }
+  }
+  return total;
 }
 
 function userText(content: unknown): string {
@@ -233,6 +267,9 @@ export async function readV3Entries(file: string): Promise<TranscriptEntry[]> {
   };
 
   const seen = new Set<string>();
+  // A message sent into a running turn is written when it is sent, and again inside
+  // kiro's own wrapper where the model read it. It is shown at the second place.
+  const steers = new Map<string, string>();
   for (const line of await readLines(file)) {
     const copy = isCompactionCopy(line.id, seen);
     seen.add(line.id);
@@ -242,9 +279,48 @@ export async function readV3Entries(file: string): Promise<TranscriptEntry[]> {
     const at = Number.isNaN(parsed) ? undefined : parsed;
 
     switch (p.type) {
-      case 'user':
+      case 'user': {
+        if (p.source === 'steer') {
+          const text = userText(p.content);
+          if (text.trim()) steers.set(line.id, text);
+          break;
+        }
+        const kiro = isRecord(p._meta) && isRecord(p._meta.kiro) ? p._meta.kiro : undefined;
+        if (kiro?.syntheticUserMessageReason !== undefined) {
+          // A message kiro wrote itself. Only a steer's has anything the user said.
+          const ids = Array.isArray(kiro.steeringConsumedIds) ? kiro.steeringConsumedIds : [];
+          for (const id of ids) {
+            const text = typeof id === 'string' ? steers.get(id) : undefined;
+            if (text === undefined) continue;
+            out.push({ kind: 'item', item: { type: 'message', message: { id: `s-${id}`, role: 'user', text, timestamp: at, steer: true } } });
+          }
+          break;
+        }
         out.push({ kind: 'prompt', id: line.id, text: userText(p.content), atMs: at, timestamp: at });
         break;
+      }
+      case 'tombstone': {
+        // kiro rewound the session to before a prompt: that prompt and everything after it
+        // up to here no longer exist.
+        const from = p.kind === 'checkpoint_revert' ? str(p.effectiveFromMessageId) : undefined;
+        const at = from ? out.findIndex((e) => e.kind === 'prompt' && e.id === from) : -1;
+        if (at >= 0) out.length = at;
+        break;
+      }
+      case 'usage_summary': {
+        const credits = (Array.isArray(p.promptTurnSummaries) ? p.promptTurnSummaries : []).reduce(
+          (sum: number, s: unknown) => sum + (isRecord(s) && typeof s.usage === 'number' && Number.isFinite(s.usage) ? s.usage : 0),
+          0,
+        );
+        const elapsedMs = typeof p.elapsedTime === 'number' && p.elapsedTime > 0 ? p.elapsedTime : undefined;
+        if (credits > 0 || elapsedMs) {
+          out.push({
+            kind: 'item',
+            item: { type: 'turn_stats', id: `u-${line.id}`, ...(elapsedMs ? { elapsedMs } : {}), ...(credits > 0 ? { credits } : {}) },
+          });
+        }
+        break;
+      }
       case 'assistant': {
         const text = str(p.content) ?? '';
         if (!text.trim()) break;

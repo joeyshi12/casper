@@ -13,6 +13,14 @@ export interface ModelInfo {
   rateMultiplier: number;
   rateUnit: string;
   isDefault: boolean;
+  /** Effort levels the model takes, lowest first. Absent for a model without them, and
+   *  until a kiro session has reported them. */
+  effortLevels?: string[];
+  /** The level kiro recommends for the model. */
+  recommendedEffort?: string;
+  /** The level a new chat on this model gets: the user's own default from kiro's
+   *  `chat.modelDefaults`, else the recommended one. */
+  defaultEffort?: string;
 }
 
 export interface ModelsResponse {
@@ -36,7 +44,9 @@ export interface ChatSummary {
   liveness: SessionLiveness;
   agentId?: string;
   modelId?: string;
+  effortLevel?: string;
   running: boolean;
+  pinned: boolean;
   contextUsagePercentage?: number;
 }
 
@@ -48,12 +58,10 @@ export interface CreateChatRequest {
   cwd?: string;
   agentId?: string;
   modelId?: string;
+  effortLevel?: string;
   freshWorkspace?: boolean;
   /** The server generates one if absent or malformed. */
   chatId?: string;
-  /** Names the session as it is created, so the row is never listed as untitled
-   *  while the client waits on the first prompt. */
-  title?: string;
 }
 
 /** One file attached to a prompt, recorded per message rather than parsed from the text. */
@@ -70,6 +78,17 @@ export interface TranscriptMessage {
   text: string;
   timestamp?: number;
   attachments?: MessageAttachment[];
+  /** kiro's id for a prompt, which a branch is cut at. */
+  messageId?: string;
+  /** Sent while a turn ran, into that turn. A steer is no prompt of its own, so it cannot
+   *  be edited or branched from. */
+  steer?: boolean;
+}
+
+/** What one turn took, shown under its reply. */
+export interface TurnStats {
+  elapsedMs?: number;
+  credits?: number;
 }
 
 /** A tool-call entry in a session transcript. */
@@ -94,7 +113,8 @@ export type TranscriptItem =
   | { type: 'tool_call'; tool: TranscriptToolCall }
   | { type: 'compaction'; id: string; summary: string; timestamp?: number }
   | { type: 'turn_error'; id: string; message: string; timestamp?: number }
-  | { type: 'turn_interrupted'; id: string; timestamp?: number };
+  | { type: 'turn_interrupted'; id: string; timestamp?: number }
+  | ({ type: 'turn_stats'; id: string } & TurnStats);
 
 /** A turn that failed or was stopped, stored because kiro drops what it had in flight. */
 export interface TurnEnding {
@@ -152,8 +172,39 @@ export interface SetModelRequest {
   modelId: string;
 }
 
+/** The user's kiro plan, and how much of it is used this billing cycle. */
+export interface AccountUsage {
+  planName: string;
+  used: number;
+  limit?: number;
+  /** The day the count starts again, as YYYY-MM-DD. */
+  resetsOn?: string;
+  overageCharges?: number;
+  currency?: string;
+}
+
+/** What a chat has cost, and the plan it counts against. */
+export interface ChatUsageResponse {
+  credits?: number;
+  account?: AccountUsage;
+}
+
+export interface SetEffortRequest {
+  effortLevel: string;
+}
+
+/** A user message's `messageId`. Branching keeps that message's turn; rewinding drops
+ *  the message and everything after it. */
+export interface CutChatRequest {
+  messageId: string;
+}
+
 export interface RenameChatRequest {
   title: string;
+}
+
+export interface PinChatRequest {
+  pinned: boolean;
 }
 
 export interface SetCwdRequest {
@@ -191,6 +242,70 @@ export interface DeviceInfo {
 
 export interface DevicesResponse {
   devices: DeviceInfo[];
+}
+
+/** Casper's settings page: the defaults a new chat gets, and how the server runs. */
+export interface SettingsResponse {
+  /** The agent a new chat starts on. The default model and effort are on `ModelInfo`. */
+  defaultAgentId: string;
+  server: ServerInfo;
+}
+
+/** An MCP server in kiro's global `mcp.json`. Its environment values are never sent. */
+export interface McpServerInfo {
+  name: string;
+  command?: string;
+  url?: string;
+  args: string[];
+  envKeys: string[];
+  disabled: boolean;
+}
+
+/** A new server: a command to run, or the URL of one already running. */
+export interface McpServerInput {
+  name: string;
+  command?: string;
+  url?: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+/** A skill in `~/.kiro/skills`. */
+export interface SkillInfo {
+  name: string;
+  description: string;
+  /** Its SKILL.md. */
+  path: string;
+}
+
+export interface ToolsResponse {
+  mcpServers: McpServerInfo[];
+  skills: SkillInfo[];
+}
+
+/** How the server is set up, from its config file and environment. Shown, not edited. */
+export interface ServerInfo {
+  version: string;
+  kiroVersion?: string;
+  kiroBin: string;
+  host: string;
+  port: number;
+  authEnabled: boolean;
+  fileRoot: string;
+  defaultCwd: string;
+  dataDir: string;
+  configFile: string;
+  maxLiveSessions: number;
+  liveSessions: number;
+  uptimeMs: number;
+}
+
+/** A change to the defaults a new chat gets. The model and effort are written to kiro's
+ *  own settings, so the kiro CLI uses them too. */
+export interface UpdateDefaultsRequest {
+  modelId?: string;
+  effort?: { modelId: string; level: string };
+  agentId?: string;
 }
 
 export interface HealthResponse {

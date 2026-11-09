@@ -1,6 +1,11 @@
 import type {
   AgentsResponse,
+  ChatUsageResponse,
   CreateChatRequest,
+  McpServerInput,
+  SettingsResponse,
+  ToolsResponse,
+  UpdateDefaultsRequest,
   DevicesResponse,
   DirListing,
   ModelsResponse,
@@ -77,10 +82,24 @@ export const api = {
   deleteChat: (id: string) => req<{ ok: boolean }>('DELETE', `/api/chats/${id}`),
   renameChat: (id: string, title: string) =>
     req<{ ok: boolean }>('POST', `/api/chats/${id}/rename`, { title }),
+  pinChat: (id: string, pinned: boolean) =>
+    req<{ ok: boolean }>('POST', `/api/chats/${id}/pin`, { pinned }),
   setChatCwd: (id: string, cwd: string) =>
     req<{ ok: boolean; cwd: string }>('POST', `/api/chats/${id}/cwd`, { cwd }),
   reloadChat: (id: string) =>
     req<ChatDetail>('POST', `/api/chats/${id}/reload`),
+  chatUsage: (id: string) => req<ChatUsageResponse>('GET', `/api/chats/${id}/usage`),
+  settings: () => req<SettingsResponse>('GET', '/api/settings'),
+  updateDefaults: (body: UpdateDefaultsRequest) => req<{ ok: boolean }>('PUT', '/api/settings/defaults', body),
+  tools: () => req<ToolsResponse>('GET', '/api/tools'),
+  addMcpServer: (body: McpServerInput) => req<{ ok: boolean }>('POST', '/api/tools/mcp', body),
+  setMcpServerDisabled: (name: string, disabled: boolean) =>
+    req<{ ok: boolean }>('PUT', `/api/tools/mcp/${encodeURIComponent(name)}`, { disabled }),
+  removeMcpServer: (name: string) => req<{ ok: boolean }>('DELETE', `/api/tools/mcp/${encodeURIComponent(name)}`),
+  branchChat: (id: string, messageId: string) =>
+    req<ChatDetail>('POST', `/api/chats/${id}/branch`, { messageId }),
+  rewindChat: (id: string, messageId: string) =>
+    req<ChatDetail>('POST', `/api/chats/${id}/rewind`, { messageId }),
   tree: (id: string, relativePath = '') =>
     req<TreeResponse>(
       'GET',

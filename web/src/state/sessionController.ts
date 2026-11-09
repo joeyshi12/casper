@@ -7,7 +7,7 @@ import type {
   ChatDetail,
   ChatListResponse,
 } from '@casper/shared';
-import { stripAttachmentsLine, titleFromPrompt } from '@casper/shared';
+import { ATTACHMENTS_PREFIX, stripAttachmentsLine } from '@casper/shared';
 import { api } from '../api/rest.js';
 import { SessionSocket, type SessionSocketHandlers } from '../api/SessionSocket.js';
 import { DRAFT_PATH, pathForChat } from '../util/route.js';
@@ -21,7 +21,10 @@ export interface SessionApi {
   createChat(req: CreateChatRequest): Promise<ChatDetail>;
   deleteChat(id: string): Promise<unknown>;
   renameChat(id: string, title: string): Promise<unknown>;
+  pinChat(id: string, pinned: boolean): Promise<unknown>;
   reloadChat(id: string): Promise<ChatDetail>;
+  branchChat(id: string, messageId: string): Promise<ChatDetail>;
+  rewindChat(id: string, messageId: string): Promise<ChatDetail>;
   models(): Promise<ModelsResponse>;
   agents(): Promise<AgentsResponse>;
 }
@@ -30,10 +33,12 @@ export interface ControlledSocket {
   connect(): void;
   close(): void;
   reset(head: number): void;
-  prompt(content: PromptContentBlock[], attachments?: MessageAttachment[]): boolean;
+  prompt(content: PromptContentBlock[], attachments?: MessageAttachment[], retry?: boolean): boolean;
+  steer(text: string, clientId: string): boolean;
   cancel(): void;
   setMode(modeId: string): void;
   setModel(modelId: string): void;
+  setEffort(effortLevel: string): void;
   watchPaths(paths: string[]): void;
   execCommand(command: string): void;
 }
@@ -64,6 +69,8 @@ const ACTION_LABEL: Record<string, string> = {
   cancel: 'Stop',
   set_mode: 'Agent change',
   set_model: 'Model change',
+  set_effort: 'Effort change',
+  steer: 'Message',
   exec_command: 'Command',
 };
 
@@ -80,6 +87,7 @@ export class SessionController {
   private handledRoute: string | null | undefined = undefined;
   private isDraft = false;
   private lastSent: string | null = null;
+  private lastSteer: string | null = null;
   private msgSeq = 0;
   private firstPrompt: {
     id: string;
@@ -189,8 +197,12 @@ export class SessionController {
   private socketHandlers(id: string): SessionSocketHandlers {
     return {
       onEvent: (e) => {
+        const fresh = e.seq > this.state.appliedSeq;
         this.state.applyEvent(e);
-        if (e.payload.kind === 'turn_started') this.refreshSessions();
+        if (!fresh) return;
+        if (e.payload.kind === 'turn_started' || e.payload.kind === 'title_changed') this.refreshSessions();
+        // The chat moved to another kiro session, so its transcript is refetched.
+        if (e.payload.kind === 'history_replaced') void this.refetch(id);
         // kiro persists the session shortly after a turn ends; this delay waits for that.
         if (e.payload.kind === 'turn_ended') {
           setTimeout(() => this.refreshSessions(), this.turnEndedRefreshMs);
@@ -204,17 +216,16 @@ export class SessionController {
           this.deliver(held.id, held.content, held.attachments);
         }
       },
-      onResync: async () => {
-        const fresh = await this.api.getChat(id);
-        if (this.openTarget !== id) return;
-        this.state.loadDetail(fresh);
-        this.socket?.reset(fresh.head);
-      },
+      onResync: () => this.refetch(id),
       onAck: (action, ok, error) => {
         if (ok) return;
         const reason = error ?? 'The server rejected the request.';
         if (action === 'prompt') {
           if (this.lastSent) this.state.markPendingFailed(this.lastSent, reason);
+          return;
+        }
+        if (action === 'steer') {
+          if (this.lastSteer) this.state.markPendingFailed(this.lastSteer, reason);
           return;
         }
         console.error(`${ACTION_LABEL[action] ?? action} rejected:`, reason);
@@ -231,6 +242,13 @@ export class SessionController {
     };
   }
 
+  private async refetch(id: string): Promise<void> {
+    const fresh = await this.api.getChat(id);
+    if (this.openTarget !== id) return;
+    this.state.loadDetail(fresh);
+    this.socket?.reset(fresh.head);
+  }
+
   async createChat(opts: CreateOpts): Promise<boolean> {
     this.closeSocket();
     this.state.setConnStatus('connecting');
@@ -242,6 +260,7 @@ export class SessionController {
         cwd: opts.cwd || undefined,
         agentId: opts.agentId,
         modelId: opts.modelId,
+        effortLevel: opts.effortLevel,
         freshWorkspace: !opts.cwd,
       });
       this.refreshSessions();
@@ -278,7 +297,7 @@ export class SessionController {
     this.host?.navigate(DRAFT_PATH);
   }
 
-  send(content: PromptContentBlock[], attachments?: MessageAttachment[]): void {
+  send(content: PromptContentBlock[], attachments?: MessageAttachment[], opts: { retry?: boolean } = {}): void {
     const id = `pending-${this.msgSeq++}`;
     const text = stripAttachmentsLine(
       content
@@ -289,27 +308,44 @@ export class SessionController {
     this.state.addPending({ id, text, attachments, content });
 
     if (this.isDraft) {
-      const { currentModeId, currentModelId } = this.state;
+      const { currentModeId, currentModelId, currentEffort } = this.state;
       void this.createChat({
         agentId: currentModeId,
         modelId: currentModelId,
-        title: titleFromPrompt(content),
+        effortLevel: currentEffort,
       }).then((created) => {
         if (created) this.firstPrompt = { id, content, attachments };
         else this.state.markPendingFailed(id, 'Could not start the session.');
       });
       return;
     }
-    this.deliver(id, content, attachments);
+    this.deliver(id, content, attachments, opts.retry);
+  }
+
+  /** Sends a message into the turn that is running. It waits below the turn until the
+   *  model reads it, and comes back as failed if the turn ends first. */
+  steer(text: string): void {
+    const clean = text.trim();
+    if (!clean) return;
+    const id = `pending-${this.msgSeq++}`;
+    this.state.addPending({ id, text: clean, content: [{ type: 'text', text: clean }], steer: true });
+    this.deliverSteer(id, clean);
+  }
+
+  private deliverSteer(id: string, text: string): void {
+    this.lastSteer = id;
+    if (this.socket?.steer(text, id)) return;
+    this.state.markPendingFailed(id, 'Not connected to the server - reconnecting. Retry once the status dot is green.');
   }
 
   private deliver(
     id: string,
     content: PromptContentBlock[],
     attachments?: MessageAttachment[],
+    retry = false,
   ): void {
     this.lastSent = id;
-    if (this.socket?.prompt(content, attachments)) return;
+    if (this.socket?.prompt(content, attachments, retry)) return;
     this.state.markPendingFailed(
       id,
       this.socket
@@ -321,12 +357,23 @@ export class SessionController {
   retrySend(id: string): void {
     const pending = this.state.pending.find((p) => p.id === id);
     if (!pending) return;
+    // A steer the turn did not read goes into the turn still running, or else as a prompt.
+    if (pending.steer && this.state.observability.turnStatus === 'running') {
+      this.state.markPendingSending(id);
+      this.deliverSteer(id, pending.text);
+      return;
+    }
+    if (pending.steer) {
+      this.state.dropPending(id);
+      this.send(pending.content);
+      return;
+    }
     this.state.markPendingSending(id);
     this.deliver(id, pending.content, pending.attachments);
   }
 
   retryTurn(text: string): void {
-    this.send([{ type: 'text', text }]);
+    this.send([{ type: 'text', text }], undefined, { retry: true });
   }
 
   cancel(): void {
@@ -337,6 +384,60 @@ export class SessionController {
   changeModel(modelId: string): void {
     this.socket?.setModel(modelId);
     this.state.setCurrentModel(modelId);
+    // A draft takes the new model's default effort. A chat's comes back from kiro.
+    if (!this.socket) this.state.setCurrentEffort(undefined);
+  }
+
+  changeEffort(effortLevel: string): void {
+    this.socket?.setEffort(effortLevel);
+    this.state.setCurrentEffort(effortLevel);
+  }
+
+  /** Opens a new chat holding this one's conversation up to the turn of a prompt. */
+  async branchFrom(messageId: string): Promise<void> {
+    const id = this.state.activeId;
+    if (!id) return;
+    try {
+      const detail = await this.api.branchChat(id, messageId);
+      this.refreshSessions();
+      const branchId = detail.summary.chatId;
+      this.handledRoute = branchId;
+      this.host?.navigate(pathForChat(branchId));
+      await this.openChat(branchId, detail);
+    } catch (err) {
+      this.cutFailed(id, "Couldn't branch the chat", err);
+    }
+  }
+
+  /** Cuts the chat back to before a prompt, then sends `text` in its place with the
+   *  prompt's attachments. Resolves false if the rewind was refused. */
+  async editPrompt(messageId: string, text: string, attachments?: MessageAttachment[]): Promise<boolean> {
+    const id = this.state.activeId;
+    if (!id) return false;
+    let detail: ChatDetail;
+    try {
+      detail = await this.api.rewindChat(id, messageId);
+    } catch (err) {
+      this.cutFailed(id, "Couldn't edit the message", err);
+      return false;
+    }
+    if (this.state.activeId !== id) return false;
+    this.state.loadDetail(detail);
+    this.socket?.reset(detail.head);
+    this.refreshSessions();
+    const content: PromptContentBlock[] = [];
+    if (attachments?.length) {
+      content.push({ type: 'text', text: ATTACHMENTS_PREFIX + attachments.map((a) => a.path).join(', ') + '\n' });
+    }
+    if (text.trim()) content.push({ type: 'text', text: text.trim() });
+    if (content.length > 0) this.send(content, attachments);
+    return true;
+  }
+
+  private cutFailed(id: string, title: string, err: unknown): void {
+    if (this.state.activeId !== id) return;
+    const detail = err instanceof Error ? err.message : 'The server rejected the request.';
+    this.state.setChatNotice({ title, fix: detail, detail });
   }
 
   changeAgent(modeId: string): void {
@@ -393,6 +494,14 @@ export class SessionController {
     this.state.renameChatRow(id, title);
     await this.api.renameChat(id, title).catch(() => {
       console.error('rename session failed');
+    });
+    this.refreshSessions();
+  }
+
+  async pinChat(id: string, pinned: boolean): Promise<void> {
+    this.state.pinChatRow(id, pinned);
+    await this.api.pinChat(id, pinned).catch(() => {
+      console.error('pin session failed');
     });
     this.refreshSessions();
   }

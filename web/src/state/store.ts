@@ -33,6 +33,8 @@ interface PendingMessage {
   content: PromptContentBlock[];
   status: 'sending' | 'failed';
   error?: string;
+  /** Sent into the running turn rather than as a prompt of its own. */
+  steer?: boolean;
 }
 
 export interface ChatNotice {
@@ -54,6 +56,9 @@ export interface CasperState {
   modes: AgentMode[];
   currentModeId?: string;
   currentModelId?: string;
+  /** The chat's effort level. Unset in a draft until one is picked, so the model's
+   *  default applies. */
+  currentEffort?: string;
   items: TranscriptItem[];
   /** Highest event seq already folded into items, so a replayed event can't
    *  append a second copy of the same message or tool call. */
@@ -85,6 +90,7 @@ export interface CasperState {
   applyEvent: (e: CasperEvent) => void;
   addPending: (pending: Omit<PendingMessage, 'status'>) => void;
   markPendingFailed: (id: string, error?: string) => void;
+  dropPending: (id: string) => void;
   dismissChatNotice: () => void;
   setChatNotice: (notice: ChatNotice) => void;
   setConnStatus: (status: ConnStatus) => void;
@@ -95,10 +101,12 @@ export interface CasperState {
   setSubagents: (subagents: SubagentSummary[]) => void;
   markCancelling: () => void;
   setCurrentModel: (modelId: string) => void;
+  setCurrentEffort: (effortLevel: string | undefined) => void;
   setCurrentAgent: (modeId: string) => void;
   setCompacting: (compacting: boolean) => void;
   markPendingSending: (id: string) => void;
   renameChatRow: (id: string, title: string) => void;
+  pinChatRow: (id: string, pinned: boolean) => void;
 }
 
 export const useStore = create<CasperState>((set, get) => ({
@@ -142,6 +150,7 @@ export const useStore = create<CasperState>((set, get) => ({
     ),
 
   setCurrentModel: (currentModelId) => set({ currentModelId }),
+  setCurrentEffort: (currentEffort) => set({ currentEffort }),
 
   setCurrentAgent: (modeId) =>
     set((s) => ({
@@ -174,6 +183,11 @@ export const useStore = create<CasperState>((set, get) => ({
       ),
     })),
 
+  pinChatRow: (id, pinned) =>
+    set((s) => ({
+      chats: s.chats.map((sess) => (sess.chatId === id ? { ...sess, pinned } : sess)),
+    })),
+
   bumpFsPath: (path) =>
     set((s) => ({ fsVersion: { ...s.fsVersion, [path]: (s.fsVersion[path] ?? 0) + 1 } })),
   setWatchedPaths: (watchedPaths) => set({ watchedPaths }),
@@ -192,6 +206,7 @@ export const useStore = create<CasperState>((set, get) => ({
       modes: d.modes,
       currentModeId: d.currentModeId,
       currentModelId: d.summary.modelId,
+      currentEffort: d.summary.effortLevel,
       observability: d.observability,
       items: d.transcript,
       appliedSeq: d.head,
@@ -230,6 +245,7 @@ export const useStore = create<CasperState>((set, get) => ({
       chatNotice: null,
       currentModeId: undefined,
       currentModelId: undefined,
+      currentEffort: undefined,
       previewPath: null,
       subagents: [],
     }),
@@ -239,6 +255,7 @@ export const useStore = create<CasperState>((set, get) => ({
 
   addPending: (pending) =>
     set((s) => ({ pending: [...s.pending, { ...pending, status: 'sending' }] })),
+  dropPending: (id) => set((s) => ({ pending: s.pending.filter((p) => p.id !== id) })),
   markPendingFailed: (id, error) =>
     set((s) => ({
       pending: s.pending.map((p) =>
@@ -263,7 +280,7 @@ export const useStore = create<CasperState>((set, get) => ({
           .join('');
         const text = stripAttachmentsLine(rawText);
         // Turns are serialized server-side, so this echoes the oldest pending send.
-        const sendingIdx = state.pending.findIndex((pm) => pm.status === 'sending');
+        const sendingIdx = state.pending.findIndex((pm) => pm.status === 'sending' && !pm.steer);
         const bumpedAt = new Date(e.ts).toISOString();
         const chats = bumpChatToTop(state.chats, e.chatId, bumpedAt);
         set({
@@ -305,11 +322,12 @@ export const useStore = create<CasperState>((set, get) => ({
 
       case 'turn_ended': {
         const committed = commitDraft(state, `s-${e.seq}`, e.ts);
+        const ended: TranscriptItem[] =
+          p.stopReason === 'cancelled'
+            ? [...settleTools(committed), { type: 'turn_interrupted', id: `int-${e.seq}`, timestamp: e.ts }]
+            : committed;
         set({
-          items:
-            p.stopReason === 'cancelled'
-              ? [...settleTools(committed), { type: 'turn_interrupted', id: `int-${e.seq}`, timestamp: e.ts }]
-              : committed,
+          items: p.stats ? [...ended, { type: 'turn_stats', id: `ts-${e.seq}`, ...p.stats }] : ended,
           chatNotice: null,
           streamingText: '',
           streamingThought: '',
@@ -345,9 +363,56 @@ export const useStore = create<CasperState>((set, get) => ({
             ...state.observability,
             contextUsagePercentage:
               p.params.contextUsagePercentage ?? state.observability.contextUsagePercentage,
+            contextBreakdown: p.params.contextBreakdown ?? state.observability.contextBreakdown,
+            sessionCredits: p.params.sessionCredits ?? state.observability.sessionCredits,
           },
         });
         break;
+
+      case 'settings_changed':
+        set({
+          currentModelId: p.modelId ?? state.currentModelId,
+          currentEffort: p.effortLevel ?? undefined,
+          chats: state.chats.map((c) =>
+            c.chatId === e.chatId
+              ? { ...c, modelId: p.modelId ?? c.modelId, effortLevel: p.effortLevel ?? undefined }
+              : c,
+          ),
+        });
+        break;
+
+      case 'steer_injected':
+        // Shown where the model read it, after what the turn had said so far.
+        set({
+          items: [
+            ...commitDraft(state, `s-${e.seq}`, e.ts),
+            { type: 'message', message: { id: `s-${e.seq}`, role: 'user', text: p.text, timestamp: e.ts, steer: true } },
+          ],
+          streamingText: '',
+          streamingThought: '',
+          pending: state.pending.filter((pm) => pm.id !== p.clientId),
+        });
+        break;
+
+      case 'steer_dropped':
+        if (p.clientId) state.markPendingFailed(p.clientId, 'The turn ended before Casper read this. Retry to send it.');
+        break;
+
+      case 'prompt_id': {
+        // Names the prompt of the running turn, which is the last user message.
+        const items = [...state.items];
+        for (let i = items.length - 1; i >= 0; i--) {
+          const it = items[i]!;
+          if (it.type === 'message' && it.message.role === 'user' && !it.message.steer) {
+            if (!it.message.messageId) {
+              items[i] = { ...it, message: { ...it.message, messageId: p.messageId } };
+              set({ items });
+            }
+            break;
+          }
+        }
+        break;
+      }
 
       case 'compaction': {
         const done = p.params.status.type !== 'started';

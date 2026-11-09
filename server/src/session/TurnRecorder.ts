@@ -44,6 +44,11 @@ const bounded = (items: TranscriptItem[]): TranscriptItem[] =>
       : it,
   );
 
+/** A message sent into a running turn, where the model read it. */
+export function steerMessage(text: string, seq: number, ts: number): TranscriptItem {
+  return { type: 'message', message: { id: `s-${seq}`, role: 'user', text, timestamp: ts, steer: true } };
+}
+
 /** Follows the turn in progress so that a turn which fails or is stopped can be stored. */
 export class TurnRecorder {
   private draft: TurnDraft | null = null;
@@ -63,6 +68,8 @@ export class TurnRecorder {
       );
     } else if (p.kind === 'session_update' && this.draft) {
       this.draft = foldSessionUpdate(this.draft, p.update as SessionUpdate, e.seq, e.ts);
+    } else if (p.kind === 'steer_injected' && this.draft) {
+      this.draft = { ...emptyDraft(), items: [...commitDraft(this.draft, `s-${e.seq}`, e.ts), steerMessage(p.text, e.seq, e.ts)] };
     }
   }
 

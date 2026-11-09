@@ -21,7 +21,7 @@ import { matchPath } from 'react-router';
 import { CHAT_ROUTE, DRAFT_PATH, pathForChat } from '../web/src/util/route.js';
 import { choiceCallOf, choiceOutcome } from '../web/src/util/choiceCall.js';
 import { upsertChat } from '../web/src/state/chats.js';
-import { composerPlaceholder } from '../web/src/util/composerPlaceholder.js';
+import { groupByDate } from '../web/src/util/chatGroups.js';
 import { splitWords, rehypeFadeWords } from '../web/src/util/rehypeFadeWords.js';
 import { widgetCallOf } from '../web/src/util/widgetCall.js';
 import { lazyImageProps } from '../web/src/util/lazyImage.js';
@@ -1262,37 +1262,32 @@ describe('session list', () => {
     const fresher = upsertChat(listed, row('b', 'test', '2026-01-02T10:00:00Z'));
     assert.equal(fresher[0]!.updatedAt, '2026-01-02T10:00:00Z');
   });
-});
 
-describe('composer placeholder', () => {
-  const base = {
-    live: true,
-    connStatus: 'connected' as const,
-    uploading: false,
-    cancelling: false,
-    compacting: false,
-    running: false,
-  };
-
-  it('invites a prompt when there is nothing else to say', () => {
-    assert.equal(composerPlaceholder(base), 'Ask Casper to build something…');
-  });
-
-  it('reports the connection only when there is one to report', () => {
-    // A draft passes live: true with a closed socket, because sending is what creates the
-    // session - it must not claim to be offline.
-    assert.equal(composerPlaceholder({ ...base, connStatus: 'closed' }), 'Ask Casper to build something…');
-    assert.equal(
-      composerPlaceholder({ ...base, live: false, connStatus: 'closed' }),
-      'Offline - reconnecting when possible',
+  it('groups chats by local day, in their order, without empty groups', () => {
+    const now = new Date(2026, 4, 20, 15, 0);
+    const at = (d: number, h = 12) => new Date(2026, 4, d, h).toISOString();
+    const groups = groupByDate(
+      [
+        row('a', 'this morning', at(20, 1)),
+        row('b', 'last night', at(19, 23)),
+        row('c', 'last week', at(14)),
+        row('d', 'this month', at(1)),
+        row('e', 'long ago', new Date(2025, 0, 1).toISOString()),
+        row('f', 'also today', at(20, 9)),
+      ],
+      now,
     );
-    assert.equal(composerPlaceholder({ ...base, live: false, connStatus: 'connecting' }), 'Connecting…');
-  });
-
-  it('prefers what is happening now over the invitation', () => {
-    assert.equal(composerPlaceholder({ ...base, running: true }), 'Casper is working…');
-    assert.equal(composerPlaceholder({ ...base, running: true, uploading: true }), 'Uploading…');
-    assert.equal(composerPlaceholder({ ...base, compacting: true }), 'Compacting conversation…');
+    assert.deepEqual(
+      groups.map((g) => [g.label, g.chats.map((c) => c.title)]),
+      [
+        ['Today', ['this morning', 'also today']],
+        ['Yesterday', ['last night']],
+        ['Previous 7 days', ['last week']],
+        ['Previous 30 days', ['this month']],
+        ['Older', ['long ago']],
+      ],
+    );
+    assert.deepEqual(groupByDate([row('x', 'x', at(20))], now).map((g) => g.label), ['Today']);
   });
 });
 
@@ -1428,6 +1423,9 @@ describe('session controller', () => {
       },
       renameChat: async (id, title) => {
         calls.push(`renameChat:${id}:${title}`);
+      },
+      pinChat: async (id, pinned) => {
+        calls.push(`pinChat:${id}:${pinned}`);
       },
       reloadChat: async (id) => {
         calls.push(`reloadChat:${id}`);
@@ -1855,6 +1853,17 @@ describe('session controller', () => {
 
     assert.equal(useStore.getState().chats[0]?.title, 'new name');
     assert.ok(rest.calls.includes('renameChat:s1:new name'));
+  });
+
+  it('a pin shows immediately and is persisted after', async () => {
+    useStore.setState({
+      chats: [{ chatId: 's1', title: 'a', pinned: false } as unknown as ChatSummary],
+    });
+    const { controller, rest } = build();
+    await controller.pinChat('s1', true);
+
+    assert.equal(useStore.getState().chats[0]?.pinned, true);
+    assert.ok(rest.calls.includes('pinChat:s1:true'));
   });
 
   it('control actions reach the socket and show optimistically', async () => {

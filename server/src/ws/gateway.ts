@@ -38,10 +38,13 @@ export interface GatewayChats {
     chatId: string,
     content: PromptContentBlock[],
     attachments?: MessageAttachment[],
+    opts?: { retry?: boolean },
   ): Promise<void>;
+  steer(chatId: string, text: string, clientId?: string): Promise<void>;
   cancel(chatId: string): void;
   setMode(chatId: string, modeId: string): Promise<void>;
   setModel(chatId: string, modelId: string): Promise<void>;
+  setEffort(chatId: string, effortLevel: string): Promise<void>;
   execCommand(chatId: string, command: string, args?: string): Promise<void>;
 }
 
@@ -126,13 +129,19 @@ export function handleConnection(
       case 'watch_paths':
         return watchers.sync(msg.paths);
       case 'prompt':
-        return ack('prompt', () => manager.runPrompt(chatId, msg.content, msg.attachments));
+        return ack('prompt', () => manager.runPrompt(chatId, msg.content, msg.attachments, { retry: msg.retry === true }));
+      case 'steer':
+        return ack('steer', () =>
+          manager.steer(chatId, String(msg.text ?? ''), typeof msg.clientId === 'string' ? msg.clientId : undefined),
+        );
       case 'cancel':
         return ack('cancel', () => manager.cancel(chatId));
       case 'set_mode':
         return ack('set_mode', () => manager.setMode(chatId, msg.modeId));
       case 'set_model':
         return ack('set_model', () => manager.setModel(chatId, msg.modelId));
+      case 'set_effort':
+        return ack('set_effort', () => manager.setEffort(chatId, msg.effortLevel));
       case 'exec_command':
         return ack('exec_command', () =>
           manager.execCommand(chatId, msg.command),

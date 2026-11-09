@@ -1,13 +1,21 @@
 import { Link } from 'react-router';
 import { pathForChat } from '../../util/route.js';
-import { useCallback, useEffect, useState } from 'react';
+import { groupByDate } from '../../util/chatGroups.js';
+import { useCallback, useState } from 'react';
 import type { ChatSummary } from '@casper/shared';
-import { LockIcon, MoreIcon, PlusIcon, SearchIcon, Spinner } from '../common/icons.js';
+import {
+  CalendarIcon,
+  ChevronIcon,
+  GearIcon,
+  MoreIcon,
+  PlusIcon,
+  SearchIcon,
+  Spinner,
+} from '../common/icons.js';
 import { PopoverMenu } from '../common/PopoverMenu.js';
 import { SearchModal } from '../sessions/SearchModal.js';
-import { DevicesModal } from '../sessions/DevicesModal.js';
+import { SettingsModal } from '../sessions/SettingsModal.js';
 import { ConfirmDialog } from '../common/ConfirmDialog.js';
-import { relTime } from '../../util/relTime.js';
 
 interface Props {
   sessions: ChatSummary[];
@@ -20,7 +28,27 @@ interface Props {
   onNew: () => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
+  onPin: (id: string, pinned: boolean) => void;
   onLock: () => void;
+}
+
+/** Whether to group by date is a choice for this browser, so it lives in localStorage. */
+const GROUPED_KEY = 'casper.groupChatsByDate';
+
+function loadGrouped(): boolean {
+  try {
+    return localStorage.getItem(GROUPED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveGrouped(on: boolean): void {
+  try {
+    localStorage.setItem(GROUPED_KEY, on ? '1' : '0');
+  } catch {
+    // storage is blocked; the choice lasts until the page reloads
+  }
 }
 
 /** Session list: left of the chat on desktop, the home screen on mobile. */
@@ -32,17 +60,22 @@ export function Sidebar({
   onNew,
   onDelete,
   onRename,
+  onPin,
   onLock,
 }: Props) {
   const [searchOpen, setSearchOpen] = useState(false);
-  const [devicesOpen, setDevicesOpen] = useState(false);
-  const [accountOpen, setAccountOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuId, setMenuId] = useState<string | null>(null);
   /** The row's ⋮ button, which the portaled menu measures itself against. */
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [grouped, setGrouped] = useState(loadGrouped);
+  /** Whether the list is scrolled down, which draws a line under the header. */
+  const [scrolled, setScrolled] = useState(false);
+  /** Labels of the sections the user folded away, for this page load. */
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
 
   // PopoverMenu owns its own dismissal, so there is no blanket document listener
   // here: one would race the menu items, closing the menu before a click landed.
@@ -51,175 +84,205 @@ export function Sidebar({
     setMenuAnchor(null);
   }, []);
 
-  useEffect(() => {
-    if (!accountOpen) return;
-    const close = () => setAccountOpen(false);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [accountOpen]);
-
   const commitRename = (id: string) => {
     const t = draft.trim();
     if (t) onRename(id, t);
     setRenamingId(null);
   };
 
+  const pinned = sessions.filter((s) => s.pinned);
+  const unpinned = sessions.filter((s) => !s.pinned);
+
+  const toggleGrouped = () => {
+    saveGrouped(!grouped);
+    setGrouped(!grouped);
+  };
+
+  const toggleCollapsed = (label: string) =>
+    setCollapsed((c) => {
+      const next = new Set(c);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+
+  const groupButton = (
+    <button
+      className={`iconbtn sidebar-section-btn sidebar-group-btn${grouped ? ' is-on' : ''}`}
+      aria-label="Group chats by date"
+      aria-pressed={grouped}
+      title={grouped ? 'Stop grouping by date' : 'Group by date'}
+      onClick={toggleGrouped}
+    >
+      <CalendarIcon size={15} />
+    </button>
+  );
+
+  const sectionHead = (label: string, action?: React.ReactNode, open?: boolean) => (
+    <div className="sidebar-section-head">
+      {open === undefined ? (
+        <span className="sidebar-section-title">{label}</span>
+      ) : (
+        <button className="sidebar-section-toggle" aria-expanded={open} onClick={() => toggleCollapsed(label)}>
+          <span className="sidebar-section-title">{label}</span>
+          <ChevronIcon size={12} className={`sidebar-section-chevron${open ? '' : ' is-closed'}`} />
+        </button>
+      )}
+      {action}
+    </div>
+  );
+
+  const section = (label: string, chats: ChatSummary[], action?: React.ReactNode) => {
+    const open = !collapsed.has(label);
+    return (
+      <section key={label} className="sidebar-section" aria-label={label}>
+        {sectionHead(label, action, open)}
+        {open && <div className="sidebar-list">{chats.map(renderRow)}</div>}
+      </section>
+    );
+  };
+
+  const renderRow = (s: ChatSummary) => (
+    <div
+      key={s.chatId}
+      className={`srow ${s.chatId === activeId ? 'is-active' : ''} ${
+        menuId === s.chatId ? 'is-menu-open' : ''
+      }`}
+    >
+      {renamingId === s.chatId ? (
+        <input
+          className="srow-rename"
+          autoFocus
+          // Start with the name selected, so typing replaces it.
+          onFocus={(e) => e.currentTarget.select()}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => commitRename(s.chatId)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitRename(s.chatId);
+            if (e.key === 'Escape') setRenamingId(null);
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <Link
+          className="srow-open"
+          to={pathForChat(s.chatId)}
+          onClick={(e) => {
+            // A modified click opens a new tab; don't mark this one loading.
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            onOpen(s.chatId);
+          }}
+        >
+          <span className="sb-icon">
+            {loadingId === s.chatId ? (
+              <Spinner size={12} className="srow-spinner" />
+            ) : (
+              <span className="srow-dot" />
+            )}
+          </span>
+          <span className="srow-title" title={s.title}>
+            {s.title}
+          </span>
+        </Link>
+      )}
+
+      <div className="srow-menu">
+        <button
+          className="iconbtn srow-menu-btn"
+          aria-label="Session actions"
+          aria-haspopup="menu"
+          aria-expanded={menuId === s.chatId}
+          onClick={(e) => {
+            e.stopPropagation();
+            const open = menuId === s.chatId;
+            setMenuAnchor(open ? null : e.currentTarget);
+            setMenuId(open ? null : s.chatId);
+          }}
+        >
+          <MoreIcon size={16} />
+        </button>
+        {menuId === s.chatId && (
+          <PopoverMenu anchor={menuAnchor} onClose={closeRowMenu}>
+            <button
+              className="menu-item"
+              onClick={() => {
+                closeRowMenu();
+                onPin(s.chatId, !s.pinned);
+              }}
+            >
+              {s.pinned ? 'Unpin' : 'Pin'}
+            </button>
+            <button
+              className="menu-item"
+              onClick={() => {
+                setDraft(s.title);
+                setRenamingId(s.chatId);
+                closeRowMenu();
+              }}
+            >
+              Rename
+            </button>
+            <button
+              className="menu-item menu-item-danger"
+              onClick={() => {
+                closeRowMenu();
+                setConfirmingId(s.chatId);
+              }}
+            >
+              Delete
+            </button>
+          </PopoverMenu>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <aside className="sidebar">
-      <header className="sidebar-head">
+      <header className={`sidebar-head${scrolled ? ' is-scrolled' : ''}`}>
         <span className="brand">
           <img className="brand-logo" src="/logo.svg" alt="" />
           <span className="wordmark">Casper</span>
         </span>
-        <div className="sidebar-actions">
-          <div className="account-menu">
-            <button
-              className="iconbtn iconbtn-lg"
-              aria-label="Account"
-              title="Account"
-              onClick={(e) => {
-                e.stopPropagation();
-                setAccountOpen((v) => !v);
-              }}
-            >
-              <LockIcon size={18} />
-            </button>
-            {accountOpen && (
-              <div className="menu-list" onClick={(e) => e.stopPropagation()}>
-                <button
-                  className="menu-item"
-                  onClick={() => {
-                    setAccountOpen(false);
-                    setDevicesOpen(true);
-                  }}
-                >
-                  Devices
-                </button>
-                <button
-                  className="menu-item"
-                  onClick={() => {
-                    setAccountOpen(false);
-                    onLock();
-                  }}
-                >
-                  Lock app
-                </button>
-              </div>
-            )}
-          </div>
-          <button
-            className="iconbtn iconbtn-lg"
-            aria-label="Search sessions"
-            onClick={() => setSearchOpen(true)}
-          >
-            <SearchIcon size={20} />
-          </button>
-          <button
-            className="iconbtn iconbtn-lg"
-            aria-label="New session"
-            title="New session"
-            onClick={onNew}
-          >
-            <PlusIcon size={20} />
-          </button>
-        </div>
       </header>
 
-      <div className="sidebar-list">
-        {sessions.length === 0 ? (
-          <p className="sidebar-empty">
-            No sessions yet. Start one and it keeps running while you're away.
-          </p>
-        ) : (
-          sessions.map((s) => (
-            <div
-              key={s.chatId}
-              className={`srow ${s.chatId === activeId ? 'is-active' : ''} ${
-                menuId === s.chatId ? 'is-menu-open' : ''
-              }`}
-            >
-              {renamingId === s.chatId ? (
-                <input
-                  className="srow-rename"
-                  autoFocus
-                  // Start with the name selected, so typing replaces it.
-                  onFocus={(e) => e.currentTarget.select()}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onBlur={() => commitRename(s.chatId)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitRename(s.chatId);
-                    if (e.key === 'Escape') setRenamingId(null);
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <Link
-                  className="srow-open"
-                  to={pathForChat(s.chatId)}
-                  onClick={(e) => {
-                    // A modified click opens a new tab; don't mark this one loading.
-                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-                    onOpen(s.chatId);
-                  }}
-                >
-                  <span className="srow-main">
-                    <span className="srow-title" title={s.title}>
-                      {s.title}
-                    </span>
-                    <span className="srow-sub">
-                      <span className="srow-agent">{s.agentId ?? 'vibe'}</span>
-                      <span className="srow-dot">·</span>
-                      {loadingId === s.chatId && (
-                        <Spinner size={11} className="srow-spinner" />
-                      )}
-                      <span className="srow-when">{relTime(s.updatedAt)}</span>
-                    </span>
-                  </span>
-                </Link>
-              )}
+      <div className="sidebar-scroll" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}>
+        <nav className="sidebar-nav" aria-label="Casper">
+          <button className="snav-item" onClick={onNew}>
+            <span className="sb-icon">
+              <PlusIcon size={18} />
+            </span>
+            New
+          </button>
+          <button className="snav-item" onClick={() => setSearchOpen(true)}>
+            <span className="sb-icon">
+              <SearchIcon size={17} />
+            </span>
+            Search
+          </button>
+          <button className="snav-item" onClick={() => setSettingsOpen(true)}>
+            <span className="sb-icon">
+              <GearIcon size={17} />
+            </span>
+            Settings
+          </button>
+        </nav>
 
-              <div className="srow-menu">
-                <button
-                  className="iconbtn srow-menu-btn"
-                  aria-label="Session actions"
-                  aria-haspopup="menu"
-                  aria-expanded={menuId === s.chatId}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const open = menuId === s.chatId;
-                    setMenuAnchor(open ? null : e.currentTarget);
-                    setMenuId(open ? null : s.chatId);
-                  }}
-                >
-                  <MoreIcon size={16} />
-                </button>
-                {menuId === s.chatId && (
-                  <PopoverMenu anchor={menuAnchor} onClose={closeRowMenu}>
-                    <button
-                      className="menu-item"
-                      onClick={() => {
-                        setDraft(s.title);
-                        setRenamingId(s.chatId);
-                        closeRowMenu();
-                      }}
-                    >
-                      Rename
-                    </button>
-                    <button
-                      className="menu-item menu-item-danger"
-                      onClick={() => {
-                        closeRowMenu();
-                        setConfirmingId(s.chatId);
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </PopoverMenu>
-                )}
-              </div>
+        {pinned.length > 0 && section('Pinned', pinned)}
+        {sessions.length === 0 ? (
+          <>
+            {sectionHead('Chats', groupButton)}
+            <div className="sidebar-list">
+              <p className="sidebar-empty">
+                No sessions yet. Start one and it keeps running while you're away.
+              </p>
             </div>
-          ))
+          </>
+        ) : grouped ? (
+          groupByDate(unpinned).map((g, i) => section(g.label, g.chats, i === 0 ? groupButton : undefined))
+        ) : (
+          unpinned.length > 0 && section('Chats', unpinned, groupButton)
         )}
       </div>
 
@@ -231,11 +294,11 @@ export function Sidebar({
         />
       )}
 
-      {devicesOpen && (
-        <DevicesModal
-          onClose={() => setDevicesOpen(false)}
-          onSelfRevoked={() => {
-            setDevicesOpen(false);
+      {settingsOpen && (
+        <SettingsModal
+          onClose={() => setSettingsOpen(false)}
+          onLock={() => {
+            setSettingsOpen(false);
             onLock();
           }}
         />

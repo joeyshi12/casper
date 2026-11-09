@@ -8,7 +8,6 @@ import type { ConnStatus } from '../../api/SessionSocket.js';
 import { PlusIcon, ArrowUpIcon, StopIcon, Spinner } from '../common/icons.js';
 import { AgentPicker, ModelPicker } from '../controls/Pickers.js';
 import { ContextRing } from '../observability/ContextRing.js';
-import { composerPlaceholder } from '../../util/composerPlaceholder.js';
 
 /** Image MIME types that can be inlined as ACP image content blocks. */
 const IMAGE_TYPES = new Set([
@@ -45,6 +44,7 @@ export function Composer({
   const compacting = useStore((s) => s.observability.compacting);
   const currentModeId = useStore((s) => s.currentModeId);
   const currentModelId = useStore((s) => s.currentModelId);
+  const currentEffort = useStore((s) => s.currentEffort);
   const running = turnStatus === 'running';
   const cancelling = turnStatus === 'cancelling';
   const live = draft || connStatus === 'connected';
@@ -118,8 +118,19 @@ export function Composer({
     return content;
   };
 
+  // While a turn runs, a typed message goes into that turn. Files wait for the next prompt.
+  const canSteer = running && live && !compacting && !!text.trim() && attachments.length === 0;
+
   const submit = async () => {
     const trimmed = text.trim();
+    if (canSteer) {
+      sessionController.steer(trimmed);
+      setText('');
+      requestAnimationFrame(() => {
+        if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      });
+      return;
+    }
     if (
       (!trimmed && attachments.length === 0) ||
       running ||
@@ -214,15 +225,6 @@ export function Composer({
     };
   }, []);
 
-  const placeholder = composerPlaceholder({
-    live,
-    connStatus,
-    uploading,
-    cancelling,
-    compacting,
-    running,
-  });
-
   const canSend =
     (text.trim() || attachments.length > 0) &&
     !running &&
@@ -265,7 +267,7 @@ export function Composer({
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          placeholder={placeholder}
+          placeholder="Write a message…"
           rows={1}
         />
         <div className="composer-actions">
@@ -281,8 +283,24 @@ export function Composer({
           <div className="composer-actions-right">
             <ContextRing />
             <AgentPicker value={currentModeId} onChange={(id) => sessionController.changeAgent(id)} />
-            <ModelPicker value={currentModelId} onChange={(id) => sessionController.changeModel(id)} />
-            {running ? (
+            <ModelPicker
+              value={currentModelId}
+              effort={currentEffort}
+              draft={draft}
+              onChange={(id) => sessionController.changeModel(id)}
+              onEffortChange={(level) => sessionController.changeEffort(level)}
+            />
+            {/* While a turn runs, the one button stops it, or sends typed text into it. */}
+            {canSteer ? (
+              <button
+                className="composer-btn composer-send"
+                onClick={submit}
+                title="Send to the running turn"
+                aria-label="Send to the running turn"
+              >
+                <ArrowUpIcon size={17} />
+              </button>
+            ) : running ? (
               <button
                 className="composer-btn composer-stop"
                 onClick={() => sessionController.cancel()}

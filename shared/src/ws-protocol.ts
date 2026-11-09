@@ -13,7 +13,7 @@ import type {
   SessionUpdate,
   StopReason,
 } from './acp.js';
-import type { MessageAttachment, SubagentSummary } from './rest-dto.js';
+import type { MessageAttachment, SubagentSummary, TurnStats } from './rest-dto.js';
 
 /** A streamed session/update (agent chunk, tool call, etc). */
 export interface SessionUpdateEvent {
@@ -49,6 +49,23 @@ export interface TurnStartedEvent {
 export interface TurnEndedEvent {
   kind: 'turn_ended';
   stopReason: StopReason;
+  /** What the turn took, when kiro reported it. */
+  stats?: TurnStats;
+}
+
+/** A message sent into the running turn reached the model. `clientId` is the sender's
+ *  own id for it, so its tab can drop the copy it showed while waiting. */
+export interface SteerInjectedEvent {
+  kind: 'steer_injected';
+  text: string;
+  clientId?: string;
+}
+
+/** A message sent into the running turn did not reach the model before the turn ended. */
+export interface SteerDroppedEvent {
+  kind: 'steer_dropped';
+  text: string;
+  clientId?: string;
 }
 
 export interface TurnErrorEvent {
@@ -62,8 +79,40 @@ export interface ProcessExitedEvent {
   signal: string | null;
 }
 
+/** kiro named the session. */
+export interface TitleChangedEvent {
+  kind: 'title_changed';
+  title: string;
+}
+
+/** kiro reported the session's model and effort, after either changed. `effortLevel` is
+ *  null for a model without effort levels. */
+export interface SettingsChangedEvent {
+  kind: 'settings_changed';
+  modelId?: string;
+  effortLevel: string | null;
+}
+
+/** kiro's id for the prompt the running turn started with. */
+export interface PromptIdEvent {
+  kind: 'prompt_id';
+  messageId: string;
+}
+
+/** The chat's history was cut (a rewind, or a failed turn removed before its retry), so
+ *  clients refetch it. */
+export interface HistoryReplacedEvent {
+  kind: 'history_replaced';
+}
+
 export type CasperEventPayload =
   | SessionUpdateEvent
+  | TitleChangedEvent
+  | SettingsChangedEvent
+  | PromptIdEvent
+  | HistoryReplacedEvent
+  | SteerInjectedEvent
+  | SteerDroppedEvent
   | MetadataEvent
   | CompactionEvent
   | SubagentsChangedEvent
@@ -83,6 +132,16 @@ export interface ClientPrompt {
   type: 'prompt';
   attachments?: MessageAttachment[];
   content: PromptContentBlock[];
+  /** Sent again after its turn failed. A failed turn kiro kept nothing of is first removed,
+   *  so the model does not read the prompt twice. */
+  retry?: boolean;
+}
+
+/** A message for the turn that is running. */
+export interface ClientSteer {
+  type: 'steer';
+  text: string;
+  clientId?: string;
 }
 
 export interface ClientCancel {
@@ -97,6 +156,11 @@ export interface ClientSetMode {
 export interface ClientSetModel {
   type: 'set_model';
   modelId: string;
+}
+
+export interface ClientSetEffort {
+  type: 'set_effort';
+  effortLevel: string;
 }
 
 export interface ClientExecCommand {
@@ -117,9 +181,11 @@ export interface ClientWatchPaths {
 
 export type ClientMessage =
   | ClientPrompt
+  | ClientSteer
   | ClientCancel
   | ClientSetMode
   | ClientSetModel
+  | ClientSetEffort
   | ClientExecCommand
   | ClientPing
   | ClientWatchPaths;
