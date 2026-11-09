@@ -3,6 +3,7 @@
 import { WebSocket } from 'ws';
 import type {
   CasperEvent,
+  ChatUsageResponse,
   ModelsResponse,
   ServerMessage,
   ChatDetail,
@@ -61,13 +62,13 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
 
 /** Collect events from a WS connection until `predicate` is satisfied or timeout. */
 function collect(
-  sessionId: string,
+  chatId: string,
   cursor: number,
   predicate: (events: CasperEvent[]) => boolean,
   timeoutMs = 60_000,
 ): Promise<{ events: CasperEvent[]; sawResync: boolean; ws: WebSocket }> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`${WSBASE}/ws?sessionId=${sessionId}&cursor=${cursor}`, {
+    const ws = new WebSocket(`${WSBASE}/ws?chatId=${chatId}&cursor=${cursor}`, {
       headers: cookie ? { cookie } : {},
     });
     const events: CasperEvent[] = [];
@@ -100,7 +101,8 @@ async function main() {
   await app.listen({ host: '127.0.0.1', port: PORT });
   console.log(`server up on ${BASE}\n`);
 
-  let createdSid: string | null = null;
+  let createdChatId: string | null = null;
+  let createdSid: string | undefined;
   try {
     await login();
 
@@ -111,14 +113,15 @@ async function main() {
     const detail = await api<ChatDetail>('POST', '/api/chats', {
       modelId: 'claude-haiku-4.5',
     });
-    const sid = detail.summary.sessionId;
-    createdSid = sid;
-    assert(typeof sid === 'string', `created session ${sid}`);
+    const chatId = detail.summary.chatId;
+    createdChatId = chatId;
+    createdSid = detail.summary.sessionId;
+    assert(typeof createdSid === 'string', `created chat ${chatId} on session ${createdSid}`);
     assert(detail.modes.length > 0, `session exposes ${detail.modes.length} agent modes`);
 
     const hasTurnEnd = (evs: CasperEvent[]) =>
       evs.some((e) => e.payload.kind === 'turn_ended');
-    const ws1 = new WebSocket(`${WSBASE}/ws?sessionId=${sid}&cursor=0`, {
+    const ws1 = new WebSocket(`${WSBASE}/ws?chatId=${chatId}&cursor=0`, {
       headers: cookie ? { cookie } : {},
     });
     await new Promise<void>((r, j) => {
@@ -144,7 +147,7 @@ async function main() {
     });
     console.log(`   disconnected mid-turn at cursor=${midCursor}`);
 
-    const { events, ws: ws2 } = await collect(sid, midCursor, hasTurnEnd);
+    const { events, ws: ws2 } = await collect(chatId, midCursor, hasTurnEnd);
     ws2.close();
     const turnEnded = events.find((e) => e.payload.kind === 'turn_ended');
     assert(turnEnded, 'reconnect replayed the missed turn_ended event');
@@ -153,11 +156,9 @@ async function main() {
     assert(monotonic, 'replayed events are strictly increasing (no dupes/out-of-order)');
     assert(seqs.every((s) => s > midCursor), 'replayed events are all after the stale cursor');
 
-    const after = await api<ChatDetail>('GET', `/api/chats/${sid}`);
-    assert(
-      after.observability.creditsSpent > 0,
-      `observability shows credits spent: ${after.observability.creditsSpent.toFixed(4)}`,
-    );
+    const after = await api<ChatDetail>('GET', `/api/chats/${chatId}`);
+    const { credits } = await api<ChatUsageResponse>('GET', `/api/chats/${chatId}/usage`);
+    assert(credits !== undefined && credits > 0, `the chat has used credits: ${credits?.toFixed(4)}`);
     assert(
       Number.isFinite(after.observability.contextUsagePercentage) &&
         after.observability.contextUsagePercentage >= 0 &&
@@ -169,12 +170,12 @@ async function main() {
     );
     assert(userMsg, 'user prompt is present in the re-fetched transcript');
 
-    await api('POST', `/api/chats/${sid}/model`, { modelId: 'auto' });
+    await api('POST', `/api/chats/${chatId}/model`, { modelId: 'auto' });
     console.log('✅ set_model round-trip ok');
 
     // Compaction: exec_command 'compact' triggers kiro's compaction, which emits
     // compaction/status started -> completed.
-    const wsC = new WebSocket(`${WSBASE}/ws?sessionId=${sid}&cursor=0`, {
+    const wsC = new WebSocket(`${WSBASE}/ws?chatId=${chatId}&cursor=0`, {
       headers: cookie ? { cookie } : {},
     });
     const compactionEvents: CasperEvent[] = [];
@@ -202,7 +203,7 @@ async function main() {
     );
     assert(started, 'compaction emitted a started status');
     assert(compactionEvents.length >= 2, 'compaction emitted started -> completed');
-    const afterCompact = await api<ChatDetail>('GET', `/api/chats/${sid}`);
+    const afterCompact = await api<ChatDetail>('GET', `/api/chats/${chatId}`);
     assert(
       afterCompact.observability.compacting === false,
       'compacting flag is cleared after completion',
@@ -217,7 +218,7 @@ async function main() {
     console.log('\n🎉 Bridge E2E passed.');
   } finally {
     // Clean up the throwaway session (memory + kiro files).
-    if (createdSid) await api('DELETE', `/api/chats/${createdSid}`).catch(() => {});
+    if (createdChatId) await api('DELETE', `/api/chats/${createdChatId}`).catch(() => {});
     manager.disposeAll();
     await app.close();
     // kiro's wrapped chat process flushes its session file on shutdown, which
