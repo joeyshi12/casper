@@ -30,9 +30,17 @@ const asObj = (v: unknown): Record<string, unknown> | null =>
   v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
 
-function extractImagePaths(input: unknown): string[] {
-  const obj = asObj(input);
-  if (!obj || !Array.isArray(obj.operations)) return [];
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+
+/** The images a read showed the model: kiro 2.x's `Image` operations, or the one file a
+ *  kiro V3 `read_file` names, when that file is an image. */
+function extractImagePaths(tool: ToolCallView): string[] {
+  const obj = asObj(tool.input);
+  if (!obj) return [];
+  if (!Array.isArray(obj.operations)) {
+    const path = str(obj.path);
+    return path && IMAGE_FILE.test(path) && classifyTool(tool) === 'read' ? [path] : [];
+  }
   const paths: string[] = [];
   for (const op of obj.operations) {
     const o = asObj(op);
@@ -77,7 +85,7 @@ function useExistingImages(paths: string[]): string[] | null {
 }
 
 function useToolContent(tool: ToolCallView): { images: string[]; body: ReactNode; hidden: boolean } {
-  const paths = extractImagePaths(tool.input);
+  const paths = extractImagePaths(tool);
   const existing = useExistingImages(paths);
   const images = existing ?? paths;
   const body = renderBody(tool);
@@ -445,8 +453,10 @@ function renderRead(tool: ToolCallView): ReactNode {
   const inp = asObj(tool.input);
   const ops = inp && Array.isArray(inp.operations) ? inp.operations : [];
   const text = outputText(toolBlocks(tool));
+  // kiro V3 answers an image read with a few lines naming its format, which the image replaces.
+  if (!ops.length && extractImagePaths(tool).length > 0) return null;
   if (!text.trim()) {
-    if (extractImagePaths(tool.input).length > 0) return null;
+    if (extractImagePaths(tool).length > 0) return null;
     return renderGeneric(tool);
   }
   const textOp = ops.map(asObj).find((o) => o && o.mode !== 'Image');

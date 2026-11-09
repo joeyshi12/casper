@@ -211,6 +211,39 @@ describe('image read tool calls (rendered in a DOM)', () => {
     assert.ok(host.querySelector('.toolcall-image'), 'opening shows the image');
   });
 
+  it("shows the image a kiro V3 read_file names, in place of kiro's text about it", async () => {
+    freshPath(200);
+    render({
+      id: 'i3',
+      title: 'Read sidebar.png',
+      name: 'read',
+      kind: 'read',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: `Image: ${imagePath}\nFormat: png` } }],
+      input: { path: imagePath },
+    } as unknown as ToolCallView);
+    await flush();
+    act(() => (host.querySelector('.toolline') as HTMLElement).click());
+    assert.equal(host.querySelector('.toolcall-image')?.getAttribute('src'), `/api/fs/file?path=${encodeURIComponent(imagePath)}`);
+    assert.equal(host.textContent?.includes('Format: png'), false);
+  });
+
+  it('shows a V3 read of a text file as text', async () => {
+    render({
+      id: 'i4',
+      title: 'Read notes.md',
+      name: 'read',
+      kind: 'read',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: 'file body\n' } }],
+      input: { path: '/work/proj/notes.md' },
+    } as unknown as ToolCallView);
+    await flush();
+    act(() => (host.querySelector('.toolline') as HTMLElement).click());
+    assert.equal(host.querySelector('.toolcall-image'), null);
+    assert.match(host.textContent ?? '', /file body/);
+  });
+
   it('is not rendered when the file no longer exists', async () => {
     freshPath(404, 'application/json');
     render(imageRead());

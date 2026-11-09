@@ -1984,17 +1984,11 @@
 }
 .toolcall-body {
   padding: 6px 0 10px;
+}
+/* Each block scrolls inside its own box, so the scrollbar stays within the border. */
+.toolcall-body .thought-text {
   max-height: 460px;
   overflow-y: auto;
-}
-.toolcall-body .toolcode,
-.toolcall-body .diff-body,
-.toolcall-body .grep,
-.toolcall-body .toolcall-doc,
-.toolcall-body .todo,
-.toolcall-body .websearch {
-  max-height: none;
-  overflow-y: visible;
 }
 .toolcall-body .toolcode {
   margin-top: 4px;
