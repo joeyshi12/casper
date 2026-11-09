@@ -14,7 +14,7 @@ Kiro task and it keeps running server-side; on reconnect the client replays
 exactly what it missed.
 
 <p align="center">
-<img src="https://raw.githubusercontent.com/joeyshi12/casper/main/assets/demo.gif" alt="Casper running a task: tool calls grouped into one line, then two subagents reviewing the change" width="100%"/>
+<img src="https://raw.githubusercontent.com/joeyshi12/casper/main/assets/demo.webp" alt="Casper on a new chat: picking the effort, a task whose tool calls fold into one line, two subagents reviewing the change, and pinning the chat" width="100%"/>
 </p>
 
 ## Features
