@@ -20,7 +20,7 @@
   background: var(--n0);
   overflow: hidden;
   /* visibility must stay last: a step function, it must flip only at the end of close. */
-  transition: width 0.2s ease, opacity 0.2s ease, border-color 0.2s ease, visibility 0.2s;
+  transition: width 0.15s ease, opacity 0.15s ease, border-color 0.15s ease, visibility 0.15s;
 }
 
 .chatpane {
@@ -51,7 +51,7 @@
     left: 0;
     width: min(86vw, 320px);
     box-shadow: 0 0 40px rgb(0 0 0 / 0.5);
-    transition: transform 0.2s ease, visibility 0.2s;
+    transition: transform 0.15s ease, visibility 0.15s;
   }
   .layout:not(.nav-open) .sidebar {
     width: min(86vw, 320px);
@@ -1986,7 +1986,7 @@
 .collapse {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 0.22s ease;
+  transition: grid-template-rows 0.16s ease;
 }
 .collapse.is-open {
   grid-template-rows: 1fr;
@@ -2713,7 +2713,7 @@ a.websearch-row:hover {
   display: flex;
   flex-direction: column;
   gap: 11px;
-  animation: sheet-up 0.24s ease;
+  animation: sheet-up 0.18s ease;
 }
 @media (min-width: 560px) {
   .sheet-backdrop {
@@ -2838,7 +2838,7 @@ a.websearch-row:hover {
   border-left: 1px solid transparent;
   overflow: hidden;
   background: var(--n-abyss);
-  transition: width 0.2s ease, opacity 0.2s ease, border-color 0.2s ease;
+  transition: width 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
   opacity: 0;
 }
 .ftree-aside.is-open {
@@ -2858,7 +2858,7 @@ a.websearch-row:hover {
     z-index: 30;
     border-left: 1px solid transparent;
     box-shadow: none;
-    transition: width 0.25s ease, opacity 0.2s ease, box-shadow 0.25s ease, border-color 0.2s ease;
+    transition: width 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
   }
   .ftree-aside.is-open {
     width: 85%;

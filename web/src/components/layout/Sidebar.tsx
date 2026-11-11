@@ -25,6 +25,8 @@ interface Props {
   loadingId: string | null;
   /** Fired on a plain left click, just before the router navigates. */
   onOpen: (id: string) => void;
+  /** The pointer or focus reached a row, so its chat is likely to be opened next. */
+  onPrefetch: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
@@ -36,6 +38,10 @@ interface Props {
 const GROUPED_KEY = 'casper.groupChatsByDate';
 
 const SCROLLBAR_IDLE_MS = 1000;
+
+/** How long the pointer rests on a row before its chat is prefetched, so moving the
+ *  pointer across the list does not fetch every chat it passes. */
+const PREFETCH_HOVER_MS = 80;
 
 function loadGrouped(): boolean {
   try {
@@ -59,6 +65,7 @@ export function Sidebar({
   activeId,
   loadingId,
   onOpen,
+  onPrefetch,
   onNew,
   onDelete,
   onRename,
@@ -89,12 +96,22 @@ export function Sidebar({
   // Shows the scrollbar while the list scrolls. The class is set on the element, so
   // scrolling does not re-render the sidebar.
   const scrollIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
       if (scrollIdleTimer.current) clearTimeout(scrollIdleTimer.current);
+      if (hoverTimer.current) clearTimeout(hoverTimer.current);
     },
     [],
   );
+  const cancelHoverPrefetch = () => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+  };
+  const hoverPrefetch = (id: string) => {
+    cancelHoverPrefetch();
+    hoverTimer.current = setTimeout(() => onPrefetch(id), PREFETCH_HOVER_MS);
+  };
   const onListScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     setScrolled(el.scrollTop > 0);
@@ -187,6 +204,12 @@ export function Sidebar({
         <Link
           className="srow-open"
           to={pathForChat(s.chatId)}
+          onPointerEnter={(e) => {
+            if (e.pointerType === 'mouse') hoverPrefetch(s.chatId);
+          }}
+          onPointerLeave={cancelHoverPrefetch}
+          onPointerDown={() => onPrefetch(s.chatId)}
+          onFocus={() => onPrefetch(s.chatId)}
           onClick={(e) => {
             // A modified click opens a new tab; don't mark this one loading.
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

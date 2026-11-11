@@ -1086,6 +1086,117 @@ describe('socket watchdog: a connect that never resolves', () => {
   });
 });
 
+describe('socket events are applied once per frame', () => {
+  class OpenWs {
+    static readonly CONNECTING = READY.CONNECTING;
+    static readonly OPEN = READY.OPEN;
+    static readonly CLOSING = READY.CLOSING;
+    static readonly CLOSED = READY.CLOSED;
+    static last: OpenWs | null = null;
+    readyState = READY.OPEN;
+    onopen: (() => void) | null = null;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onclose: ((e: { code: number }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor() {
+      OpenWs.last = this;
+    }
+    close() {
+      this.readyState = READY.CLOSED;
+    }
+    send() {}
+    receive(msg: unknown) {
+      this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+  }
+
+  const event = (seq: number) => ({
+    type: 'event',
+    event: { seq, chatId: 's1', ts: 0, payload: { kind: 'metadata', params: {} } },
+  });
+
+  function harness(run: (log: string[], frame: () => void) => void) {
+    const g = globalThis as Record<string, unknown>;
+    const saved = {
+      window: g.window,
+      document: g.document,
+      location: g.location,
+      WebSocket: g.WebSocket,
+      requestAnimationFrame: g.requestAnimationFrame,
+      cancelAnimationFrame: g.cancelAnimationFrame,
+    };
+    let frames: (() => void)[] = [];
+    g.window = {
+      addEventListener() {},
+      removeEventListener() {},
+      setInterval: () => 0,
+      clearInterval() {},
+      setTimeout: () => 0,
+      clearTimeout() {},
+    };
+    g.document = { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' };
+    g.location = { protocol: 'http:', host: 'localhost:4319' };
+    g.WebSocket = OpenWs;
+    g.requestAnimationFrame = (fn: () => void) => frames.push(fn);
+    g.cancelAnimationFrame = (id: number) => {
+      frames[id - 1] = () => {};
+    };
+    try {
+      run([], () => {
+        const due = frames;
+        frames = [];
+        due.forEach((fn) => fn());
+      });
+    } finally {
+      Object.assign(g, saved);
+    }
+  }
+
+  const recording = (log: string[]) => ({
+    onEvent: (e: { seq: number }) => log.push(`event:${e.seq}`),
+    onStatus: (s: string) => log.push(`status:${s}`),
+    onResync() {},
+    onAck: (action: string) => log.push(`ack:${action}`),
+  });
+
+  it('holds events until the next frame, then applies them in order', () => {
+    harness((log, frame) => {
+      const sock = new SessionSocket('s1', recording(log) as unknown as SessionSocketHandlers, 0);
+      sock.connect();
+      log.length = 0;
+      OpenWs.last!.receive(event(1));
+      OpenWs.last!.receive(event(2));
+      assert.deepEqual(log, [], 'nothing is applied before the frame');
+      frame();
+      assert.deepEqual(log, ['event:1', 'event:2']);
+    });
+  });
+
+  it('applies held events before a message that follows them', () => {
+    harness((log) => {
+      const sock = new SessionSocket('s1', recording(log) as unknown as SessionSocketHandlers, 0);
+      sock.connect();
+      log.length = 0;
+      OpenWs.last!.receive(event(1));
+      OpenWs.last!.receive({ type: 'ack', action: 'prompt', ok: false });
+      OpenWs.last!.receive({ type: 'replay_complete' });
+      assert.deepEqual(log, ['event:1', 'ack:prompt', 'status:connected']);
+    });
+  });
+
+  it('drops held events when the chat is closed', () => {
+    harness((log, frame) => {
+      const sock = new SessionSocket('s1', recording(log) as unknown as SessionSocketHandlers, 0);
+      sock.connect();
+      log.length = 0;
+      OpenWs.last!.receive(event(1));
+      sock.close();
+      frame();
+      assert.deepEqual(log, [], 'an event of the closed chat must not reach the next one');
+    });
+  });
+});
+
 describe('markdown HTML sanitising', () => {
   interface El {
     type: 'element';
@@ -1497,6 +1608,57 @@ describe('session controller', () => {
 
     assert.deepEqual(rest.calls, [], 'an adopted detail must not be refetched');
     assert.deepEqual(socket.calls, ['create:s9@4', 'connect']);
+  });
+
+  it('opens a prefetched chat without fetching it again', async () => {
+    const { controller, socket, rest } = build({
+      api: { getChat: async (id) => (rest.calls.push(`getChat:${id}`), detailFor(id, 7)) },
+    });
+    controller.prefetchChat('s2');
+    controller.prefetchChat('s2');
+    await controller.openChat('s2');
+
+    assert.deepEqual(rest.calls, ['getChat:s2'], 'one fetch, made by the prefetch');
+    assert.deepEqual(socket.calls, ['create:s2@7', 'connect'], 'connects at the prefetched head');
+  });
+
+  it('fetches again when the prefetch was for another chat or failed', async () => {
+    let failOnce = false;
+    const { controller, rest } = build({
+      api: {
+        getChat: async (id) => {
+          rest.calls.push(`getChat:${id}`);
+          if (id === 's4' && failOnce) {
+            failOnce = false;
+            throw new Error('network');
+          }
+          return detailFor(id);
+        },
+      },
+    });
+    controller.prefetchChat('s3');
+    await controller.openChat('s4');
+    assert.equal(useStore.getState().activeId, 's4');
+
+    controller.prefetchChat('s5');
+    await controller.openChat('s5');
+    useStore.getState().clearActive();
+    failOnce = true;
+    controller.prefetchChat('s4');
+    await controller.openChat('s4');
+    assert.equal(useStore.getState().activeId, 's4', 'a failed prefetch is retried, not shown as a failure');
+    assert.deepEqual(rest.calls, ['getChat:s3', 'getChat:s4', 'getChat:s5', 'getChat:s4', 'getChat:s4']);
+  });
+
+  it('does not use a prefetch made before the chat was renamed', async () => {
+    const { controller, rest } = build();
+    controller.prefetchChat('s6');
+    await controller.renameChat('s6', 'new name');
+    await controller.openChat('s6');
+    assert.deepEqual(
+      rest.calls.filter((c) => c.startsWith('getChat')),
+      ['getChat:s6', 'getChat:s6'],
+    );
   });
 
   // Switching away mid-fetch must not let the abandoned session's detail land and

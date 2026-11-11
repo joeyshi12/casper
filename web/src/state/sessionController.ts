@@ -74,6 +74,9 @@ const ACTION_LABEL: Record<string, string> = {
   exec_command: 'Command',
 };
 
+/** How long a prefetched chat detail is used for. Past this it is fetched again. */
+const PREFETCH_TTL_MS = 10_000;
+
 export class SessionController {
   private readonly api: SessionApi;
   private readonly createSocket: CreateSocket;
@@ -97,6 +100,8 @@ export class SessionController {
   private lastCreateOpts: CreateOpts | null = null;
   private listSeq = 0;
   private listTimer: ReturnType<typeof setTimeout> | null = null;
+  /** A chat's detail fetched when the pointer reached its row, before the click. */
+  private prefetched: { id: string; at: number; detail: Promise<ChatDetail> } | null = null;
 
   constructor(opts: ControllerOptions = {}) {
     this.api = opts.api ?? api;
@@ -177,7 +182,11 @@ export class SessionController {
       detail = adopted;
     } else {
       try {
-        detail = await this.api.getChat(id);
+        const early = this.takePrefetch(id);
+        // A failed prefetch is tried again rather than shown as a failed open.
+        detail = early
+          ? await early.catch(() => this.api.getChat(id))
+          : await this.api.getChat(id);
       } catch (err) {
         if (this.openTarget !== id) return;
         this.state.setConnStatus('closed');
@@ -192,6 +201,28 @@ export class SessionController {
 
     this.socket = this.createSocket(id, this.socketHandlers(id), detail.head);
     this.socket.connect();
+  }
+
+  /** Starts fetching a chat's detail so a click on it opens sooner. A detail a few
+   *  seconds old is still correct: the socket replays every event after its head. */
+  prefetchChat(id: string): void {
+    if (id === this.state.activeId || id === this.openTarget) return;
+    const p = this.prefetched;
+    if (p && p.id === id && Date.now() - p.at < PREFETCH_TTL_MS) return;
+    const detail = this.api.getChat(id);
+    detail.catch(() => {});
+    this.prefetched = { id, at: Date.now(), detail };
+  }
+
+  private takePrefetch(id: string): Promise<ChatDetail> | null {
+    const p = this.prefetched;
+    this.prefetched = null;
+    return p && p.id === id && Date.now() - p.at < PREFETCH_TTL_MS ? p.detail : null;
+  }
+
+  /** Forgets a prefetched detail that a change to the chat has made out of date. */
+  private dropPrefetch(id: string): void {
+    if (this.prefetched?.id === id) this.prefetched = null;
   }
 
   private socketHandlers(id: string): SessionSocketHandlers {
@@ -479,6 +510,7 @@ export class SessionController {
   }
 
   async deleteChat(id: string): Promise<void> {
+    this.dropPrefetch(id);
     try {
       await this.api.deleteChat(id);
     } catch {
@@ -491,6 +523,7 @@ export class SessionController {
   }
 
   async renameChat(id: string, title: string): Promise<void> {
+    this.dropPrefetch(id);
     this.state.renameChatRow(id, title);
     await this.api.renameChat(id, title).catch(() => {
       console.error('rename session failed');
@@ -499,6 +532,7 @@ export class SessionController {
   }
 
   async pinChat(id: string, pinned: boolean): Promise<void> {
+    this.dropPrefetch(id);
     this.state.pinChatRow(id, pinned);
     await this.api.pinChat(id, pinned).catch(() => {
       console.error('pin session failed');

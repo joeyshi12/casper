@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { MessageAttachment, TranscriptItem, TranscriptMessage } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 import { promptsAccepted, sessionController } from '../../state/sessionController.js';
@@ -24,8 +24,9 @@ import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { ToolCallCard, ToolCallGroupCard, ThoughtLineCard, type RunRowInput } from './ToolCallCard.js';
 
 /* The messages, grouped tool calls and thinking of one conversation, shared by the chat
-   and by a subagent's row. */
-export function TranscriptEntries({
+   and by a subagent's row. Memoized so that a streamed chunk of the reply, which changes
+   only the text below these entries, does not re-render all of them. */
+export const TranscriptEntries = memo(function TranscriptEntries({
   entries,
   lastActive,
   streamingThought = '',
@@ -143,7 +144,7 @@ export function TranscriptEntries({
       })}
     </>
   );
-}
+});
 
 /**
  * A message the user sent. One kiro has saved can be edited, which cuts the chat back to

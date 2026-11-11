@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../state/store.js';
 import { sessionController } from '../../state/sessionController.js';
 import { api } from '../../api/rest.js';
@@ -61,7 +61,8 @@ export const Transcript = memo(function Transcript() {
       ),
     };
   }
-  const arrivedLive = (id: string) => !hydrated.current.ids.has(id);
+  // Stable, so TranscriptEntries can skip re-rendering. It reads the ref when called.
+  const arrivedLive = useCallback((id: string) => !hydrated.current.ids.has(id), []);
 
   const grouped = useMemo(() => groupToolCalls(items), [items]);
 
