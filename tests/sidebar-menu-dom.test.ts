@@ -64,6 +64,7 @@ beforeEach(() => {
           activeId: 's2',
           loadingId: null,
           onOpen: () => {},
+          onPrefetch: (id: string) => calls.push(`prefetch:${id}`),
           onNew: () => calls.push('new'),
           onDelete: () => {},
           onRename: () => {},
@@ -164,6 +165,28 @@ describe('sidebar sections (rendered in a DOM)', () => {
       await new Promise((r) => setTimeout(r, 50));
     }
     assert.ok(!scroller.classList.contains('is-scrolling'), 'hidden again after the list is still');
+  });
+
+  it('prefetches a chat when a row is pressed or focused, and after a short hover', async () => {
+    const link = rows()[1]!.querySelector('.srow-open') as HTMLElement;
+    const pointer = (type: string, pointerType: string) =>
+      act(() => {
+        link.dispatchEvent(new w.PointerEvent(type, { bubbles: true, pointerType }));
+      });
+    pointer('pointerdown', 'touch');
+    act(() => link.focus());
+    assert.deepEqual(calls, ['prefetch:s2', 'prefetch:s2']);
+
+    calls.length = 0;
+    pointer('pointerover', 'mouse');
+    pointer('pointerout', 'mouse');
+    await new Promise((r) => setTimeout(r, 150));
+    assert.deepEqual(calls, [], 'a pointer passing over the row fetches nothing');
+
+    pointer('pointerover', 'mouse');
+    const deadline = Date.now() + 2000;
+    while (calls.length === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(calls, ['prefetch:s2']);
   });
 
   it('shows pinned chats in their own section above the rest', () => {

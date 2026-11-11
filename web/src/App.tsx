@@ -105,6 +105,7 @@ function Shell({ onLock }: { onLock: () => void }) {
           sessionController.markLoading(id);
           closeNavOnMobile();
         }}
+        onPrefetch={(id) => sessionController.prefetchChat(id)}
         onNew={() => {
           sessionController.startDraft();
           closeNavOnMobile();

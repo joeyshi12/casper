@@ -1499,6 +1499,57 @@ describe('session controller', () => {
     assert.deepEqual(socket.calls, ['create:s9@4', 'connect']);
   });
 
+  it('opens a prefetched chat without fetching it again', async () => {
+    const { controller, socket, rest } = build({
+      api: { getChat: async (id) => (rest.calls.push(`getChat:${id}`), detailFor(id, 7)) },
+    });
+    controller.prefetchChat('s2');
+    controller.prefetchChat('s2');
+    await controller.openChat('s2');
+
+    assert.deepEqual(rest.calls, ['getChat:s2'], 'one fetch, made by the prefetch');
+    assert.deepEqual(socket.calls, ['create:s2@7', 'connect'], 'connects at the prefetched head');
+  });
+
+  it('fetches again when the prefetch was for another chat or failed', async () => {
+    let failOnce = false;
+    const { controller, rest } = build({
+      api: {
+        getChat: async (id) => {
+          rest.calls.push(`getChat:${id}`);
+          if (id === 's4' && failOnce) {
+            failOnce = false;
+            throw new Error('network');
+          }
+          return detailFor(id);
+        },
+      },
+    });
+    controller.prefetchChat('s3');
+    await controller.openChat('s4');
+    assert.equal(useStore.getState().activeId, 's4');
+
+    controller.prefetchChat('s5');
+    await controller.openChat('s5');
+    useStore.getState().clearActive();
+    failOnce = true;
+    controller.prefetchChat('s4');
+    await controller.openChat('s4');
+    assert.equal(useStore.getState().activeId, 's4', 'a failed prefetch is retried, not shown as a failure');
+    assert.deepEqual(rest.calls, ['getChat:s3', 'getChat:s4', 'getChat:s5', 'getChat:s4', 'getChat:s4']);
+  });
+
+  it('does not use a prefetch made before the chat was renamed', async () => {
+    const { controller, rest } = build();
+    controller.prefetchChat('s6');
+    await controller.renameChat('s6', 'new name');
+    await controller.openChat('s6');
+    assert.deepEqual(
+      rest.calls.filter((c) => c.startsWith('getChat')),
+      ['getChat:s6', 'getChat:s6'],
+    );
+  });
+
   // Switching away mid-fetch must not let the abandoned session's detail land and
   // overwrite the one the user moved to.
   it('drops a detail that arrives after the user moved on', async () => {
