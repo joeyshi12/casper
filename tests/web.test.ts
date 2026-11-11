@@ -1086,6 +1086,117 @@ describe('socket watchdog: a connect that never resolves', () => {
   });
 });
 
+describe('socket events are applied once per frame', () => {
+  class OpenWs {
+    static readonly CONNECTING = READY.CONNECTING;
+    static readonly OPEN = READY.OPEN;
+    static readonly CLOSING = READY.CLOSING;
+    static readonly CLOSED = READY.CLOSED;
+    static last: OpenWs | null = null;
+    readyState = READY.OPEN;
+    onopen: (() => void) | null = null;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onclose: ((e: { code: number }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor() {
+      OpenWs.last = this;
+    }
+    close() {
+      this.readyState = READY.CLOSED;
+    }
+    send() {}
+    receive(msg: unknown) {
+      this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+  }
+
+  const event = (seq: number) => ({
+    type: 'event',
+    event: { seq, chatId: 's1', ts: 0, payload: { kind: 'metadata', params: {} } },
+  });
+
+  function harness(run: (log: string[], frame: () => void) => void) {
+    const g = globalThis as Record<string, unknown>;
+    const saved = {
+      window: g.window,
+      document: g.document,
+      location: g.location,
+      WebSocket: g.WebSocket,
+      requestAnimationFrame: g.requestAnimationFrame,
+      cancelAnimationFrame: g.cancelAnimationFrame,
+    };
+    let frames: (() => void)[] = [];
+    g.window = {
+      addEventListener() {},
+      removeEventListener() {},
+      setInterval: () => 0,
+      clearInterval() {},
+      setTimeout: () => 0,
+      clearTimeout() {},
+    };
+    g.document = { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' };
+    g.location = { protocol: 'http:', host: 'localhost:4319' };
+    g.WebSocket = OpenWs;
+    g.requestAnimationFrame = (fn: () => void) => frames.push(fn);
+    g.cancelAnimationFrame = (id: number) => {
+      frames[id - 1] = () => {};
+    };
+    try {
+      run([], () => {
+        const due = frames;
+        frames = [];
+        due.forEach((fn) => fn());
+      });
+    } finally {
+      Object.assign(g, saved);
+    }
+  }
+
+  const recording = (log: string[]) => ({
+    onEvent: (e: { seq: number }) => log.push(`event:${e.seq}`),
+    onStatus: (s: string) => log.push(`status:${s}`),
+    onResync() {},
+    onAck: (action: string) => log.push(`ack:${action}`),
+  });
+
+  it('holds events until the next frame, then applies them in order', () => {
+    harness((log, frame) => {
+      const sock = new SessionSocket('s1', recording(log) as unknown as SessionSocketHandlers, 0);
+      sock.connect();
+      log.length = 0;
+      OpenWs.last!.receive(event(1));
+      OpenWs.last!.receive(event(2));
+      assert.deepEqual(log, [], 'nothing is applied before the frame');
+      frame();
+      assert.deepEqual(log, ['event:1', 'event:2']);
+    });
+  });
+
+  it('applies held events before a message that follows them', () => {
+    harness((log) => {
+      const sock = new SessionSocket('s1', recording(log) as unknown as SessionSocketHandlers, 0);
+      sock.connect();
+      log.length = 0;
+      OpenWs.last!.receive(event(1));
+      OpenWs.last!.receive({ type: 'ack', action: 'prompt', ok: false });
+      OpenWs.last!.receive({ type: 'replay_complete' });
+      assert.deepEqual(log, ['event:1', 'ack:prompt', 'status:connected']);
+    });
+  });
+
+  it('drops held events when the chat is closed', () => {
+    harness((log, frame) => {
+      const sock = new SessionSocket('s1', recording(log) as unknown as SessionSocketHandlers, 0);
+      sock.connect();
+      log.length = 0;
+      OpenWs.last!.receive(event(1));
+      sock.close();
+      frame();
+      assert.deepEqual(log, [], 'an event of the closed chat must not reach the next one');
+    });
+  });
+});
+
 describe('markdown HTML sanitising', () => {
   interface El {
     type: 'element';

@@ -40,6 +40,10 @@ export class SessionSocket {
   private connectingSince = 0;
   private lastMessageAt = 0;
   private watchdog: number | null = null;
+  /** Events received since the last animation frame. They are applied together, so a burst
+   *  of streamed chunks or a replay renders once per frame instead of once per event. */
+  private queued: CasperEvent[] = [];
+  private flushFrame: number | null = null;
 
   constructor(
     private readonly chatId: string,
@@ -133,13 +137,16 @@ export class SessionSocket {
       if (this.ws !== ws) return;
       this.lastMessageAt = Date.now();
       const msg = JSON.parse(ev.data as string) as ServerMessage;
+      if (msg.type === 'event') {
+        if (msg.event.seq > this.cursor) {
+          this.cursor = msg.event.seq;
+          this.queue(msg.event);
+        }
+        return;
+      }
+      // Anything else is handled after the events that came before it.
+      this.flush();
       switch (msg.type) {
-        case 'event':
-          if (msg.event.seq > this.cursor) {
-            this.cursor = msg.event.seq;
-            this.handlers.onEvent(msg.event);
-          }
-          break;
         case 'replay_complete':
           this.handlers.onStatus('connected');
           break;
@@ -165,6 +172,7 @@ export class SessionSocket {
 
     ws.onclose = (ev) => {
       if (this.ws !== ws) return;
+      this.flush();
       if (this.closedByUser) {
         this.handlers.onStatus('closed');
         return;
@@ -183,6 +191,29 @@ export class SessionSocket {
     ws.onerror = () => {
       if (this.ws === ws) ws.close();
     };
+  }
+
+  private queue(event: CasperEvent): void {
+    this.queued.push(event);
+    if (this.flushFrame !== null) return;
+    if (typeof requestAnimationFrame !== 'function') {
+      this.flush();
+      return;
+    }
+    this.flushFrame = requestAnimationFrame(() => {
+      this.flushFrame = null;
+      this.flush();
+    });
+  }
+
+  private flush(): void {
+    if (this.flushFrame !== null) {
+      cancelAnimationFrame(this.flushFrame);
+      this.flushFrame = null;
+    }
+    const events = this.queued;
+    this.queued = [];
+    for (const e of events) this.handlers.onEvent(e);
   }
 
   private send(msg: ClientMessage): boolean {
@@ -220,6 +251,10 @@ export class SessionSocket {
 
   close(): void {
     this.closedByUser = true;
+    // Events not yet applied belong to this chat, not to the one opened next.
+    if (this.flushFrame !== null) cancelAnimationFrame(this.flushFrame);
+    this.flushFrame = null;
+    this.queued = [];
     window.removeEventListener('online', this.eager);
     document.removeEventListener('visibilitychange', this.onVisibility);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
