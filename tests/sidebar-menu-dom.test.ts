@@ -153,6 +153,19 @@ describe('sidebar sections (rendered in a DOM)', () => {
     assert.ok(!head.classList.contains('is-scrolled'));
   });
 
+  it('shows the scrollbar while the list scrolls and hides it once the list is still', async () => {
+    const scroller = host.querySelector('.sidebar-scroll') as HTMLElement;
+    act(() => {
+      scroller.dispatchEvent(new w.Event('scroll'));
+    });
+    assert.ok(scroller.classList.contains('is-scrolling'));
+    const deadline = Date.now() + 3000;
+    while (scroller.classList.contains('is-scrolling') && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(!scroller.classList.contains('is-scrolling'), 'hidden again after the list is still');
+  });
+
   it('shows pinned chats in their own section above the rest', () => {
     assert.deepEqual(sectionNames(), ['Pinned', 'Chats']);
     assert.deepEqual(rowsIn('Pinned'), ['first']);

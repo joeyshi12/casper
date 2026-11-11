@@ -188,6 +188,16 @@
   overflow-y: auto;
   padding-bottom: 6px;
 }
+/* The thumb hides once the list has been still for a second; the track keeps its width,
+   so nothing moves. Sidebar.tsx sets is-scrolling. */
+.sidebar-scroll:not(.is-scrolling)::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+@supports not selector(::-webkit-scrollbar) {
+  .sidebar-scroll:not(.is-scrolling) {
+    scrollbar-color: transparent transparent;
+  }
+}
 .sidebar-section + .sidebar-section {
   margin-top: 8px;
 }
