@@ -36,7 +36,7 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 
   --header-h: 56px;
-  --gutter: 16px;
+  --gutter: 12px;
 
   /* 96px = tallest notice-banner wrap plus the 10px it floats above the composer. */
   --transcript-end-slack: 96px;
