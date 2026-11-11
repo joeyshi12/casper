@@ -1,7 +1,7 @@
 import { Link } from 'react-router';
 import { pathForChat } from '../../util/route.js';
 import { groupByDate } from '../../util/chatGroups.js';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatSummary } from '@casper/shared';
 import {
   CalendarIcon,
@@ -34,6 +34,8 @@ interface Props {
 
 /** Whether to group by date is a choice for this browser, so it lives in localStorage. */
 const GROUPED_KEY = 'casper.groupChatsByDate';
+
+const SCROLLBAR_IDLE_MS = 1000;
 
 function loadGrouped(): boolean {
   try {
@@ -83,6 +85,23 @@ export function Sidebar({
     setMenuId(null);
     setMenuAnchor(null);
   }, []);
+
+  // Shows the scrollbar while the list scrolls. The class is set on the element, so
+  // scrolling does not re-render the sidebar.
+  const scrollIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (scrollIdleTimer.current) clearTimeout(scrollIdleTimer.current);
+    },
+    [],
+  );
+  const onListScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    setScrolled(el.scrollTop > 0);
+    el.classList.add('is-scrolling');
+    if (scrollIdleTimer.current) clearTimeout(scrollIdleTimer.current);
+    scrollIdleTimer.current = setTimeout(() => el.classList.remove('is-scrolling'), SCROLLBAR_IDLE_MS);
+  };
 
   const commitRename = (id: string) => {
     const t = draft.trim();
@@ -247,7 +266,7 @@ export function Sidebar({
         </span>
       </header>
 
-      <div className="sidebar-scroll" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}>
+      <div className="sidebar-scroll" onScroll={onListScroll}>
         <nav className="sidebar-nav" aria-label="Casper">
           <button className="snav-item" onClick={onNew}>
             <span className="sb-icon">
