@@ -188,14 +188,34 @@
   overflow-y: auto;
   padding-bottom: 6px;
 }
-/* The thumb hides once the list has been still for a second; the track keeps its width,
-   so nothing moves. Sidebar.tsx sets is-scrolling. */
-.sidebar-scroll:not(.is-scrolling)::-webkit-scrollbar-thumb {
-  background: transparent;
+/* The thumb fades out once the list has been still for a second; the track keeps its
+   width, so nothing moves. Sidebar.tsx sets is-scrolling. A transition on the thumb
+   itself does not run in Chromium, so the colour is a registered property on the list,
+   which can be transitioned, and the thumb reads it. */
+@property --sidebar-thumb {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+.sidebar-scroll {
+  --sidebar-thumb: transparent;
+  transition: --sidebar-thumb 0.5s ease-in-out;
+}
+.sidebar-scroll.is-scrolling {
+  --sidebar-thumb: var(--n2);
+  transition-duration: 0s;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--sidebar-thumb);
 }
 @supports not selector(::-webkit-scrollbar) {
-  .sidebar-scroll:not(.is-scrolling) {
+  .sidebar-scroll {
     scrollbar-color: transparent transparent;
+    transition: scrollbar-color 0.5s ease-in-out;
+  }
+  .sidebar-scroll.is-scrolling {
+    scrollbar-color: var(--n2) transparent;
+    transition-duration: 0s;
   }
 }
 .sidebar-section + .sidebar-section {
