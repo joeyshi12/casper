@@ -199,7 +199,7 @@
 }
 .sidebar-scroll {
   --sidebar-thumb: transparent;
-  transition: --sidebar-thumb 0.5s ease-in-out;
+  transition: --sidebar-thumb 0.2s ease-out;
 }
 .sidebar-scroll.is-scrolling {
   --sidebar-thumb: var(--n2);
@@ -211,7 +211,7 @@
 @supports not selector(::-webkit-scrollbar) {
   .sidebar-scroll {
     scrollbar-color: transparent transparent;
-    transition: scrollbar-color 0.5s ease-in-out;
+    transition: scrollbar-color 0.2s ease-out;
   }
   .sidebar-scroll.is-scrolling {
     scrollbar-color: var(--n2) transparent;
