@@ -440,15 +440,29 @@
   border-bottom: 1px solid var(--n1);
   background: var(--n-abyss);
 }
+.navbtn,
+.iconbtn,
+.msg-action,
+.composer-plus,
+.chat-head-btn,
+.ftree-refresh,
+.ftree-close,
+.fpreview-dl,
+.fpreview-full-btn,
+.fpreview-close,
+.fpreview-seg-btn,
+.ctx-btn {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: var(--r-sm);
+  color: var(--n4);
+  transition: background 0.12s, color 0.12s;
+}
 .navbtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 34px;
   height: 40px;
-  flex-shrink: 0;
-  color: var(--n4);
-  border-radius: var(--r-sm);
 }
 .navbtn:hover {
   color: var(--n6);
@@ -464,14 +478,8 @@
   white-space: nowrap;
 }
 .iconbtn {
-  font-size: 20px;
-  color: var(--n4);
   width: 38px;
   height: 38px;
-  border-radius: var(--r-sm);
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
 }
 .iconbtn:active,
 .iconbtn:hover {
@@ -812,7 +820,6 @@
 }
 .dirpick-input {
   width: 100%;
-  box-sizing: border-box;
   padding: 6px 8px;
   background: var(--n1);
   border: 1px solid var(--n2);
@@ -957,16 +964,11 @@
   transform: rotate(180deg);
 }
 
-/* Opens upward in the composer (see override below) so it isn't clipped off-screen. */
-.dd-panel {
+.dd-panel,
+.mp-panel,
+.mp-effort {
   position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
   z-index: 40;
-  min-width: 200px;
-  max-width: 300px;
-  max-height: 320px;
-  overflow-y: auto;
   padding: 4px;
   background: var(--n0);
   border: 1px solid var(--n2);
@@ -974,13 +976,24 @@
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
   animation: dd-in 0.12s ease;
 }
+/* Opens upward in the composer (see override below) so it isn't clipped off-screen. */
+.dd-panel {
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 200px;
+  max-width: 300px;
+  max-height: 320px;
+  overflow-y: auto;
+}
 .composer-actions-right .dd-panel {
   top: auto;
   bottom: calc(100% + 6px);
   left: auto;
   right: 0;
 }
-.dd-option {
+.dd-option,
+.mp-option,
+.mp-effort-row {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -990,12 +1003,14 @@
   border-radius: var(--r-sm);
   color: var(--n5);
   font-size: 13px;
-  cursor: pointer;
 }
-.dd-option.is-active {
+.dd-option.is-active,
+.mp-option.is-active,
+.mp-effort-row.is-active {
   background: var(--n1);
 }
-.dd-option.is-selected {
+.dd-option.is-selected,
+.mp-option.is-selected {
   color: var(--n6);
 }
 .dd-check {
@@ -1026,40 +1041,17 @@
   white-space: nowrap;
 }
 .mp-panel {
-  position: absolute;
   bottom: calc(100% + 6px);
   right: 0;
-  z-index: 40;
   width: 300px;
   max-width: calc(100vw - 2 * var(--gutter));
-  padding: 4px;
-  background: var(--n0);
-  border: 1px solid var(--n2);
-  border-radius: var(--r-md);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
-  animation: dd-in 0.12s ease;
 }
 .mp-list {
   max-height: 340px;
   overflow-y: auto;
 }
 .mp-option {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  text-align: left;
   padding: 5px 7px;
-  border-radius: var(--r-sm);
-  color: var(--n5);
-  font-size: 13px;
-  cursor: pointer;
-}
-.mp-option.is-active {
-  background: var(--n1);
-}
-.mp-option.is-selected {
-  color: var(--n6);
 }
 .mp-option-name {
   flex: 1;
@@ -1073,21 +1065,6 @@
   margin: 4px 3px;
   background: var(--n2);
 }
-.mp-effort-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 6px 7px;
-  border-radius: var(--r-sm);
-  color: var(--n5);
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-}
-.mp-effort-row.is-active {
-  background: var(--n1);
-}
 .mp-effort-label {
   flex: 1;
 }
@@ -1099,16 +1076,9 @@
 }
 /* Beside the panel, level with its bottom edge, where the effort row is. */
 .mp-effort {
-  position: absolute;
   bottom: -1px;
   right: calc(100% + 6px);
   width: 260px;
-  padding: 4px;
-  background: var(--n0);
-  border: 1px solid var(--n2);
-  border-radius: var(--r-md);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
-  animation: dd-in 0.12s ease;
 }
 /* No room beside it on a phone, so it covers the bottom of the panel instead. */
 @media (max-width: 768px) {
@@ -1277,16 +1247,8 @@
   }
 }
 .msg-action {
-  display: grid;
-  place-items: center;
   width: 24px;
   height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: var(--r-sm);
-  background: none;
-  color: var(--n4);
-  cursor: pointer;
 }
 .msg-action:hover:not(:disabled) {
   background: var(--n1);
@@ -1468,7 +1430,7 @@
   gap: 5px;
   flex-shrink: 0;
   padding: 2px 8px;
-  border-radius: var(--r-pill, 999px);
+  border-radius: var(--r-pill);
   border: 1px solid var(--n2);
   background: var(--n1);
   font-size: 12px;
@@ -1957,7 +1919,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.toolline-text.is-live {
+.toolline-text.is-live,
+.agent-what.is-live {
   background: linear-gradient(
     100deg,
     var(--n4) 0%,
@@ -1994,19 +1957,6 @@
 .collapse-inner {
   min-height: 0;
   overflow: hidden;
-}
-@media (prefers-reduced-motion: reduce) {
-  .toolline-chevron,
-  .toolline-text.is-live,
-  .agent-what.is-live,
-  .collapse,
-  .sidebar {
-    transition: none;
-    animation: none;
-  }
-  .nav-scrim {
-    animation: none;
-  }
 }
 .toolcall-body {
   padding: 5px 0 8px;
@@ -2088,21 +2038,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.agent-what.is-live {
-  background: linear-gradient(
-    100deg,
-    var(--n4) 0%,
-    var(--n4) 35%,
-    color-mix(in srgb, var(--n4) 20%, transparent) 50%,
-    var(--n4) 65%,
-    var(--n4) 100%
-  );
-  background-size: 220% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  animation: label-shimmer 1.6s linear infinite;
 }
 .agent-time {
   color: var(--n4);
@@ -2470,26 +2405,13 @@ a.websearch-row:hover {
   align-items: center;
   gap: 3px;
   min-width: 0;
-  /* overflow: visible, not hidden - the dropdown panels are absolutely
-     positioned and an overflow container here would clip them. */
-  overflow: visible;
 }
 .composer-box:focus-within {
   border-color: var(--frost-deep);
 }
 .composer-plus {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 34px;
   height: 34px;
-  flex-shrink: 0;
-  border-radius: var(--r-sm);
-  border: none;
-  background: none;
-  color: var(--n4);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
 }
 .composer-plus:hover:not(:disabled) {
   background: var(--n2);
@@ -2772,9 +2694,6 @@ a.websearch-row:hover {
   border-top: none;
   background: none;
 }
-.chat-draft .composer-box {
-  border-radius: var(--r-lg, 16px);
-}
 
 .chat-body {
   flex: 1;
@@ -2798,20 +2717,11 @@ a.websearch-row:hover {
   flex-direction: column;
 }
 
-/* box-sizing: border-box set here since this stylesheet has no global border-box rule. */
 .chat-head-btn {
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 30px;
   height: 30px;
-  padding: 0;
-  border-radius: var(--r-sm);
   border: 1px solid transparent;
-  background: none;
   color: inherit;
-  cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
 }
 .chat-head-btn:hover:not(:disabled) {
@@ -2897,18 +2807,8 @@ a.websearch-row:hover {
 }
 .ftree-refresh,
 .ftree-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   width: 28px;
   height: 28px;
-  padding: 0;
-  border-radius: var(--r-sm);
-  border: none;
-  background: none;
-  color: var(--n4);
-  cursor: pointer;
-  transition: background 0.12s;
 }
 .ftree-refresh:hover,
 .ftree-close:hover {
@@ -3056,8 +2956,6 @@ a.websearch-row:hover {
   color: var(--n3);
   flex-shrink: 0;
 }
-.ftree-children {
-}
 
 .fpreview-backdrop {
   position: fixed;
@@ -3109,19 +3007,8 @@ a.websearch-row:hover {
 .fpreview-dl,
 .fpreview-full-btn,
 .fpreview-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 34px;
   height: 34px;
-  flex-shrink: 0;
-  border-radius: var(--r-sm);
-  border: none;
-  background: none;
-  color: var(--n4);
-  font-size: 18px;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
 }
 .fpreview-dl:hover,
 .fpreview-full-btn:hover,
@@ -3215,26 +3102,16 @@ a.websearch-row:hover {
 }
 
 .fpreview-seg-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 30px;
   height: 26px;
-  border: none;
   border-radius: calc(var(--r-sm) - 1px);
-  background: none;
-  color: var(--n4);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
 }
-
 .fpreview-seg-btn:hover {
-  color: var(--n7);
+  color: var(--n5);
 }
-
 .fpreview-seg-btn.is-active {
   background: var(--n3);
-  color: var(--n9);
+  color: var(--n6);
 }
 .fpreview-code {
   font-family: var(--font-mono);
@@ -3321,18 +3198,8 @@ a.websearch-row:hover {
   flex-shrink: 0;
 }
 .ctx-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 28px;
   height: 28px;
-  padding: 0;
-  border: none;
-  background: none;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  color: var(--n4);
-  transition: background 0.12s;
 }
 .ctx-btn:hover {
   background: var(--n2);
