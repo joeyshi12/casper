@@ -24,6 +24,24 @@ export interface JsonRpcResponse {
   error?: { code: number; message: string };
 }
 
+const LEAD_IN_DESCRIPTION =
+  'One or two sentences of reply text that introduce this, shown above it in the chat. ' +
+  'Markdown. Don\'t write them again in your reply.';
+
+/** Longest lead-in: a sentence or two, not the explanation itself. */
+export const MAX_LEAD_IN_CHARS = 600;
+
+/** Human-readable problem with a lead_in argument, or null when it is usable. */
+export function leadInProblem(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) {
+    return 'lead_in is required: one or two sentences that introduce this, shown above it.';
+  }
+  if (value.length > MAX_LEAD_IN_CHARS) {
+    return `lead_in is ${value.length} characters, over ${MAX_LEAD_IN_CHARS}. Keep it to a sentence or two and put the rest in your reply.`;
+  }
+  return null;
+}
+
 const TOOLS = [
   {
     name: 'read_me',
@@ -57,6 +75,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
+        lead_in: { type: 'string', description: LEAD_IN_DESCRIPTION },
         i_have_seen_read_me: {
           type: 'boolean',
           description: 'True only if you have already called read_me in this conversation.',
@@ -70,7 +89,7 @@ const TOOLS = [
           description: 'The HTML fragment to render.',
         },
       },
-      required: ['i_have_seen_read_me', 'title', 'widget_code'],
+      required: ['lead_in', 'i_have_seen_read_me', 'title', 'widget_code'],
     },
   },
   {
@@ -83,6 +102,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
+        lead_in: { type: 'string', description: LEAD_IN_DESCRIPTION },
         question: { type: 'string', description: 'What they are deciding.' },
         options: {
           type: 'array',
@@ -102,7 +122,7 @@ const TOOLS = [
           },
         },
       },
-      required: ['question', 'options'],
+      required: ['lead_in', 'question', 'options'],
     },
   },
 ];
@@ -140,6 +160,8 @@ function handleShowWidget(
   if (args.i_have_seen_read_me !== true) {
     return callError(id, 'Call read_me first, then set i_have_seen_read_me to true.');
   }
+  const leadIn = leadInProblem(args.lead_in);
+  if (leadIn) return callError(id, leadIn);
   const title = typeof args.title === 'string' ? args.title.trim() : '';
   if (!title) return callError(id, 'title is required: a short snake_case identifier.');
 
@@ -158,7 +180,7 @@ function handleShowWidget(
 
   // Nothing to do here: Casper renders the widget from this tool call as kiro reports
   // it, so this only validates and tells the model what the user is now looking at.
-  return ok(id, text(`Widget "${title}" is on screen. Don't repeat its content in prose.`));
+  return ok(id, text(`Widget "${title}" is on screen below your lead_in. Don't repeat either in prose.`));
 }
 
 /** Asks the client for the user's answer through MCP elicitation. Resolves with the
@@ -182,7 +204,7 @@ function handleChoice(
   args: Record<string, unknown>,
   ask: AskUser | undefined,
 ): JsonRpcResponse | Promise<JsonRpcResponse> {
-  const problem = validateChoice(args);
+  const problem = leadInProblem(args.lead_in) ?? validateChoice(args);
   if (problem) return callError(id, problem);
   // Casper renders the options from this call, same as show_widget. The elicitation only
   // holds the call open until the user answers.

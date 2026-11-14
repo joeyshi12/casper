@@ -26,9 +26,9 @@ is complete, so a widget whose script sits at the top looks inert until the end.
 
 The widget holds the visual and nothing else. Write the lead-in, the explanation and any
 summary in your reply text, outside the call, where the user's font settings apply. No
-paragraphs of prose, headings or titles inside the widget. Introduce a widget with a
-sentence before it, and put a short paragraph between two widgets rather than calling
-show_widget twice in a row.
+paragraphs of prose, headings or titles inside the widget. The lead_in argument is the
+sentence that introduces it, shown above it. Put a short paragraph between two widgets
+rather than calling show_widget twice in a row.
 
 ## Hard rules
 

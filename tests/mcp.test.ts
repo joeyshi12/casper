@@ -41,7 +41,7 @@ describe('MCP server protocol', () => {
     const tools = (res?.result as { tools: { name: string; inputSchema: { required: string[] } }[] }).tools;
 assert.deepEqual(tools.map((t) => t.name), ['read_me', 'show_widget', 'show_choice']);
     const widget = tools[1]!;
-    assert.deepEqual(widget.inputSchema.required, ['i_have_seen_read_me', 'title', 'widget_code']);
+    assert.deepEqual(widget.inputSchema.required, ['lead_in', 'i_have_seen_read_me', 'title', 'widget_code']);
   });
 
   it('refuses show_widget until read_me has been acknowledged', () => {
@@ -52,7 +52,7 @@ assert.deepEqual(tools.map((t) => t.name), ['read_me', 'show_widget', 'show_choi
 
   it('refuses a whole document, since a widget is a fragment', () => {
     const res = resultOf(call('show_widget', {
-      i_have_seen_read_me: true, title: 'x', widget_code: '<html><body><p>x</p></body></html>',
+      lead_in: 'Here it is.', i_have_seen_read_me: true, title: 'x', widget_code: '<html><body><p>x</p></body></html>',
     }));
     assert.equal(res.isError, true);
     assert.match(res.content![0]!.text, /fragment/);
@@ -60,10 +60,22 @@ assert.deepEqual(tools.map((t) => t.name), ['read_me', 'show_widget', 'show_choi
 
   it('accepts a valid widget', () => {
     const res = resultOf(call('show_widget', {
-      i_have_seen_read_me: true, title: 'compound_interest', widget_code: '<p>x</p>',
+      lead_in: 'Here is how the balance grows.', i_have_seen_read_me: true, title: 'compound_interest', widget_code: '<p>x</p>',
     }));
     assert.equal(res.isError, false);
     assert.match(res.content![0]!.text, /compound_interest/);
+  });
+
+  it('refuses a widget or a choice without a lead_in, or with an essay in it', () => {
+    const widget = { i_have_seen_read_me: true, title: 'x', widget_code: '<p>x</p>' };
+    const choice = { question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] };
+    for (const [name, args] of [['show_widget', widget], ['show_choice', choice]] as const) {
+      for (const lead_in of [undefined, '  ', 'x'.repeat(601)]) {
+        const res = resultOf(call(name, { ...args, lead_in }));
+        assert.equal(res.isError, true, `${name} with lead_in ${JSON.stringify(lead_in)?.slice(0, 20)}`);
+        assert.match(res.content![0]!.text, /lead_in/);
+      }
+    }
   });
 
   // The reason for a tool per template: the model gets a real schema for each,
@@ -74,7 +86,7 @@ assert.deepEqual(tools.map((t) => t.name), ['read_me', 'show_widget', 'show_choi
       tools: { name: string; inputSchema: { required?: string[]; properties: Record<string, unknown> } }[];
     }).tools;
     const byName = new Map(tools.map((t) => [t.name, t.inputSchema]));
-    assert.deepEqual(byName.get('show_choice')?.required, ['question', 'options']);
+    assert.deepEqual(byName.get('show_choice')?.required, ['lead_in', 'question', 'options']);
     // Nested shapes are described too, not left as bare objects.
     const options = byName.get('show_choice')?.properties.options as {
       items: { required: string[] };

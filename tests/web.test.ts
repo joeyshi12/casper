@@ -108,6 +108,8 @@ describe('tool names from kiro V3 live updates', () => {
     assert.equal(toolLabel(tool), '@casper/show_choice');
     const widget = fold({ title: '@casper/show_widget', rawInput: { title: 't', widget_code: '<p>' }, _meta: { kiro: { serverName: 'casper' } } });
     assert.equal(widgetCallOf(widget)?.code, '<p>');
+    const introduced = fold({ title: '@casper/show_widget', rawInput: { lead_in: ' Here is the flow. ', title: 't', widget_code: '<p>' }, _meta: { kiro: { serverName: 'casper' } } });
+    assert.equal(widgetCallOf(introduced)?.leadIn, 'Here is the flow.');
   });
 
   it('the call that starts a subagent is named invoke_sub_agent', () => {

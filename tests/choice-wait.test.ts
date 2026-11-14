@@ -28,6 +28,7 @@ after(() => {
 });
 
 const choiceArgs = {
+  lead_in: 'Two layouts fit this page.',
   question: 'Which layout?',
   options: [{ label: 'One column', prompt: 'Use one column' }, { label: 'Two columns' }],
 };
