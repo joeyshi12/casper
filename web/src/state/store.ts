@@ -331,7 +331,7 @@ export const useStore = create<CasperState>((set, get) => ({
           chatNotice: null,
           streamingText: '',
           streamingThought: '',
-          observability: { ...state.observability, turnStatus: 'idle' },
+          observability: { ...state.observability, turnStatus: 'idle', waitingChoice: undefined },
         });
         break;
       }
@@ -348,7 +348,7 @@ export const useStore = create<CasperState>((set, get) => ({
             : state.chatNotice,
           streamingText: '',
           streamingThought: '',
-          observability: { ...state.observability, turnStatus: 'idle' },
+          observability: { ...state.observability, turnStatus: 'idle', waitingChoice: undefined },
         });
         break;
       }
@@ -398,6 +398,21 @@ export const useStore = create<CasperState>((set, get) => ({
         if (p.clientId) state.markPendingFailed(p.clientId, 'The turn ended before Casper read this. Retry to send it.');
         break;
 
+      case 'choice_waiting':
+        set({ observability: { ...state.observability, waitingChoice: p.toolCallId } });
+        break;
+
+      case 'choice_settled':
+        // A message typed while the choice waited answered it, so its copy goes.
+        set({
+          observability:
+            state.observability.waitingChoice === p.toolCallId
+              ? { ...state.observability, waitingChoice: undefined }
+              : state.observability,
+          pending: p.clientId ? state.pending.filter((pm) => pm.id !== p.clientId) : state.pending,
+        });
+        break;
+
       case 'prompt_id': {
         // Names the prompt of the running turn, which is the last user message.
         const items = [...state.items];
@@ -434,7 +449,7 @@ export const useStore = create<CasperState>((set, get) => ({
         // Also clears compacting: a dead process never sends the completion that
         // normally would, and while set it disables the composer.
         set({
-          observability: { ...state.observability, turnStatus: 'idle', compacting: false },
+          observability: { ...state.observability, turnStatus: 'idle', compacting: false, waitingChoice: undefined },
         });
         break;
     }

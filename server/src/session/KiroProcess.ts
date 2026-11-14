@@ -3,8 +3,10 @@ import { EventEmitter } from 'node:events';
 import split2 from 'split2';
 import {
   ACP_METHODS,
+  type ElicitationResult,
   type JsonRpcNotification,
   type JsonRpcRequest,
+  type KiroElicitationParams,
   type RequestPermissionParams,
   type SessionForkParams,
   type SessionLoadParams,
@@ -73,10 +75,15 @@ export class KiroProcess extends EventEmitter {
       this.emit('notification', n);
     });
 
-    // Every request from kiro gets an answer, or the turn waiting on it stalls.
+    // Every request from kiro gets an answer, or the turn waiting on it stalls. An
+    // elicitation is answered later, by whoever handles the 'elicitation' event.
     this.client.on('serverRequest', (req: JsonRpcRequest) => {
       if (req.method === ACP_METHODS.requestPermission) {
         this.client.respond(req.id, permissionOutcome(req.params as RequestPermissionParams | undefined));
+        return;
+      }
+      if (req.method === ACP_METHODS.mcpElicitation && this.listenerCount('elicitation') > 0) {
+        this.emit('elicitation', req.id, req.params as KiroElicitationParams);
         return;
       }
       this.log.debug({ method: req.method }, 'acp: unsupported request from kiro');
@@ -162,6 +169,11 @@ export class KiroProcess extends EventEmitter {
 
   cancel(sessionId: string): void {
     this.client.notify(ACP_METHODS.sessionCancel, { sessionId });
+  }
+
+  /** Answers an elicitation kiro forwarded from an MCP server. */
+  answerElicitation(id: JsonRpcRequest['id'], result: ElicitationResult): void {
+    this.client.respond(id, result);
   }
 
   setMode(sessionId: string, modeId: string): Promise<unknown> {

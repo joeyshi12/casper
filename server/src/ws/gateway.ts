@@ -41,6 +41,7 @@ export interface GatewayChats {
     opts?: { retry?: boolean },
   ): Promise<void>;
   steer(chatId: string, text: string, clientId?: string): Promise<void>;
+  answerChoice(chatId: string, toolCallId: string, answer: string): void;
   cancel(chatId: string): void;
   setMode(chatId: string, modeId: string): Promise<void>;
   setModel(chatId: string, modelId: string): Promise<void>;
@@ -133,6 +134,10 @@ export function handleConnection(
       case 'steer':
         return ack('steer', () =>
           manager.steer(chatId, String(msg.text ?? ''), typeof msg.clientId === 'string' ? msg.clientId : undefined),
+        );
+      case 'choice':
+        return ack('choice', () =>
+          manager.answerChoice(chatId, String(msg.toolCallId ?? ''), String(msg.answer ?? '')),
         );
       case 'cancel':
         return ack('cancel', () => manager.cancel(chatId));

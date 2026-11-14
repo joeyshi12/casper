@@ -20,12 +20,18 @@ export class TurnState {
         break;
       case 'turn_ended':
       case 'turn_error':
-        this.snapshot = { ...s, turnStatus: 'idle' };
+        this.snapshot = { ...s, turnStatus: 'idle', waitingChoice: undefined };
         break;
       case 'process_exited':
         // Nothing a dead process was doing is still in flight, compaction included: only a
         // completed/failed notification clears that, and while set it disables the composer.
-        this.snapshot = { ...s, turnStatus: 'idle', compacting: false };
+        this.snapshot = { ...s, turnStatus: 'idle', compacting: false, waitingChoice: undefined };
+        break;
+      case 'choice_waiting':
+        this.snapshot = { ...s, waitingChoice: payload.toolCallId };
+        break;
+      case 'choice_settled':
+        if (s.waitingChoice === payload.toolCallId) this.snapshot = { ...s, waitingChoice: undefined };
         break;
       case 'metadata':
         this.snapshot = {

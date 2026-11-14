@@ -22,6 +22,14 @@ answers better than a paragraph.
 Order matters. Content renders as it arrives, and scripts run only once the message
 is complete, so a widget whose script sits at the top looks inert until the end.
 
+## Text goes in your reply
+
+The widget holds the visual and nothing else. Write the lead-in, the explanation and any
+summary in your reply text, outside the call, where the user's font settings apply. No
+paragraphs of prose, headings or titles inside the widget. Introduce a widget with a
+sentence before it, and put a short paragraph between two widgets rather than calling
+show_widget twice in a row.
+
 ## Hard rules
 
 - No gradients, drop shadows or blur. They flash while content is patched in.

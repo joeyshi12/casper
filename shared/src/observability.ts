@@ -14,6 +14,8 @@ export interface ObservabilitySnapshot {
   sessionCredits?: number;
   /** True while a /compact is in progress, which disables sending. */
   compacting: boolean;
+  /** The id of the show_choice call the running turn is waiting on the user to answer. */
+  waitingChoice?: string;
 }
 
 export function emptyObservabilitySnapshot(): ObservabilitySnapshot {

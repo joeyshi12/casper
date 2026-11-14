@@ -35,6 +35,7 @@ export interface ControlledSocket {
   reset(head: number): void;
   prompt(content: PromptContentBlock[], attachments?: MessageAttachment[], retry?: boolean): boolean;
   steer(text: string, clientId: string): boolean;
+  choice(toolCallId: string, answer: string): boolean;
   cancel(): void;
   setMode(modeId: string): void;
   setModel(modelId: string): void;
@@ -361,6 +362,12 @@ export class SessionController {
     const id = `pending-${this.msgSeq++}`;
     this.state.addPending({ id, text: clean, content: [{ type: 'text', text: clean }], steer: true });
     this.deliverSteer(id, clean);
+  }
+
+  /** Answers the show_choice call the turn is waiting on. False when it could not be sent. */
+  answerChoice(toolCallId: string, answer: string): boolean {
+    const clean = answer.trim();
+    return !!clean && (this.socket?.choice(toolCallId, clean) ?? false);
   }
 
   private deliverSteer(id: string, text: string): void {

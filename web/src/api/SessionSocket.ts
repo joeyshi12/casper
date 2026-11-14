@@ -230,6 +230,9 @@ export class SessionSocket {
   steer(text: string, clientId: string): boolean {
     return this.send({ type: 'steer', text, clientId });
   }
+  choice(toolCallId: string, answer: string): boolean {
+    return this.send({ type: 'choice', toolCallId, answer });
+  }
   cancel(): void {
     this.send({ type: 'cancel' });
   }
