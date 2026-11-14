@@ -107,6 +107,26 @@ describe('the choice panel above the composer', () => {
     assert.deepEqual(answered, [['choice-1', encodeChoiceAnswers([null, 'Narrow'])]]);
   });
 
+  it('moves between questions with the arrows, keeping the answers given', () => {
+    setWaiting('choice-1');
+    show(createElement(ChoicePanel));
+    const prev = () => host.querySelector('button[aria-label="Previous question"]') as HTMLButtonElement;
+    const next = () => host.querySelector('button[aria-label="Next question"]') as HTMLButtonElement;
+    assert.equal(prev().disabled, true, 'nothing before the first question');
+    act(() => next().click());
+    assert.equal(question(), 'How wide?');
+    assert.equal(next().disabled, true, 'nothing after the last question');
+    act(() => options()[1]!.click());
+    assert.deepEqual(answered, [], 'the first question is still open');
+    assert.equal(question(), 'Which layout?', 'answering moves to the open question');
+    key('ArrowRight');
+    assert.equal(question(), 'How wide?');
+    assert.deepEqual(options().map((b) => b.classList.contains('is-picked')), [false, true], 'the answer given shows');
+    key('ArrowLeft');
+    act(() => options()[0]!.click());
+    assert.deepEqual(answered, [['choice-1', encodeChoiceAnswers(['Use one column', 'Wide'])]]);
+  });
+
   it('skips the call when every question was skipped', () => {
     setWaiting('choice-1');
     show(createElement(ChoicePanel));
@@ -131,7 +151,7 @@ describe('the choice panel above the composer', () => {
   it('skips the whole call with the close button', () => {
     setWaiting('choice-1');
     show(createElement(ChoicePanel));
-    act(() => (host.querySelector('.choice-panel-close') as HTMLButtonElement).click());
+    act(() => (host.querySelector('button[aria-label="Skip the questions"]') as HTMLButtonElement).click());
     assert.deepEqual(skipped, ['choice-1']);
   });
 

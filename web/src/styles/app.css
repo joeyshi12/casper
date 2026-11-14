@@ -1698,13 +1698,18 @@
   font-size: 14px;
   color: var(--n6);
 }
-.choice-panel-step {
+.choice-panel-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   flex: none;
-  padding-top: 2px;
+}
+.choice-panel-step {
   font-size: 12px;
   color: var(--n4);
+  font-variant-numeric: tabular-nums;
 }
-.choice-panel-close {
+.choice-panel-icon {
   display: grid;
   place-items: center;
   flex: none;
@@ -1717,9 +1722,16 @@
   color: var(--n4);
   cursor: pointer;
 }
-.choice-panel-close:hover:not(:disabled) {
+.choice-panel-icon:hover:not(:disabled) {
   background: var(--n2);
   color: var(--n6);
+}
+.choice-panel-icon:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.choice-panel-icon .is-flipped {
+  transform: rotate(180deg);
 }
 .choice-panel-opts {
   margin: 0;
@@ -1734,18 +1746,43 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 9px 2px;
+  padding: 9px 8px;
   border: none;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   background: none;
   font: inherit;
   text-align: left;
   color: var(--n6);
   cursor: pointer;
+  transition: background-color 0.12s;
 }
-.choice-panel-opt:hover:not(:disabled) .choice-panel-num {
-  background: var(--frost-deep);
+/* A highlighted row hides the dividers on both sides of it. */
+.choice-panel-opts > li:has(> .choice-panel-opt:hover:not(:disabled)),
+.choice-panel-opts > li:has(> .choice-panel-opt:hover:not(:disabled)) + li,
+.choice-panel-opts > li:has(> .is-picked),
+.choice-panel-opts > li:has(> .is-picked) + li {
+  border-top-color: transparent;
+}
+.choice-panel-opt:hover:not(:disabled),
+.choice-panel-opt.is-picked {
+  background: var(--n2);
+}
+.choice-panel-opt:hover:not(:disabled) .choice-panel-num,
+.choice-panel-opt.is-picked .choice-panel-num {
+  background: var(--n3);
   color: var(--n6);
+}
+.choice-panel-go {
+  flex: none;
+  margin-left: auto;
+  color: var(--n4);
+  transform: rotate(90deg);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.choice-panel-opt:hover:not(:disabled) .choice-panel-go,
+.choice-panel-opt:focus-visible .choice-panel-go {
+  opacity: 1;
 }
 .choice-panel-opt:disabled {
   cursor: default;
@@ -1774,7 +1811,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 2px;
+  padding: 9px 8px;
 }
 .choice-panel-input {
   flex: 1;

@@ -3,13 +3,14 @@ import { encodeChoiceAnswers, type ChoiceAnswers } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 import { sessionController } from '../../state/sessionController.js';
 import { choiceCallOf, type ChoiceData } from '../../util/choiceCall.js';
-import { CloseIcon, PencilIcon } from '../common/icons.js';
+import { ArrowUpIcon, ChevronRightIcon, CloseIcon, PencilIcon } from '../common/icons.js';
 
 /**
  * The questions of the show_choice call the turn is waiting on, above the composer, asked
  * one at a time. Tapping an option, or pressing its number, answers the current question;
- * "Something else" answers it with typed text, and Skip passes over it. The answers go to
- * the call together after the last question. The close button skips them all, and a message
+ * "Something else" answers it with typed text, and Skip passes over it. The arrows, or the
+ * arrow keys, move between questions. The answers go to the call together once every
+ * question has one. The close button skips them all, and a message
  * sent from the composer answers the call in their place.
  */
 export function ChoicePanel() {
@@ -28,8 +29,10 @@ export function ChoicePanel() {
 }
 
 function ChoiceSteps({ toolCallId, choice }: { toolCallId: string; choice: ChoiceData }) {
+  const count = choice.questions.length;
   const [step, setStep] = useState(0);
-  const [answers, setAnswers] = useState<ChoiceAnswers>([]);
+  // undefined for a question not answered yet, null for one skipped.
+  const [answers, setAnswers] = useState<(string | null | undefined)[]>([]);
   const [other, setOther] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -37,20 +40,30 @@ function ChoiceSteps({ toolCallId, choice }: { toolCallId: string; choice: Choic
     if (!busy && sessionController.skipChoice(toolCallId)) setBusy(true);
   };
 
-  /** Records the current question's answer, or null to skip it, and moves on. */
+  const go = (to: number) => {
+    if (to < 0 || to >= count) return;
+    setStep(to);
+    setOther('');
+  };
+
+  /** Records the current question's answer, or null to skip it, and moves to the next
+   *  unanswered question. Once none is left, the answers go to the call. */
   const settle = (answer: string | null) => {
     if (busy) return;
     const next = [...answers];
     next[step] = answer?.trim() || null;
+    setAnswers(next);
     setOther('');
-    if (step < choice.questions.length - 1) {
-      setAnswers(next);
-      setStep(step + 1);
+    const after = [...Array(count).keys()].map((i) => (step + 1 + i) % count);
+    const open = after.find((i) => next[i] === undefined);
+    if (open !== undefined) {
+      setStep(open);
       return;
     }
-    const sent = next.every((a) => a === null)
+    const final: ChoiceAnswers = next.map((a) => a ?? null);
+    const sent = final.every((a) => a === null)
       ? sessionController.skipChoice(toolCallId)
-      : sessionController.answerChoice(toolCallId, encodeChoiceAnswers(next));
+      : sessionController.answerChoice(toolCallId, encodeChoiceAnswers(final));
     if (sent) setBusy(true);
   };
 
@@ -68,33 +81,50 @@ function ChoiceSteps({ toolCallId, choice }: { toolCallId: string; choice: Choic
       } else if (e.key === 'Escape') {
         e.preventDefault();
         settle(null);
+      } else if (count > 1 && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        go(step + (e.key === 'ArrowLeft' ? -1 : 1));
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   });
 
-  const count = choice.questions.length;
+  const picked = answers[step];
 
   return (
     <div className="choice-panel" role="group" aria-label={current.question}>
       <div className="choice-panel-head">
         <p className="choice-panel-q">{current.question}</p>
         {count > 1 && (
-          <span className="choice-panel-step">
-            {step + 1} of {count}
-          </span>
+          <div className="choice-panel-nav">
+            <button className="choice-panel-icon" onClick={() => go(step - 1)} disabled={step === 0} aria-label="Previous question">
+              <ChevronRightIcon size={16} className="is-flipped" />
+            </button>
+            <span className="choice-panel-step">
+              {step + 1} of {count}
+            </span>
+            <button className="choice-panel-icon" onClick={() => go(step + 1)} disabled={step === count - 1} aria-label="Next question">
+              <ChevronRightIcon size={16} />
+            </button>
+          </div>
         )}
-        <button className="choice-panel-close" onClick={skipAll} disabled={busy} title="Skip" aria-label="Skip the questions">
+        <button className="choice-panel-icon" onClick={skipAll} disabled={busy} title="Skip" aria-label="Skip the questions">
           <CloseIcon size={16} />
         </button>
       </div>
       <ol className="choice-panel-opts">
         {current.options.map((option, i) => (
           <li key={option.label}>
-            <button className="choice-panel-opt" onClick={() => settle(option.prompt)} disabled={busy}>
+            <button
+              className={`choice-panel-opt${picked === option.prompt ? ' is-picked' : ''}`}
+              onClick={() => settle(option.prompt)}
+              disabled={busy}
+              aria-pressed={picked === option.prompt}
+            >
               <span className="choice-panel-num">{i + 1}</span>
               <span className="choice-panel-label">{option.label}</span>
+              <ArrowUpIcon size={15} className="choice-panel-go" />
             </button>
           </li>
         ))}
