@@ -1712,6 +1712,12 @@
   color: var(--n4);
 }
 
+.tpl-choice-reply {
+  display: flex;
+  flex-direction: column;
+  margin-top: 9px;
+}
+
 .widget-wrap {
   width: 100%;
   margin: 9px 0;
