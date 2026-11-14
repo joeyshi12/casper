@@ -9,7 +9,7 @@ import path from 'node:path';
 import type { CasperEventPayload, ChatSummary } from '@casper/shared';
 import { config } from '../server/src/config.js';
 import { TurnState } from '../server/src/session/TurnState.js';
-import { SessionManager, Session } from '../server/src/session/SessionManager.js';
+import { IDLE_PROCESS_MS, SessionManager, Session } from '../server/src/session/SessionManager.js';
 import { EventStore } from '../server/src/session/EventStore.js';
 import { closeDb, db } from '../server/src/session/db.js';
 import { ChatStore } from '../server/src/session/chatStore.js';
@@ -887,6 +887,32 @@ describe('process lifecycle', () => {
       assert.equal(spawned[0]?.disposed(), false, 'a running turn must not be evicted');
     } finally {
       (config as { maxLiveSessions: number }).maxLiveSessions = cap;
+      mgr.disposeAll();
+    }
+  });
+
+  it('stops a process idle past the limit, and keeps busy and recent ones', async () => {
+    const spawned: FakeProcess[] = [];
+    const mgr = managerWith(() => {
+      const p = fakeKiroProcess({ sessionId: `idle-${spawned.length + 1}` });
+      spawned.push(p);
+      return p;
+    });
+    try {
+      for (const id of ['idle-1', 'idle-2', 'idle-3', 'idle-4']) await mgr.createChat({ cwd: sessionsCwd, chatId: id });
+      const now = Date.now();
+      const [old, busy, compacting, recent] = await Promise.all(
+        ['idle-1', 'idle-2', 'idle-3', 'idle-4'].map((id) => mgr.ensureOpen(id)),
+      );
+      for (const s of [old!, busy!, compacting!]) s.lastActivity = now - IDLE_PROCESS_MS - 1000;
+      busy!.running = true;
+      compacting!.record({ kind: 'compaction', params: { sessionId: compacting!.sessionId, status: { type: 'started' }, summary: null } });
+      recent!.lastActivity = now - IDLE_PROCESS_MS + 1000;
+
+      mgr.stopIdleProcesses(now);
+      assert.deepEqual(spawned.map((p) => p.disposed()), [true, false, false, false]);
+      assert.equal(old!.proc, undefined, 'the chat goes dormant');
+    } finally {
       mgr.disposeAll();
     }
   });

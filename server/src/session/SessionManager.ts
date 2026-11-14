@@ -134,6 +134,15 @@ export interface SessionManagerOptions {
 }
 
 const CANCEL_GRACE_MS = 10_000;
+// How long a chat's kiro process may sit idle before it is stopped, and how often to look.
+export const IDLE_PROCESS_MS = 30 * 60_000;
+const IDLE_SWEEP_MS = 60_000;
+
+/** Whether the session's kiro process has nothing in progress: no turn, which includes one
+ *  waiting on a choice or on subagents, no compaction, and no spawn or reload. */
+function isIdle(s: Session): boolean {
+  return !!s.proc && !s.running && !s.spawning && !s.reloading && !s.turnState.get().compacting;
+}
 
 // Store, turn state and metadata exist as soon as a session is opened; the
 // kiro-cli child (`proc`) spawns lazily on first action.
@@ -342,6 +351,21 @@ export class SessionManager {
     this.defaultModel = opts.defaultModel ?? (async () => undefined);
     this.defaultEffort = opts.defaultEffort ?? (async () => undefined);
     this.defaultAgent = opts.defaultAgent ?? (async () => undefined);
+    this.idleSweep = setInterval(() => this.stopIdleProcesses(), IDLE_SWEEP_MS);
+    this.idleSweep.unref?.();
+  }
+
+  private readonly idleSweep: NodeJS.Timeout;
+
+  /** Stops the kiro process of each chat idle for longer than `IDLE_PROCESS_MS`. The chat
+   *  goes dormant and is loaded again on its next action. */
+  stopIdleProcesses(now = Date.now()): void {
+    for (const s of this.sessions.values()) {
+      if (!isIdle(s) || now - s.lastActivity < IDLE_PROCESS_MS) continue;
+      this.log.info({ sessionId: s.sessionId }, 'idle process stopped');
+      s.proc?.dispose();
+      s.proc = undefined;
+    }
   }
 
   /** What a session is called, from every read path. */
@@ -729,7 +753,7 @@ export class SessionManager {
     let victim: Session | null = null;
     let oldest = Infinity;
     for (const s of liveIds) {
-      if (!s.running && s.lastActivity < oldest) {
+      if (isIdle(s) && s.lastActivity < oldest) {
         oldest = s.lastActivity;
         victim = s;
       }
@@ -1401,6 +1425,7 @@ export class SessionManager {
   }
 
   disposeAll(): void {
+    clearInterval(this.idleSweep);
     for (const id of [...this.sessions.keys()]) this.evict(id);
   }
 }
