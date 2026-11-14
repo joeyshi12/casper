@@ -1777,6 +1777,10 @@
 .choice-panel-opts > li:has(> .is-picked) + li {
   border-top-color: transparent;
 }
+.choice-panel-stack:has(> .is-current > li:last-child > .choice-panel-opt:hover:not(:disabled)) + .choice-panel-other,
+.choice-panel-stack:has(> .is-current > li:last-child > .is-picked) + .choice-panel-other {
+  border-top-color: transparent;
+}
 .choice-panel-opt:hover:not(:disabled),
 .choice-panel-opt.is-picked {
   background: var(--n2);
