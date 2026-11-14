@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fastifyCookie from '@fastify/cookie';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config.js';
-import { LoginStore } from '../session/logins.js';
+import { LOGIN_TTL_SECONDS, LoginStore } from '../session/logins.js';
 import { AttemptLimiter } from '../util/rateLimit.js';
 
 const SESSION_COOKIE = 'casper.sid';
@@ -67,7 +67,7 @@ function cookieOptions(): {
     httpOnly: true,
     sameSite: 'lax',
     secure: 'auto',
-    maxAge: config.sessionTtlSeconds,
+    maxAge: LOGIN_TTL_SECONDS,
   };
 }
 

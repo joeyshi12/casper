@@ -57,25 +57,23 @@ since the unit records paths that move on upgrade. To remove it, run
 
 ## Configuration
 
-Settings live in `~/.config/casper/config.json` (written `0600`). Each also works as
-an environment variable, and the environment wins.
+Settings live in `~/.config/casper/config.json` (written `0600`). The few that differ
+per launch can also be set in the environment, which wins over the file.
 
-| Variable | Config key | Default | |
+| Config key | Variable | Default | |
 |---|---|---|---|
-| `HOST` | `host` | `0.0.0.0` | Bind address |
-| `PORT` | `port` | `4319` | Server port |
-| `CASPER_TOKEN` | `token` | _(generated)_ | Exchanged at login for a per-device cookie |
-| `CASPER_SESSION_TTL_SECONDS` | `sessionTtlSeconds` | `604800` | Device-login lifetime, extended on activity |
-| `KIRO_BIN` | `kiroBin` | `kiro-cli` | Path to kiro-cli |
-| `CASPER_KIRO_SESSIONS_DIR` | `kiroSessionsDir` | `~/.kiro/sessions` | kiro's session files, which Casper reads |
-| `DEFAULT_CWD` | `defaultCwd` | cwd | Working directory for new chats |
-| `DEFAULT_AGENT` | `defaultAgent` | `casper` | Agent for new chats when kiro's `chat.defaultAgent` is unset |
-| `CASPER_FILE_ROOT` | `fileRoot` | `/` | The only folder the file browser can read |
-| `MAX_LIVE_SESSIONS` | `maxLiveSessions` | `6` | Concurrent kiro processes |
-| `EVENT_BUFFER_SIZE` | `eventBufferSize` | `5000` | Events kept per chat for replay on reconnect |
-| `CASPER_MAX_UPLOAD_BYTES` | `maxUploadBytes` | `104857600` | Largest uploaded file |
-| `CASPER_DATA_DIR` | _(env only)_ | `~/.casper` | Where `casper.db` and uploads live |
-| `CASPER_WEB_DIST` | _(env only)_ | beside the bundle | Built web app to serve |
+| `host` | `CASPER_HOST` | `0.0.0.0` | Bind address |
+| `port` | `CASPER_PORT` | `4319` | Server port |
+| `token` | `CASPER_TOKEN` | _(generated)_ | Exchanged at login for a per-device cookie |
+| `kiroBin` | `CASPER_KIRO_BIN` | `kiro-cli` | Path to kiro-cli |
+| `defaultCwd` | | cwd | Working directory for new chats |
+| `defaultAgent` | | `casper` | Agent for new chats when kiro's `chat.defaultAgent` is unset |
+| `fileRoot` | | `/` | The only folder the file browser can read |
+| `kiroSessionsDir` | | `~/.kiro/sessions` | kiro's session files, which Casper reads |
+| `maxLiveSessions` | | `6` | Concurrent kiro processes |
+| `maxUploadBytes` | | `104857600` | Largest uploaded file |
+| _(env only)_ | `CASPER_DATA_DIR` | `~/.casper` | Where `casper.db` and uploads live |
+| _(env only)_ | `CASPER_WEB_DIST` | beside the bundle | Built web app to serve |
 
 Beyond your LAN, put a TLS reverse proxy in front that forwards WebSocket upgrades
 with a long read timeout. The PWA needs HTTPS.

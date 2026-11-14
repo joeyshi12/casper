@@ -131,7 +131,7 @@ export async function workspaceNotFound(cwd: string): Promise<ConfineFailure> {
 }
 
 /** Roots for paths that arrive absolute: fileRoot, plus the data directory so a
- *  narrowed CASPER_FILE_ROOT doesn't hide the user's own uploads. */
+ *  narrowed fileRoot doesn't hide the user's own uploads. */
 export function absoluteRoots(): string[] {
   return [config.fileRoot, config.casperDataDir];
 }
