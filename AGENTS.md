@@ -106,7 +106,9 @@ npm run typecheck              # all workspaces
 - **kiro over ACP** (`KiroProcess`) runs `kiro-cli acp --agent-engine v3`. The agent and model are
   `_meta.kiro` session inputs, not launch flags, and V3 rejects the old flags. On load kiro keeps
   the session's own mode and model. Every request kiro sends needs an answer: permissions are
-  allowed once, anything else gets a JSON-RPC error. kiro sends a subagent's own updates on the
+  allowed once, anything else gets a JSON-RPC error, except a show_choice call's
+  `_kiro/mcp/elicitation`. That one is held until the user picks or types an answer, or the
+  turn stops, which is what keeps the call, and the turn, waiting on them. kiro sends a subagent's own updates on the
   parent's session tagged `_meta.kiro.agentSubtaskId`; they update the subagent's row and must
   not reach the chat's event log.
 - **Branch and rewind both use `session/fork`**, which answers with the new id only. The copy

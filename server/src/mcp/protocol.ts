@@ -1,5 +1,6 @@
 import { MODULES, getGuidelines } from './guidelines.js';
 import { MAX_OPTIONS, validateChoice } from './choice.js';
+import { CHOICE_ANSWER_PREFIX } from '@casper/shared';
 
 /** Used only when a client states no version; otherwise theirs is echoed back. */
 export const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
@@ -77,8 +78,8 @@ const TOOLS = [
     title: 'Ask the user to choose',
     description:
       'Ask the user to pick from a few options, which they tap instead of typing. ' +
-      'Use it wherever you would otherwise end a message asking which of several ' +
-      'ways to proceed.',
+      'Write your answer first and call this last: the call waits until the user picks ' +
+      'an option or types a reply, and returns what they chose.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -160,21 +161,58 @@ function handleShowWidget(
   return ok(id, text(`Widget "${title}" is on screen. Don't repeat its content in prose.`));
 }
 
+/** Asks the client for the user's answer through MCP elicitation. Resolves with the
+ *  client's result, or rejects when the client refused or failed the request. */
+export type AskUser = (params: Record<string, unknown>) => Promise<unknown>;
+
+/** The result when the client cannot ask, such as kiro run outside Casper. The model then
+ *  has to stop and let the pick arrive as the user's next message. */
+export const CHOICE_NOT_WAITED =
+  "Options are on screen. End your turn now and write nothing more: the user's pick arrives as their next message.";
+
+function choiceResult(result: unknown): string {
+  const r = (result ?? {}) as { action?: unknown; content?: { answer?: unknown } };
+  const answer = typeof r.content?.answer === 'string' ? r.content.answer.trim() : '';
+  if (r.action === 'accept' && answer) return `${CHOICE_ANSWER_PREFIX}${answer}`;
+  return 'The question was closed without an answer.';
+}
+
 function handleChoice(
   id: JsonRpcResponse['id'],
   args: Record<string, unknown>,
-): JsonRpcResponse {
+  ask: AskUser | undefined,
+): JsonRpcResponse | Promise<JsonRpcResponse> {
   const problem = validateChoice(args);
   if (problem) return callError(id, problem);
-  // Casper renders it from this call, same as show_widget.
-  return ok(id, text('Options are on screen. Wait for the user to pick one.'));
+  // Casper renders the options from this call, same as show_widget. The elicitation only
+  // holds the call open until the user answers.
+  if (!ask) return ok(id, text(CHOICE_NOT_WAITED));
+  return ask({
+    mode: 'form',
+    message: String(args.question).trim(),
+    requestedSchema: {
+      type: 'object',
+      properties: {
+        answer: { type: 'string', description: "The option's prompt, or what the user typed instead." },
+      },
+      required: ['answer'],
+    },
+  }).then(
+    (result) => ok(id, text(choiceResult(result))),
+    () => ok(id, text(CHOICE_NOT_WAITED)),
+  );
 }
 
 /**
  * One message in, one response or null for notifications. Answers whether or not
- * initialize came first, so stateless clients work too.
+ * initialize came first, so stateless clients work too. show_choice answers later, once
+ * the user has, when `ask` is given.
  */
-export function handleMessage(req: JsonRpcRequest, version: string): JsonRpcResponse | null {
+export function handleMessage(
+  req: JsonRpcRequest,
+  version: string,
+  ask?: AskUser,
+): JsonRpcResponse | null | Promise<JsonRpcResponse> {
   const id = req.id ?? null;
   const method = req.method ?? '';
   const params = req.params ?? {};
@@ -199,7 +237,7 @@ export function handleMessage(req: JsonRpcRequest, version: string): JsonRpcResp
       const args = (params.arguments ?? {}) as Record<string, unknown>;
       if (name === 'read_me') return handleReadMe(id, args);
       if (name === 'show_widget') return handleShowWidget(id, args);
-      if (name === 'show_choice') return handleChoice(id, args);
+      if (name === 'show_choice') return handleChoice(id, args, ask);
       return { jsonrpc: '2.0', id, error: { code: -32602, message: `Unknown tool: ${name}` } };
     }
     default:

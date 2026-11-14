@@ -1,4 +1,6 @@
+import { CHOICE_ANSWER_PREFIX } from '@casper/shared';
 import type { ToolCallView } from '../state/store.js';
+import { outputText } from './toolRender.js';
 
 interface ChoiceOption {
   label: string;
@@ -35,6 +37,25 @@ export function choiceCallOf(tool: ToolCallView): ChoiceData | null {
   return { question, options };
 }
 
+/**
+ * What the user answered, read out of the call's result, or null when the call returned
+ * without one. kiro reports the result live as `rawOutput` with `response` and `message`
+ * fields, and as plain text in its file.
+ */
+export function choiceAnswerOf(tool: Pick<ToolCallView, 'content' | 'output'>): string | null {
+  const out = tool.output as { response?: unknown; message?: unknown } | string | undefined;
+  const texts = [
+    typeof out === 'string' ? out : undefined,
+    typeof out === 'object' && out !== null && typeof out.response === 'string' ? out.response : undefined,
+    typeof out === 'object' && out !== null && typeof out.message === 'string' ? out.message : undefined,
+    outputText(Array.isArray(tool.content) ? tool.content : []),
+  ];
+  for (const t of texts) {
+    if (t?.startsWith(CHOICE_ANSWER_PREFIX)) return t.slice(CHOICE_ANSWER_PREFIX.length).trim() || null;
+  }
+  return null;
+}
+
 export interface ChoiceOutcome {
   /** Label of the option the user took, if they took one. */
   picked: string | null;
@@ -43,9 +64,9 @@ export interface ChoiceOutcome {
 }
 
 /**
- * What became of a choice, judged by the first thing the user said after it appeared: one of
- * the options, or something else entirely. Either way the question is closed - offering
- * buttons for a moment that has passed invites answering a question twice.
+ * What became of a choice, judged by the user's answer: one of the options, or something
+ * else entirely. Either way the question is closed - offering buttons for a moment that has
+ * passed invites answering a question twice.
  */
 export function choiceOutcome(
   options: ChoiceData['options'],

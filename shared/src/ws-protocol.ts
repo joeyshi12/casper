@@ -68,6 +68,22 @@ export interface SteerDroppedEvent {
   clientId?: string;
 }
 
+/** A show_choice call is waiting for the user to pick an option or type a reply. */
+export interface ChoiceWaitingEvent {
+  kind: 'choice_waiting';
+  toolCallId: string;
+}
+
+/** The choice stopped waiting: answered with `answer`, or closed without one when the turn
+ *  was stopped. `clientId` is set when a message typed into the running turn answered it, so
+ *  the sender's tab can drop the copy it showed while waiting. */
+export interface ChoiceSettledEvent {
+  kind: 'choice_settled';
+  toolCallId: string;
+  answer?: string;
+  clientId?: string;
+}
+
 export interface TurnErrorEvent {
   kind: 'turn_error';
   message: string;
@@ -113,6 +129,8 @@ export type CasperEventPayload =
   | HistoryReplacedEvent
   | SteerInjectedEvent
   | SteerDroppedEvent
+  | ChoiceWaitingEvent
+  | ChoiceSettledEvent
   | MetadataEvent
   | CompactionEvent
   | SubagentsChangedEvent
@@ -142,6 +160,13 @@ export interface ClientSteer {
   type: 'steer';
   text: string;
   clientId?: string;
+}
+
+/** The user's answer to the show_choice call the turn is waiting on. */
+export interface ClientChoice {
+  type: 'choice';
+  toolCallId: string;
+  answer: string;
 }
 
 export interface ClientCancel {
@@ -182,6 +207,7 @@ export interface ClientWatchPaths {
 export type ClientMessage =
   | ClientPrompt
   | ClientSteer
+  | ClientChoice
   | ClientCancel
   | ClientSetMode
   | ClientSetModel

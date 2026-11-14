@@ -24,7 +24,8 @@ exactly what it missed.
 - **Model, effort and agent** per chat, with titles from kiro and live context usage
   and credits.
 - **Rich rendering** of Markdown, Mermaid, code and tool calls, a file browser for the
-  workspace, subagent transcripts, and inline widgets from a `show_widget` MCP tool.
+  workspace, subagent transcripts, inline widgets from a `show_widget` MCP tool, and
+  options from a `show_choice` tool that wait for you to tap one or type a reply.
 - **Settings** for kiro's defaults, MCP servers and skills, and your logged-in devices.
 - **PWA** that installs to a home screen.
 

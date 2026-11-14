@@ -115,7 +115,7 @@ function ToolCallCardBody({ tool, arriving, active }: ToolCallCardProps) {
     return widget.code ? <WidgetBlock code={widget.code} /> : null;
   }
   const choice = choiceCallOf(tool);
-  if (choice) return <ChoiceTemplate data={choice} toolId={tool.id} />;
+  if (choice) return <ChoiceTemplate data={choice} tool={tool} />;
   return <GenericToolCall tool={tool} arriving={arriving} active={active} />;
 }
 

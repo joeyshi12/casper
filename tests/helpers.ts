@@ -144,6 +144,9 @@ export function fakeKiroProcess(
     cancel(...a: unknown[]) {
       log('cancel', a);
     },
+    answerElicitation(...a: unknown[]) {
+      log('answerElicitation', a);
+    },
     async setMode(...a: unknown[]) {
       log('setMode', a);
     },

@@ -357,6 +357,8 @@ export const ACP_METHODS = {
   sessionFork: 'session/fork',
   sessionUpdate: 'session/update',
   requestPermission: 'session/request_permission',
+  // kiro forwards an MCP server's elicitation/create to the client as this request.
+  mcpElicitation: '_kiro/mcp/elicitation',
   compact: '_kiro/session/compact',
   sessionContext: '_kiro/session/context',
   accountUsage: '_kiro/account/getUsage',
@@ -364,6 +366,24 @@ export const ACP_METHODS = {
   steerClear: '_session/steer/clear',
   checkpointRevert: '_kiro/checkpoint/revertMultiple',
 } as const;
+
+/** The params of kiro's `_kiro/mcp/elicitation` request. */
+export interface KiroElicitationParams {
+  sessionId: string;
+  toolCallId?: string;
+  elicitation?: { mode?: string; message?: string; requestedSchema?: unknown };
+}
+
+/** The answer to an elicitation, as MCP defines it. */
+export type ElicitationResult =
+  | { action: 'accept'; content: Record<string, string> }
+  | { action: 'decline' | 'cancel' };
+
+/**
+ * show_choice's tool result when the user answered starts with this, followed by what they
+ * sent. The web reads the answer back out of it, so a reloaded chat still shows the pick.
+ */
+export const CHOICE_ANSWER_PREFIX = 'The user answered: ';
 
 /** kiro's notice that a requested agent could not be used, so the session fell back to
  *  another one. */

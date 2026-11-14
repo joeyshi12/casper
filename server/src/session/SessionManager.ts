@@ -3,12 +3,16 @@ import {
   contextBreakdownOf,
   emptyObservabilitySnapshot,
   KIRO_AGENT_NOT_FOUND,
+  kiroToolName,
   stripAttachmentsLine,
   type AgentMode,
   type CasperEvent,
   type AccountUsage,
   type CasperEventPayload,
   type ChatUsageResponse,
+  type ElicitationResult,
+  type JsonRpcId,
+  type KiroElicitationParams,
   type KiroUpdateMeta,
   type MessageAttachment,
   type JsonRpcNotification,
@@ -92,6 +96,8 @@ function resolveCwd(input?: string): string {
 export interface ManagedProcess {
   on(event: 'notification', cb: (n: JsonRpcNotification) => void): unknown;
   on(event: 'exit', cb: (code: number | null, signal: string | null) => void): unknown;
+  on(event: 'elicitation', cb: (id: JsonRpcId, params: KiroElicitationParams) => void): unknown;
+  answerElicitation(id: JsonRpcId, result: ElicitationResult): void;
   initialize(): Promise<unknown>;
   newSession(params: SessionNewParams): Promise<SessionNewResult>;
   loadSession(params: SessionLoadParams): Promise<SessionNewResult>;
@@ -153,6 +159,11 @@ export class Session {
   lastTurn?: { messageId?: string; output: boolean; failed: boolean };
   // Messages sent into the running turn that the model has not read yet, by kiro's id.
   readonly steers = new Map<string, { text: string; clientId?: string }>();
+  // The show_choice calls of the running turn, which are the only calls whose elicitation
+  // Casper answers.
+  readonly choiceCalls = new Set<string>();
+  // The show_choice call waiting for the user, and kiro's request to answer when they do.
+  choice?: { toolCallId: string; requestId: JsonRpcId; proc: ManagedProcess };
   // What the running turn took, from kiro's turn_completion.
   turnStats?: TurnStats;
   title = '';
@@ -565,11 +576,29 @@ export class SessionManager {
         return;
       }
       if (subagentId) this.trackSubagentCall(s, subagentId, update);
+      if (update.sessionUpdate === 'tool_call' && kiroToolName(update as { title?: string })?.endsWith('show_choice')) {
+        s.choiceCalls.add((update as { toolCallId: string }).toolCallId);
+      }
       if (s.lastTurn) s.lastTurn.output = true;
       s.record({ kind: 'session_update', update });
     });
+    proc.on('elicitation', (id: JsonRpcId, params: KiroElicitationParams) => {
+      const toolCallId = params?.toolCallId;
+      // Only a show_choice call of this session's running turn is held for the user. Any
+      // other MCP server's elicitation is declined, as it was before Casper answered any.
+      if (
+        s.proc !== proc || !s.running || s.cancelRequested || s.choice ||
+        params?.sessionId !== s.sessionId || !toolCallId || !s.choiceCalls.has(toolCallId)
+      ) {
+        proc.answerElicitation(id, { action: 'decline' });
+        return;
+      }
+      s.choice = { toolCallId, requestId: id, proc };
+      s.record({ kind: 'choice_waiting', toolCallId });
+    });
     proc.on('exit', (code: number | null, signal: string | null) => {
       if (s.proc !== proc) return;
+      this.settleChoice(s, undefined);
       s.record({ kind: 'process_exited', code, signal });
       s.proc = undefined;
       s.running = false;
@@ -871,6 +900,7 @@ export class SessionManager {
     if (opts.retry) await this.dropFailedTurn(chatId, s, proc);
     s.lastTurn = { output: false, failed: false };
     s.turnStats = undefined;
+    s.choiceCalls.clear();
     let recorded: MessageAttachment[] | undefined;
     if (attachments?.length) {
       const ordinal = await promptCount(s.sessionId);
@@ -887,6 +917,7 @@ export class SessionManager {
         else s.recorder.discard();
         if (s.lastTurn) s.lastTurn.failed = res.stopReason === 'cancelled';
         await this.dropSteers(s, proc);
+        this.settleChoice(s, undefined);
         const stats = s.turnStats;
         s.turnStats = undefined;
         s.record({ kind: 'turn_ended', stopReason: res.stopReason, ...(stats ? { stats } : {}) });
@@ -895,6 +926,7 @@ export class SessionManager {
         if (s.lastTurn) s.lastTurn.failed = true;
         s.turnStats = undefined;
         await this.dropSteers(s, proc);
+        this.settleChoice(s, undefined);
         if (s.cancelRequested) {
           // The user stopped the turn and the process had to be killed to do it.
           this.saveEnding(chatId, s.recorder.finish({ kind: 'interrupted' }));
@@ -930,6 +962,11 @@ export class SessionManager {
     if (!message) throw new Error('The message is empty');
     const proc = s?.proc;
     if (!s || !proc || !s.running || s.cancelRequested) throw new Error('No turn is running');
+    // While a choice waits, a typed message is the answer to it rather than a steer.
+    if (s.choice) {
+      this.settleChoice(s, message, clientId);
+      return;
+    }
     // Registered under the id kiro is given before it is sent, since kiro can read the
     // message before its answer arrives.
     const id = crypto.randomUUID();
@@ -998,6 +1035,32 @@ export class SessionManager {
     }
   }
 
+  /** The user picked an option of the choice the turn is waiting on. */
+  answerChoice(chatId: string, toolCallId: string, answer: string): void {
+    const s = this.sessions.get(this.store.sessionIdForChat(chatId) ?? '');
+    const text = answer.trim();
+    if (!text) throw new Error('The answer is empty');
+    if (!s?.choice || s.choice.toolCallId !== toolCallId) throw new Error('That question is no longer waiting for an answer');
+    this.settleChoice(s, text);
+  }
+
+  /** Ends the wait of the choice the turn is held on, with the user's answer, or with none
+   *  when the turn is stopped or ends. */
+  private settleChoice(s: Session, answer: string | undefined, clientId?: string): void {
+    const choice = s.choice;
+    if (!choice) return;
+    s.choice = undefined;
+    const result: ElicitationResult = answer ? { action: 'accept', content: { answer } } : { action: 'cancel' };
+    // A process that has exited has nothing waiting on the answer.
+    if (s.proc === choice.proc) choice.proc.answerElicitation(choice.requestId, result);
+    s.record({
+      kind: 'choice_settled',
+      toolCallId: choice.toolCallId,
+      ...(answer ? { answer } : {}),
+      ...(clientId ? { clientId } : {}),
+    });
+  }
+
   /**
    * Asks kiro to cancel the turn. If the turn has not ended within the grace period, kiro
    * has stopped handling the session (its agent loop can panic while the process stays
@@ -1007,6 +1070,7 @@ export class SessionManager {
     const s = this.sessions.get(this.store.sessionIdForChat(chatId) ?? '');
     const proc = s?.proc;
     if (!s || !proc) return;
+    this.settleChoice(s, undefined);
     proc.cancel(s.sessionId);
     if (!s.running) return;
     s.cancelRequested = true;
