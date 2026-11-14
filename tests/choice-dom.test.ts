@@ -19,6 +19,7 @@ let sent: unknown[];
 let answered: [string, string][];
 
 const data = {
+  leadIn: '',
   question: 'Which one?',
   options: [
     { label: 'First', prompt: 'Take the first' },
@@ -146,5 +147,22 @@ describe('choice events in the store', () => {
     useStore.getState().applyEvent(event(2, { kind: 'choice_settled', toolCallId: 'choice-1', answer: 'A grid', clientId: 'pending-3' }));
     assert.equal(useStore.getState().observability.waitingChoice, undefined);
     assert.deepEqual(useStore.getState().pending, []);
+  });
+});
+
+describe('the lead_in of a show_choice call', () => {
+  it('renders as reply text above the options', async () => {
+    // MarkdownRenderer preloads katex when idle, which jsdom cannot import; skip it.
+    (globalThis as Any).requestIdleCallback = () => {};
+    const { ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js');
+    const tool = {
+      id: 'choice-9', name: 'casper/show_choice', title: '@casper/show_choice', status: 'in_progress', content: [],
+      input: { lead_in: 'Both **fit** the page.', question: 'Which one?', options: [{ label: 'First' }, { label: 'Second' }] },
+    };
+    act(() => root.render(createElement(ToolCallCard, { tool })));
+    const lead = host.querySelector('.msg-assistant');
+    assert.equal(lead?.textContent?.trim(), 'Both fit the page.');
+    assert.equal(lead?.querySelector('strong')?.textContent, 'fit');
+    assert.equal(lead?.nextElementSibling?.className, 'tpl-choice');
   });
 });

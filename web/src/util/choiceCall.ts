@@ -1,6 +1,7 @@
 import { CHOICE_ANSWER_PREFIX } from '@casper/shared';
 import type { ToolCallView } from '../state/store.js';
 import { outputText } from './toolRender.js';
+import { leadInOf } from './widgetCall.js';
 
 interface ChoiceOption {
   label: string;
@@ -10,6 +11,8 @@ interface ChoiceOption {
 }
 
 export interface ChoiceData {
+  /** The sentence that introduces the options, shown above them. */
+  leadIn: string;
   question: string;
   options: ChoiceOption[];
 }
@@ -34,7 +37,7 @@ export function choiceCallOf(tool: ToolCallView): ChoiceData | null {
     options.push({ label, detail, prompt });
   }
   if (!question || options.length < 2) return null;
-  return { question, options };
+  return { leadIn: leadInOf(data), question, options };
 }
 
 /**

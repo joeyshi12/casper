@@ -112,11 +112,34 @@ function ToolCallCardBody({ tool, arriving, active }: ToolCallCardProps) {
         </div>
       );
     }
-    return widget.code ? <WidgetBlock code={widget.code} /> : null;
+    if (!widget.code) return null;
+    return (
+      <>
+        <LeadIn text={widget.leadIn} />
+        <WidgetBlock code={widget.code} />
+      </>
+    );
   }
   const choice = choiceCallOf(tool);
-  if (choice) return <ChoiceTemplate data={choice} tool={tool} />;
+  if (choice) {
+    return (
+      <>
+        <LeadIn text={choice.leadIn} />
+        <ChoiceTemplate data={choice} tool={tool} />
+      </>
+    );
+  }
   return <GenericToolCall tool={tool} arriving={arriving} active={active} />;
+}
+
+/** The reply text a show_widget or show_choice call passes to introduce itself. */
+function LeadIn({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <div className="msg msg-assistant">
+      <MarkdownRenderer text={text} />
+    </div>
+  );
 }
 
 function ToolImages({ paths }: { paths: string[] }) {
