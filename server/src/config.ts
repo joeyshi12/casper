@@ -126,30 +126,6 @@ const setting = (key: string, fallback: string): string => pickString(undefined,
 
 const settingInt = (key: string, fallback: number): number => pickInt(undefined, fileConfig[key], fallback);
 
-/** Environment variables earlier versions read, and what replaced each. */
-const RETIRED_ENV: Record<string, string> = {
-  HOST: 'CASPER_HOST',
-  PORT: 'CASPER_PORT',
-  KIRO_BIN: 'CASPER_KIRO_BIN',
-  DEFAULT_CWD: 'defaultCwd in the config file',
-  DEFAULT_AGENT: 'defaultAgent in the config file',
-  CASPER_FILE_ROOT: 'fileRoot in the config file',
-  CASPER_KIRO_SESSIONS_DIR: 'kiroSessionsDir in the config file',
-  MAX_LIVE_SESSIONS: 'maxLiveSessions in the config file',
-  CASPER_MAX_UPLOAD_BYTES: 'maxUploadBytes in the config file',
-  CASPER_SESSION_TTL_SECONDS: 'nothing; the login lifetime is fixed at 7 days',
-  EVENT_BUFFER_SIZE: 'nothing; the replay buffer is fixed',
-};
-
-/** A warning for each retired variable that is set, so an old override is not lost silently. */
-export function retiredEnvWarnings(env: NodeJS.ProcessEnv): string[] {
-  return Object.entries(RETIRED_ENV)
-    .filter(([name]) => env[name] !== undefined && env[name] !== '')
-    .map(([name, now]) => `${name} is no longer read; use ${now}`);
-}
-
-for (const msg of retiredEnvWarnings(process.env)) logger.warn(`config: ${msg}`);
-
 // Resolves kiro-cli to an absolute path: a minimal systemd/bare-node PATH may
 // omit ~/.toolbox/bin, so `spawn kiro-cli` would otherwise ENOENT.
 function resolveKiroBin(explicit: string, home: string): string {

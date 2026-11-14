@@ -75,9 +75,6 @@ per launch can also be set in the environment, which wins over the file.
 | _(env only)_ | `CASPER_DATA_DIR` | `~/.casper` | Where `casper.db` and uploads live |
 | _(env only)_ | `CASPER_WEB_DIST` | beside the bundle | Built web app to serve |
 
-Earlier versions read more variables, such as `HOST`, `PORT` and `MAX_LIVE_SESSIONS`.
-Casper logs a warning at startup for any that are still set.
-
 Beyond your LAN, put a TLS reverse proxy in front that forwards WebSocket upgrades
 with a long read timeout. The PWA needs HTTPS.
 
