@@ -127,6 +127,12 @@ describe('a choice the running turn waits on', () => {
     render({ status: 'completed', content: [{ type: 'text', text: 'The user answered: A grid instead' }] });
     assert.equal(host.querySelector('.is-picked'), null);
     assert.deepEqual(buttons().map((b) => b.disabled), [true, true]);
+    assert.equal(host.querySelector('.tpl-choice-reply .msg-user-text')?.textContent, 'A grid instead');
+  });
+
+  it('shows no reply under the card for a tapped option', () => {
+    render({ status: 'completed', content: [{ type: 'text', text: 'The user answered: Take the second' }] });
+    assert.equal(host.querySelector('.tpl-choice-reply'), null);
   });
 });
 

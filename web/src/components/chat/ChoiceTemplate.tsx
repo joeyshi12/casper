@@ -37,6 +37,9 @@ export function ChoiceTemplate({ data, tool }: { data: ChoiceData; tool: Pick<To
   const picked = justPicked ?? outcome.picked;
   const closed = picked !== null || outcome.superseded;
   const usable = !closed && (waiting || accepting);
+  // A typed answer went to the call, not into the chat, so the card shows it. An older
+  // choice was answered by a prompt, which the transcript already shows.
+  const typed = answer !== null && outcome.superseded ? answer : null;
 
   const choose = (option: ChoiceData['options'][number]) => {
     if (!usable) return;
@@ -64,6 +67,15 @@ export function ChoiceTemplate({ data, tool }: { data: ChoiceData; tool: Pick<To
           );
         })}
       </div>
+      {typed && (
+        <div className="tpl-choice-reply">
+          <div className="msg-user-wrap">
+            <div className="msg msg-user">
+              <div className="msg-user-text">{typed}</div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
