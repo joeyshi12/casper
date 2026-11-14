@@ -9,7 +9,7 @@ import path from 'node:path';
 import type { CasperEventPayload, ChatSummary } from '@casper/shared';
 import { config } from '../server/src/config.js';
 import { TurnState } from '../server/src/session/TurnState.js';
-import { SessionManager, Session } from '../server/src/session/SessionManager.js';
+import { IDLE_PROCESS_MS, SessionManager, Session } from '../server/src/session/SessionManager.js';
 import { EventStore } from '../server/src/session/EventStore.js';
 import { closeDb, db } from '../server/src/session/db.js';
 import { ChatStore } from '../server/src/session/chatStore.js';
@@ -892,8 +892,6 @@ describe('process lifecycle', () => {
   });
 
   it('stops a process idle past the limit, and keeps busy and recent ones', async () => {
-    const limit = config.idleProcessSeconds;
-    (config as { idleProcessSeconds: number }).idleProcessSeconds = 60;
     const spawned: FakeProcess[] = [];
     const mgr = managerWith(() => {
       const p = fakeKiroProcess({ sessionId: `idle-${spawned.length + 1}` });
@@ -906,21 +904,15 @@ describe('process lifecycle', () => {
       const [old, busy, compacting, recent] = await Promise.all(
         ['idle-1', 'idle-2', 'idle-3', 'idle-4'].map((id) => mgr.ensureOpen(id)),
       );
-      for (const s of [old!, busy!, compacting!]) s.lastActivity = now - 61_000;
+      for (const s of [old!, busy!, compacting!]) s.lastActivity = now - IDLE_PROCESS_MS - 1000;
       busy!.running = true;
       compacting!.record({ kind: 'compaction', params: { sessionId: compacting!.sessionId, status: { type: 'started' }, summary: null } });
-      recent!.lastActivity = now - 30_000;
+      recent!.lastActivity = now - IDLE_PROCESS_MS + 1000;
 
       mgr.stopIdleProcesses(now);
       assert.deepEqual(spawned.map((p) => p.disposed()), [true, false, false, false]);
       assert.equal(old!.proc, undefined, 'the chat goes dormant');
-
-      (config as { idleProcessSeconds: number }).idleProcessSeconds = 0;
-      recent!.lastActivity = 0;
-      mgr.stopIdleProcesses(now);
-      assert.equal(spawned[3]!.disposed(), false, '0 turns the timeout off');
     } finally {
-      (config as { idleProcessSeconds: number }).idleProcessSeconds = limit;
       mgr.disposeAll();
     }
   });

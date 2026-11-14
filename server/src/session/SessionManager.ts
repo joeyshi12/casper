@@ -134,7 +134,8 @@ export interface SessionManagerOptions {
 }
 
 const CANCEL_GRACE_MS = 10_000;
-// How often idle kiro processes are looked for.
+// How long a chat's kiro process may sit idle before it is stopped, and how often to look.
+export const IDLE_PROCESS_MS = 30 * 60_000;
 const IDLE_SWEEP_MS = 60_000;
 
 /** Whether the session's kiro process has nothing in progress: no turn, which includes one
@@ -356,13 +357,11 @@ export class SessionManager {
 
   private readonly idleSweep: NodeJS.Timeout;
 
-  /** Stops the kiro process of each chat idle for longer than `idleProcessSeconds`. The chat
+  /** Stops the kiro process of each chat idle for longer than `IDLE_PROCESS_MS`. The chat
    *  goes dormant and is loaded again on its next action. */
   stopIdleProcesses(now = Date.now()): void {
-    const limitMs = config.idleProcessSeconds * 1000;
-    if (limitMs <= 0) return;
     for (const s of this.sessions.values()) {
-      if (!isIdle(s) || now - s.lastActivity < limitMs) continue;
+      if (!isIdle(s) || now - s.lastActivity < IDLE_PROCESS_MS) continue;
       this.log.info({ sessionId: s.sessionId }, 'idle process stopped');
       s.proc?.dispose();
       s.proc = undefined;
