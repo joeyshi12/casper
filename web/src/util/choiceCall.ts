@@ -1,20 +1,37 @@
-import { CHOICE_ANSWER_PREFIX } from '@casper/shared';
+import { oneLine, parseChoiceResult, type ChoiceResult } from '@casper/shared';
 import type { ToolCallView } from '../state/store.js';
 import { outputText } from './toolRender.js';
 import { leadInOf } from './widgetCall.js';
 
 interface ChoiceOption {
   label: string;
-  detail?: string;
-  /** Sent when tapped. The label is the sensible default. */
+  /** What the answer says when this is picked. The label is the sensible default. */
   prompt: string;
 }
 
-export interface ChoiceData {
-  /** The sentence that introduces the options, shown above them. */
-  leadIn: string;
+export interface ChoiceQuestion {
   question: string;
   options: ChoiceOption[];
+}
+
+export interface ChoiceData {
+  /** The sentence that introduces the questions, shown above them. */
+  leadIn: string;
+  questions: ChoiceQuestion[];
+}
+
+function questionOf(raw: unknown): ChoiceQuestion | null {
+  const q = (raw ?? {}) as Record<string, unknown>;
+  const question = typeof q.question === 'string' ? q.question.trim() : '';
+  const options: ChoiceOption[] = [];
+  for (const item of Array.isArray(q.options) ? q.options : []) {
+    const o = (item ?? {}) as Record<string, unknown>;
+    const label = typeof o.label === 'string' && o.label.trim() ? o.label : '';
+    if (!label) continue;
+    const prompt = typeof o.prompt === 'string' && o.prompt.trim() ? o.prompt : label;
+    options.push({ label, prompt });
+  }
+  return question && options.length >= 2 ? { question, options } : null;
 }
 
 /**
@@ -25,27 +42,17 @@ export function choiceCallOf(tool: ToolCallView): ChoiceData | null {
   // kiro namespaces MCP tools, so match the suffix rather than the whole name.
   if (!tool.name?.endsWith('show_choice')) return null;
   const data = (tool.input ?? {}) as Record<string, unknown>;
-  const question = typeof data.question === 'string' ? data.question.trim() : '';
-  const raw = Array.isArray(data.options) ? data.options : [];
-  const options: ChoiceOption[] = [];
-  for (const item of raw) {
-    const o = (item ?? {}) as Record<string, unknown>;
-    const label = typeof o.label === 'string' && o.label.trim() ? o.label : '';
-    if (!label) continue;
-    const detail = typeof o.detail === 'string' && o.detail.trim() ? o.detail : undefined;
-    const prompt = typeof o.prompt === 'string' && o.prompt.trim() ? o.prompt : label;
-    options.push({ label, detail, prompt });
-  }
-  if (!question || options.length < 2) return null;
-  return { leadIn: leadInOf(data), question, options };
+  const questions = (Array.isArray(data.questions) ? data.questions : []).map(questionOf);
+  if (questions.length === 0 || questions.some((q) => !q)) return null;
+  return { leadIn: leadInOf(data), questions: questions as ChoiceQuestion[] };
 }
 
 /**
- * What the user answered, read out of the call's result, or null when the call returned
- * without one. kiro reports the result live as `rawOutput` with `response` and `message`
- * fields, and as plain text in its file.
+ * What the user did, read out of the call's result, or null while the call is open or when
+ * it closed without an answer. kiro reports the result live as `rawOutput` with `response`
+ * and `message` fields, and as plain text in its file.
  */
-export function choiceAnswerOf(tool: Pick<ToolCallView, 'content' | 'output'>): string | null {
+export function choiceResultOf(tool: Pick<ToolCallView, 'content' | 'output'>, data: ChoiceData): ChoiceResult | null {
   const out = tool.output as { response?: unknown; message?: unknown } | string | undefined;
   const texts = [
     typeof out === 'string' ? out : undefined,
@@ -53,29 +60,16 @@ export function choiceAnswerOf(tool: Pick<ToolCallView, 'content' | 'output'>): 
     typeof out === 'object' && out !== null && typeof out.message === 'string' ? out.message : undefined,
     outputText(Array.isArray(tool.content) ? tool.content : []),
   ];
+  const questions = data.questions.map((q) => q.question);
   for (const t of texts) {
-    if (t?.startsWith(CHOICE_ANSWER_PREFIX)) return t.slice(CHOICE_ANSWER_PREFIX.length).trim() || null;
+    const parsed = t ? parseChoiceResult(t, questions) : null;
+    if (parsed) return parsed;
   }
   return null;
 }
 
-export interface ChoiceOutcome {
-  /** Label of the option the user took, if they took one. */
-  picked: string | null;
-  /** They said something else instead, so the question has been left behind. */
-  superseded: boolean;
-}
-
-/**
- * What became of a choice, judged by the user's answer: one of the options, or something
- * else entirely. Either way the question is closed - offering buttons for a moment that has
- * passed invites answering a question twice.
- */
-export function choiceOutcome(
-  options: ChoiceData['options'],
-  reply: string | null,
-): ChoiceOutcome {
-  if (reply === null) return { picked: null, superseded: false };
-  const hit = options.find((o) => o.prompt.trim() === reply.trim());
-  return hit ? { picked: hit.label, superseded: false } : { picked: null, superseded: true };
+/** The label of the option an answer picked, or the answer itself when it was typed. */
+export function answerLabel(question: ChoiceQuestion, answer: string): string {
+  // The result holds each answer on one line, so compare one-line forms.
+  return question.options.find((o) => oneLine(o.prompt) === oneLine(answer))?.label ?? answer;
 }

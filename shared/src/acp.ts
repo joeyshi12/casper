@@ -379,12 +379,6 @@ export type ElicitationResult =
   | { action: 'accept'; content: Record<string, string> }
   | { action: 'decline' | 'cancel' };
 
-/**
- * show_choice's tool result when the user answered starts with this, followed by what they
- * sent. The web reads the answer back out of it, so a reloaded chat still shows the pick.
- */
-export const CHOICE_ANSWER_PREFIX = 'The user answered: ';
-
 /** kiro's notice that a requested agent could not be used, so the session fell back to
  *  another one. */
 export const KIRO_AGENT_NOT_FOUND = '_kiro/customAgent/not_found';

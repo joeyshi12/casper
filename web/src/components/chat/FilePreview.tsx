@@ -70,7 +70,7 @@ function PreviewModal({
 
   return (
     <div className="fpreview-backdrop" onClick={onBackdropClick}>
-      <div className={`fpreview-modal${full ? ' fpreview-full' : ''}`}>
+      <div className={`fpreview-modal${full ? ' fpreview-full' : ''}`} role="dialog" aria-modal="true" aria-label={preview.path}>
         <div className="fpreview-header">
           {canRender && !preview.error && (
             <div className="fpreview-seg" role="group" aria-label="Preview mode">

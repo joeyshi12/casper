@@ -24,8 +24,7 @@ const widgetItem = (id: string): TranscriptItem =>
 
 const choiceItem = (id: string): TranscriptItem =>
   toolItem(id, 'casper/show_choice', {
-    question: 'Which one?',
-    options: [{ label: 'a', prompt: 'a' }, { label: 'b', prompt: 'b' }],
+    questions: [{ question: 'Which one?', options: [{ label: 'a', prompt: 'a' }, { label: 'b', prompt: 'b' }] }],
   });
 
 const subagentItem = (id: string): TranscriptItem => toolItem(id, 'invoke_sub_agent', { name: 'context-gatherer' });

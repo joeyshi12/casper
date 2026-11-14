@@ -1,6 +1,11 @@
 import { MODULES, getGuidelines } from './guidelines.js';
-import { MAX_OPTIONS, validateChoice } from './choice.js';
-import { CHOICE_ANSWER_PREFIX } from '@casper/shared';
+import { MAX_OPTIONS, MAX_QUESTIONS, questionTexts, validateChoice } from './choice.js';
+import {
+  decodeChoiceAnswers,
+  formatChoiceAnswers,
+  formatChoiceReply,
+  formatChoiceSkipped,
+} from '@casper/shared';
 
 /** Used only when a client states no version; otherwise theirs is echoed back. */
 export const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
@@ -96,33 +101,44 @@ const TOOLS = [
     name: 'show_choice',
     title: 'Ask the user to choose',
     description:
-      'Ask the user to pick from a few options, which they tap instead of typing. ' +
-      'Write your answer first and call this last: the call waits until the user picks ' +
-      'an option or types a reply, and returns what they chose.',
+      'Ask the user to pick from a few options, which they tap instead of typing. Ask up ' +
+      `to ${MAX_QUESTIONS} independent questions in one call; they are asked one after another. ` +
+      'Write your answer first and call this last: the call waits until the user answers ' +
+      'or types a reply, and returns what they chose.',
     inputSchema: {
       type: 'object',
       properties: {
         lead_in: { type: 'string', description: LEAD_IN_DESCRIPTION },
-        question: { type: 'string', description: 'What they are deciding.' },
-        options: {
+        questions: {
           type: 'array',
-          minItems: 2,
-          maxItems: MAX_OPTIONS,
+          minItems: 1,
+          maxItems: MAX_QUESTIONS,
           items: {
             type: 'object',
             properties: {
-              label: { type: 'string', description: 'Short, tappable phrase.' },
-              detail: { type: 'string', description: 'One line of context.' },
-              prompt: {
-                type: 'string',
-                description: 'Message sent when tapped. Defaults to the label.',
+              question: { type: 'string', description: 'What they are deciding.' },
+              options: {
+                type: 'array',
+                minItems: 2,
+                maxItems: MAX_OPTIONS,
+                items: {
+                  type: 'object',
+                  properties: {
+                    label: { type: 'string', description: 'The option, as a short phrase on one line.' },
+                    prompt: {
+                      type: 'string',
+                      description: 'What the answer says when this is picked. Defaults to the label.',
+                    },
+                  },
+                  required: ['label'],
+                },
               },
             },
-            required: ['label'],
+            required: ['question', 'options'],
           },
         },
       },
-      required: ['lead_in', 'question', 'options'],
+      required: ['lead_in', 'questions'],
     },
   },
 ];
@@ -192,11 +208,15 @@ export type AskUser = (params: Record<string, unknown>) => Promise<unknown>;
 export const CHOICE_NOT_WAITED =
   "Options are on screen. End your turn now and write nothing more: the user's pick arrives as their next message.";
 
-function choiceResult(result: unknown): string {
+function choiceResult(result: unknown, questions: string[]): string {
   const r = (result ?? {}) as { action?: unknown; content?: { answer?: unknown } };
-  const answer = typeof r.content?.answer === 'string' ? r.content.answer.trim() : '';
-  if (r.action === 'accept' && answer) return `${CHOICE_ANSWER_PREFIX}${answer}`;
-  return 'The question was closed without an answer.';
+  const raw = typeof r.content?.answer === 'string' ? r.content.answer.trim() : '';
+  if (r.action === 'accept' && raw) {
+    const answers = decodeChoiceAnswers(raw, questions.length);
+    return answers ? formatChoiceAnswers(questions, answers) : formatChoiceReply(raw);
+  }
+  if (r.action === 'decline') return formatChoiceSkipped();
+  return 'The questions were closed without an answer.';
 }
 
 function handleChoice(
@@ -209,18 +229,19 @@ function handleChoice(
   // Casper renders the options from this call, same as show_widget. The elicitation only
   // holds the call open until the user answers.
   if (!ask) return ok(id, text(CHOICE_NOT_WAITED));
+  const questions = questionTexts(args);
   return ask({
     mode: 'form',
-    message: String(args.question).trim(),
+    message: questions.join('\n'),
     requestedSchema: {
       type: 'object',
       properties: {
-        answer: { type: 'string', description: "The option's prompt, or what the user typed instead." },
+        answer: { type: 'string', description: 'The answers as JSON, or what the user typed instead.' },
       },
       required: ['answer'],
     },
   }).then(
-    (result) => ok(id, text(choiceResult(result))),
+    (result) => ok(id, text(choiceResult(result, questions))),
     () => ok(id, text(CHOICE_NOT_WAITED)),
   );
 }

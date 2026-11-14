@@ -1,5 +1,6 @@
 export * from './acp.js';
 export * from './attachments.js';
+export * from './choice.js';
 export * from './observability.js';
 export * from './rest-dto.js';
 export * from './titles.js';

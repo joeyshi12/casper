@@ -134,6 +134,8 @@ export interface SessionManagerOptions {
 }
 
 const CANCEL_GRACE_MS = 10_000;
+// What kiro is sent for a choice still waiting when its turn stops or ends.
+const CHOICE_CLOSED: ElicitationResult = { action: 'cancel' };
 // How long a chat's kiro process may sit idle before it is stopped, and how often to look.
 export const IDLE_PROCESS_MS = 30 * 60_000;
 const IDLE_SWEEP_MS = 60_000;
@@ -622,7 +624,7 @@ export class SessionManager {
     });
     proc.on('exit', (code: number | null, signal: string | null) => {
       if (s.proc !== proc) return;
-      this.settleChoice(s, undefined);
+      this.settleChoice(s, CHOICE_CLOSED);
       s.record({ kind: 'process_exited', code, signal });
       s.proc = undefined;
       s.running = false;
@@ -941,7 +943,7 @@ export class SessionManager {
         else s.recorder.discard();
         if (s.lastTurn) s.lastTurn.failed = res.stopReason === 'cancelled';
         await this.dropSteers(s, proc);
-        this.settleChoice(s, undefined);
+        this.settleChoice(s, CHOICE_CLOSED);
         const stats = s.turnStats;
         s.turnStats = undefined;
         s.record({ kind: 'turn_ended', stopReason: res.stopReason, ...(stats ? { stats } : {}) });
@@ -950,7 +952,7 @@ export class SessionManager {
         if (s.lastTurn) s.lastTurn.failed = true;
         s.turnStats = undefined;
         await this.dropSteers(s, proc);
-        this.settleChoice(s, undefined);
+        this.settleChoice(s, CHOICE_CLOSED);
         if (s.cancelRequested) {
           // The user stopped the turn and the process had to be killed to do it.
           this.saveEnding(chatId, s.recorder.finish({ kind: 'interrupted' }));
@@ -988,7 +990,7 @@ export class SessionManager {
     if (!s || !proc || !s.running || s.cancelRequested) throw new Error('No turn is running');
     // While a choice waits, a typed message is the answer to it rather than a steer.
     if (s.choice) {
-      this.settleChoice(s, message, clientId);
+      this.settleChoice(s, { action: 'accept', content: { answer: message } }, clientId);
       return;
     }
     // Registered under the id kiro is given before it is sent, since kiro can read the
@@ -1059,30 +1061,22 @@ export class SessionManager {
     }
   }
 
-  /** The user picked an option of the choice the turn is waiting on. */
+  /** The user answered the choice the turn is waiting on, or skipped it with an empty answer. */
   answerChoice(chatId: string, toolCallId: string, answer: string): void {
     const s = this.sessions.get(this.store.sessionIdForChat(chatId) ?? '');
-    const text = answer.trim();
-    if (!text) throw new Error('The answer is empty');
     if (!s?.choice || s.choice.toolCallId !== toolCallId) throw new Error('That question is no longer waiting for an answer');
-    this.settleChoice(s, text);
+    const text = answer.trim();
+    this.settleChoice(s, text ? { action: 'accept', content: { answer: text } } : { action: 'decline' });
   }
 
-  /** Ends the wait of the choice the turn is held on, with the user's answer, or with none
-   *  when the turn is stopped or ends. */
-  private settleChoice(s: Session, answer: string | undefined, clientId?: string): void {
+  /** Ends the wait of the choice the turn is held on by sending kiro `result`. */
+  private settleChoice(s: Session, result: ElicitationResult, clientId?: string): void {
     const choice = s.choice;
     if (!choice) return;
     s.choice = undefined;
-    const result: ElicitationResult = answer ? { action: 'accept', content: { answer } } : { action: 'cancel' };
     // A process that has exited has nothing waiting on the answer.
     if (s.proc === choice.proc) choice.proc.answerElicitation(choice.requestId, result);
-    s.record({
-      kind: 'choice_settled',
-      toolCallId: choice.toolCallId,
-      ...(answer ? { answer } : {}),
-      ...(clientId ? { clientId } : {}),
-    });
+    s.record({ kind: 'choice_settled', toolCallId: choice.toolCallId, ...(clientId ? { clientId } : {}) });
   }
 
   /**
@@ -1094,7 +1088,7 @@ export class SessionManager {
     const s = this.sessions.get(this.store.sessionIdForChat(chatId) ?? '');
     const proc = s?.proc;
     if (!s || !proc) return;
-    this.settleChoice(s, undefined);
+    this.settleChoice(s, CHOICE_CLOSED);
     proc.cancel(s.sessionId);
     if (!s.running) return;
     s.cancelRequested = true;

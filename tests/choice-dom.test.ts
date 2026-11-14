@@ -1,8 +1,9 @@
-// A choice usually renders while the turn that asked it is still running. A click then sent
-// a prompt the server refused with "A turn is already running for this session".
+// The show_choice call the turn waits on asks its questions one at a time in a panel above
+// the composer, and the transcript keeps a card of what was answered.
 
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { encodeChoiceAnswers, formatChoiceAnswers, formatChoiceReply, formatChoiceSkipped } from '@casper/shared';
 import { installDomGlobals } from './helpers.js';
 
 type Any = any;
@@ -10,40 +11,58 @@ type Any = any;
 let createElement: Any;
 let act: Any;
 let createRoot: Any;
-let ChoiceTemplate: Any;
+let ChoicePanel: Any;
+let ToolCallCard: Any;
 let useStore: Any;
 let sessionController: Any;
 let root: Any;
 let host: HTMLElement;
-let sent: unknown[];
 let answered: [string, string][];
+let skipped: string[];
 
-const data = {
-  leadIn: '',
-  question: 'Which one?',
-  options: [
-    { label: 'First', prompt: 'Take the first' },
-    { label: 'Second', prompt: 'Take the second' },
-  ],
-};
+const layout = { question: 'Which layout?', options: [{ label: 'One column', prompt: 'Use one column' }, { label: 'Two columns' }] };
+const width = { question: 'How wide?', options: [{ label: 'Narrow' }, { label: 'Wide' }] };
+const input = (questions: Any[]) => ({ lead_in: 'Both **fit** the page.', questions });
+const choiceTool = (extra: Any = {}, questions: Any[] = [layout, width]) => ({
+  id: 'choice-1', name: 'casper/show_choice', title: '@casper/show_choice', status: 'in_progress', content: [],
+  input: input(questions), ...extra,
+});
 
-const buttons = () => [...host.querySelectorAll('button.tpl-choice-opt')] as HTMLButtonElement[];
-
-const setTurnStatus = (turnStatus: string) => {
+const options = () => [...host.querySelectorAll('.choice-panel-opts.is-current button.choice-panel-opt')] as HTMLButtonElement[];
+const question = () => host.querySelector('.choice-panel-q.is-current')?.textContent;
+const key = (k: string) => act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })));
+const setWaiting = (waitingChoice: string | undefined, tool: Any = choiceTool()) => {
   act(() => {
-    useStore.setState((s: Any) => ({ observability: { ...s.observability, turnStatus } }));
+    useStore.setState((s: Any) => ({
+      items: [{ type: 'tool_call', tool }],
+      observability: { ...s.observability, turnStatus: waitingChoice ? 'running' : 'idle', waitingChoice },
+    }));
+  });
+};
+const show = (el: Any) => act(() => root.render(el));
+const type = (text: string) => {
+  const field = host.querySelector('.choice-panel-input') as HTMLInputElement;
+  act(() => {
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), 'value')!.set!.call(field, text);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
   });
 };
 
 before(async () => {
   ({ host, react: { createElement, act } } = await installDomGlobals());
+  // MarkdownRenderer preloads katex when idle, which jsdom cannot import; skip it.
+  (globalThis as Any).requestIdleCallback = () => {};
   ({ createRoot } = await import('react-dom/client'));
-  ({ ChoiceTemplate } = await import('../web/src/components/chat/ChoiceTemplate.js'));
+  ({ ChoicePanel } = await import('../web/src/components/chat/ChoicePanel.js'));
+  ({ ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js'));
   ({ useStore } = await import('../web/src/state/store.js'));
   ({ sessionController } = await import('../web/src/state/sessionController.js'));
-  sessionController.send = (content: unknown) => sent.push(content);
   sessionController.answerChoice = (toolCallId: string, answer: string) => {
     answered.push([toolCallId, answer]);
+    return true;
+  };
+  sessionController.skipChoice = (toolCallId: string) => {
+    skipped.push(toolCallId);
     return true;
   };
 });
@@ -53,87 +72,171 @@ after(() => {
 });
 
 beforeEach(() => {
-  sent = [];
   answered = [];
+  skipped = [];
   useStore.getState().clearActive();
   useStore.setState({ activeId: 's1', items: [] });
   act(() => {
     root?.unmount();
     root = createRoot(host);
-    root.render(createElement(ChoiceTemplate, { data, tool: { id: 'choice-1', content: [] } }));
   });
 });
 
-describe('choice buttons and the running turn', () => {
-  it('are disabled and send nothing while the turn is running', () => {
-    setTurnStatus('running');
-    assert.deepEqual(buttons().map((b) => b.disabled), [true, true]);
-    act(() => buttons()[0]!.click());
-    assert.equal(sent.length, 0);
-    assert.equal(host.querySelector('.is-picked'), null);
-  });
-
-  it('become usable once the turn ends, and send the picked option', () => {
-    setTurnStatus('running');
-    setTurnStatus('idle');
-    assert.deepEqual(buttons().map((b) => b.disabled), [false, false]);
-    act(() => buttons()[1]!.click());
-    assert.deepEqual(sent, [[{ type: 'text', text: 'Take the second' }]]);
-    assert.equal(host.querySelector('.is-picked')?.textContent, 'Second');
-  });
-
-  it('stay disabled while the conversation is being compacted', () => {
-    act(() => {
-      useStore.setState((s: Any) => ({ observability: { ...s.observability, compacting: true } }));
-    });
-    assert.deepEqual(buttons().map((b) => b.disabled), [true, true]);
-  });
-});
-
-describe('a choice the running turn waits on', () => {
-  const render = (tool: Any) => {
-    act(() => root.render(createElement(ChoiceTemplate, { data, tool: { id: 'choice-1', content: [], ...tool } })));
-  };
-  const setWaiting = (waitingChoice: string | undefined) => {
-    act(() => {
-      useStore.setState((s: Any) => ({ observability: { ...s.observability, turnStatus: 'running', waitingChoice } }));
-    });
-  };
-
-  it('can be answered while the turn runs, and answers the call rather than sending a prompt', () => {
+describe('the choice panel above the composer', () => {
+  it('asks the questions in turn, then answers the call with all of them', () => {
     setWaiting('choice-1');
-    assert.deepEqual(buttons().map((b) => b.disabled), [false, false]);
-    act(() => buttons()[0]!.click());
-    assert.deepEqual(answered, [['choice-1', 'Take the first']]);
-    assert.equal(sent.length, 0);
-    assert.equal(host.querySelector('.is-picked')?.textContent, 'First');
+    show(createElement(ChoicePanel));
+    assert.equal(question(), 'Which layout?');
+    assert.equal(host.querySelector('.choice-panel-step')?.textContent, '1 of 2');
+    assert.deepEqual(options().map((b) => b.querySelector('.choice-panel-num')?.textContent), ['1', '2']);
+    act(() => options()[0]!.click());
+    assert.deepEqual(answered, [], 'nothing is sent until the last question');
+    assert.equal(question(), 'How wide?');
+    assert.equal(host.querySelector('.choice-panel-step')?.textContent, '2 of 2');
+    act(() => options()[1]!.click());
+    assert.deepEqual(answered, [['choice-1', encodeChoiceAnswers(['Use one column', 'Wide'])]]);
+    assert.deepEqual(options().map((b) => b.disabled), [true, true], 'one answer per call');
   });
 
-  it('stays disabled while the turn waits on a different call', () => {
-    setWaiting('choice-2');
-    assert.deepEqual(buttons().map((b) => b.disabled), [true, true]);
+  it('answers with number keys, and Escape skips the current question', () => {
+    setWaiting('choice-1');
+    show(createElement(ChoicePanel));
+    key('Escape');
+    assert.equal(question(), 'How wide?');
+    key('1');
+    assert.deepEqual(answered, [['choice-1', encodeChoiceAnswers([null, 'Narrow'])]]);
   });
 
-  it("shows the pick read back from the call's result after a reload", () => {
+  it('moves between questions with the arrows, keeping the answers given', () => {
+    setWaiting('choice-1');
+    show(createElement(ChoicePanel));
+    const prev = () => host.querySelector('button[aria-label="Previous question"]') as HTMLButtonElement;
+    const next = () => host.querySelector('button[aria-label="Next question"]') as HTMLButtonElement;
+    assert.equal(prev().disabled, true, 'nothing before the first question');
+    act(() => next().click());
+    assert.equal(question(), 'How wide?');
+    assert.equal(next().disabled, true, 'nothing after the last question');
+    act(() => options()[1]!.click());
+    assert.deepEqual(answered, [], 'the first question is still open');
+    assert.equal(question(), 'Which layout?', 'answering moves to the open question');
+    key('ArrowRight');
+    assert.equal(question(), 'How wide?');
+    assert.deepEqual(options().map((b) => b.classList.contains('is-picked')), [false, true], 'the answer given shows');
+    key('ArrowLeft');
+    act(() => options()[0]!.click());
+    assert.deepEqual(answered, [['choice-1', encodeChoiceAnswers(['Use one column', 'Wide'])]]);
+  });
+
+  it('renders every question, so the panel keeps the height of the tallest', () => {
+    setWaiting('choice-1', choiceTool({}, [layout, { question: 'Which?', options: [{ label: 'A' }, { label: 'B' }, { label: 'C' }] }]));
+    show(createElement(ChoicePanel));
+    assert.deepEqual([...host.querySelectorAll('.choice-panel-opts')].map((ol) => ol.children.length), [2, 3]);
+    assert.equal(host.querySelectorAll('.choice-panel-opts.is-current').length, 1);
+  });
+
+  it('keeps what was typed in "Something else" when moving between questions', () => {
+    setWaiting('choice-1');
+    show(createElement(ChoicePanel));
+    type('A grid');
+    act(() => (host.querySelector('button[aria-label="Next question"]') as HTMLButtonElement).click());
+    assert.equal((host.querySelector('.choice-panel-input') as HTMLInputElement).value, '');
+    act(() => (host.querySelector('button[aria-label="Previous question"]') as HTMLButtonElement).click());
+    assert.equal((host.querySelector('.choice-panel-input') as HTMLInputElement).value, 'A grid');
+  });
+
+  it('ignores its keys while a dialog or menu is open, or focus is elsewhere', () => {
+    setWaiting('choice-1');
+    show(createElement(ChoicePanel));
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    document.body.appendChild(dialog);
+    key('Escape');
+    key('1');
+    dialog.remove();
+    assert.equal(question(), 'Which layout?', 'the dialog had the keys');
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+    key('1');
+    outside.remove();
+    assert.equal(question(), 'Which layout?', 'a focused control elsewhere had the keys');
+    key('1');
+    assert.equal(question(), 'How wide?');
+  });
+
+  it('skips the call when every question was skipped', () => {
+    setWaiting('choice-1');
+    show(createElement(ChoicePanel));
+    act(() => (host.querySelector('.choice-panel-skip') as HTMLButtonElement).click());
+    act(() => (host.querySelector('.choice-panel-skip') as HTMLButtonElement).click());
+    assert.deepEqual(skipped, ['choice-1']);
+    assert.deepEqual(answered, []);
+  });
+
+  it('takes a typed answer from "Something else"', () => {
+    setWaiting('choice-1', choiceTool({}, [layout]));
+    show(createElement(ChoicePanel));
+    assert.equal(host.querySelector('.choice-panel-step'), null, 'no counter for one question');
+    const action = () => host.querySelector('.choice-panel-skip') as HTMLButtonElement;
+    assert.equal(action().textContent, 'Skip');
+    type('A grid');
+    assert.equal(action().textContent, 'Send');
+    act(() => action().click());
+    assert.deepEqual(answered, [['choice-1', encodeChoiceAnswers(['A grid'])]]);
+  });
+
+  it('skips the whole call with the close button', () => {
+    setWaiting('choice-1');
+    show(createElement(ChoicePanel));
+    act(() => (host.querySelector('button[aria-label="Skip the questions"]') as HTMLButtonElement).click());
+    assert.deepEqual(skipped, ['choice-1']);
+  });
+
+  it('is not shown when no question is waiting', () => {
     setWaiting(undefined);
-    render({ status: 'completed', content: [{ type: 'text', text: 'The user answered: Take the second' }] });
-    assert.equal(host.querySelector('.is-picked')?.textContent, 'Second');
-    render({ status: 'completed', output: { response: 'The user answered: Take the second', message: '' } });
-    assert.equal(host.querySelector('.is-picked')?.textContent, 'Second');
+    show(createElement(ChoicePanel));
+    assert.equal(host.querySelector('.choice-panel'), null);
+  });
+});
+
+describe('the choice in the transcript', () => {
+  const card = (extra: Any) => show(createElement(ToolCallCard, { tool: choiceTool({ status: 'completed', ...extra }) }));
+  const rows = () =>
+    [...host.querySelectorAll('.tpl-choice-row')].map((r) => [
+      r.querySelector('.tpl-choice-q')?.textContent,
+      r.querySelector('.tpl-choice-a')?.textContent,
+    ]);
+  const result = (text: string) => ({ content: [{ type: 'text', text }] });
+
+  it('shows the lead-in and nothing else while the turn waits on it', () => {
+    setWaiting('choice-1');
+    show(createElement(ToolCallCard, { tool: choiceTool() }));
+    const lead = host.querySelector('.msg-assistant');
+    assert.equal(lead?.textContent?.trim(), 'Both fit the page.');
+    assert.equal(lead?.querySelector('strong')?.textContent, 'fit');
+    assert.equal(host.querySelector('.tpl-choice-record'), null);
   });
 
-  it('closes without a pick when the user typed something else', () => {
+  it('shows each question with its answer, by option label, read from the result', () => {
     setWaiting(undefined);
-    useStore.setState((s: Any) => ({ observability: { ...s.observability, turnStatus: 'idle' } }));
-    render({ status: 'completed', content: [{ type: 'text', text: 'The user answered: A grid instead' }] });
-    assert.equal(host.querySelector('.is-picked'), null);
-    assert.deepEqual(buttons().map((b) => b.disabled), [true, true]);
-    assert.equal(host.querySelector('.tpl-choice-reply .msg-user-text')?.textContent, 'A grid instead');
+    card(result(formatChoiceAnswers(['Which layout?', 'How wide?'], ['Use one column', null])));
+    assert.deepEqual(rows(), [['Which layout?', 'One column'], ['How wide?', 'Skipped']]);
+    card({ output: { response: formatChoiceAnswers(['Which layout?', 'How wide?'], ['A grid', 'Wide']), message: '' } });
+    assert.deepEqual(rows(), [['Which layout?', 'A grid'], ['How wide?', 'Wide']]);
   });
 
-  it('shows no reply under the card for a tapped option', () => {
-    render({ status: 'completed', content: [{ type: 'text', text: 'The user answered: Take the second' }] });
-    assert.equal(host.querySelector('.tpl-choice-reply'), null);
+  it('shows a reply typed instead of answering under the questions', () => {
+    setWaiting(undefined);
+    card(result(formatChoiceReply('Neither, a grid')));
+    assert.deepEqual(rows(), [['Which layout? How wide?', 'Neither, a grid']]);
+  });
+
+  it('marks every question skipped, or not answered when the turn stopped', () => {
+    setWaiting(undefined);
+    card(result(formatChoiceSkipped()));
+    assert.deepEqual(rows(), [['Which layout?', 'Skipped'], ['How wide?', 'Skipped']]);
+    card(result('The questions were closed without an answer.'));
+    assert.deepEqual(rows(), [['Which layout?', 'Not answered'], ['How wide?', 'Not answered']]);
   });
 });
 
@@ -144,25 +247,8 @@ describe('choice events in the store', () => {
     useStore.setState({ appliedSeq: 0, pending: [{ id: 'pending-3', text: 'A grid', content: [], steer: true }] } as Any);
     useStore.getState().applyEvent(event(1, { kind: 'choice_waiting', toolCallId: 'choice-1' }));
     assert.equal(useStore.getState().observability.waitingChoice, 'choice-1');
-    useStore.getState().applyEvent(event(2, { kind: 'choice_settled', toolCallId: 'choice-1', answer: 'A grid', clientId: 'pending-3' }));
+    useStore.getState().applyEvent(event(2, { kind: 'choice_settled', toolCallId: 'choice-1', clientId: 'pending-3' }));
     assert.equal(useStore.getState().observability.waitingChoice, undefined);
     assert.deepEqual(useStore.getState().pending, []);
-  });
-});
-
-describe('the lead_in of a show_choice call', () => {
-  it('renders as reply text above the options', async () => {
-    // MarkdownRenderer preloads katex when idle, which jsdom cannot import; skip it.
-    (globalThis as Any).requestIdleCallback = () => {};
-    const { ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js');
-    const tool = {
-      id: 'choice-9', name: 'casper/show_choice', title: '@casper/show_choice', status: 'in_progress', content: [],
-      input: { lead_in: 'Both **fit** the page.', question: 'Which one?', options: [{ label: 'First' }, { label: 'Second' }] },
-    };
-    act(() => root.render(createElement(ToolCallCard, { tool })));
-    const lead = host.querySelector('.msg-assistant');
-    assert.equal(lead?.textContent?.trim(), 'Both fit the page.');
-    assert.equal(lead?.querySelector('strong')?.textContent, 'fit');
-    assert.equal(lead?.nextElementSibling?.className, 'tpl-choice');
   });
 });

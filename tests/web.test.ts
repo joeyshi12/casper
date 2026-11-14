@@ -19,7 +19,15 @@ import type { SessionSocketHandlers } from '../web/src/api/SessionSocket.js';
 import { lineDiff } from '../web/src/util/diff.js';
 import { matchPath } from 'react-router';
 import { CHAT_ROUTE, DRAFT_PATH, pathForChat } from '../web/src/util/route.js';
-import { choiceCallOf, choiceOutcome } from '../web/src/util/choiceCall.js';
+import { answerLabel, choiceCallOf } from '../web/src/util/choiceCall.js';
+import {
+  decodeChoiceAnswers,
+  encodeChoiceAnswers,
+  formatChoiceAnswers,
+  formatChoiceReply,
+  formatChoiceSkipped,
+  parseChoiceResult,
+} from '@casper/shared';
 import { upsertChat } from '../web/src/state/chats.js';
 import { groupByDate } from '../web/src/util/chatGroups.js';
 import { splitWords, rehypeFadeWords } from '../web/src/util/rehypeFadeWords.js';
@@ -100,11 +108,11 @@ describe('tool names from kiro V3 live updates', () => {
     const tool = fold({
       title: '@casper/show_choice',
       kind: 'other',
-      rawInput: { question: 'Pick one', options: [{ label: 'A' }, { label: 'B' }] },
+      rawInput: { questions: [{ question: 'Pick one', options: [{ label: 'A' }, { label: 'B' }] }] },
       _meta: { kiro: { serverName: 'casper', toolOrigin: 'default' } },
     });
     assert.equal(tool.name, 'casper/show_choice');
-    assert.equal(choiceCallOf(tool)?.question, 'Pick one');
+    assert.equal(choiceCallOf(tool)?.questions[0]?.question, 'Pick one');
     assert.equal(toolLabel(tool), '@casper/show_choice');
     const widget = fold({ title: '@casper/show_widget', rawInput: { title: 't', widget_code: '<p>' }, _meta: { kiro: { serverName: 'casper' } } });
     assert.equal(widgetCallOf(widget)?.code, '<p>');
@@ -574,14 +582,15 @@ describe('choice call parsing', () => {
 
   it('defaults an option prompt to its label, since that is what was tapped', () => {
     const data = call({
-      question: 'Push?', options: [{ label: 'Push now' }, { label: 'Wait', prompt: 'hold off' }],
+      questions: [{ question: 'Push?', options: [{ label: 'Push now' }, { label: 'Wait', prompt: 'hold off' }] }],
     });
-    assert.deepEqual(data?.options.map((o) => o.prompt), ['Push now', 'hold off']);
+    assert.deepEqual(data?.questions[0]?.options.map((o) => o.prompt), ['Push now', 'hold off']);
   });
 
   it('ignores other tools, and a choice with nothing to choose', () => {
     assert.equal(choiceCallOf({ ...base, name: 'fs_read', input: {} }), null);
-    assert.equal(call({ question: 'Which?', options: [{ label: 'only one' }] }), null);
+    assert.equal(call({ questions: [{ question: 'Which?', options: [{ label: 'only one' }] }] }), null);
+    assert.equal(call({ question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] }), null, 'the old shape');
   });
 });
 
@@ -1438,30 +1447,39 @@ describe('streamed word fade', () => {
   });
 });
 
-describe('choice outcome', () => {
-  const options = [
-    { label: 'Ship it', prompt: 'Ship it as 0.9.5.' },
-    { label: 'Hold', prompt: 'Hold off for now.' },
-  ];
+describe('choice results', () => {
+  const questions = ['Which layout?', 'How wide?'];
 
-  it('stays open until the user says something', () => {
-    assert.deepEqual(choiceOutcome(options, null), { picked: null, superseded: false });
+  it('reads back each answer, with a skipped one as null', () => {
+    const text = formatChoiceAnswers(questions, ['Use one column', null]);
+    assert.deepEqual(parseChoiceResult(text, questions), { kind: 'answers', answers: ['Use one column', null] });
   });
 
-  it('records the option taken, ignoring surrounding whitespace', () => {
-    assert.deepEqual(choiceOutcome(options, '  Ship it as 0.9.5. '), {
-      picked: 'Ship it',
-      superseded: false,
-    });
+  it('reads answers by position, with line breaks and lookalike questions', () => {
+    const qs = ['Theme → dark or light?', 'Theme', 'Two\nlines?'];
+    const text = formatChoiceAnswers(qs, ['Dark', 'Warm\ncolours', 'Yes']);
+    assert.equal(text.split('\n').length, 4, 'one line per question');
+    assert.deepEqual(parseChoiceResult(text, qs), { kind: 'answers', answers: ['Dark', 'Warm colours', 'Yes'] });
   });
 
-  it('closes without a pick when the user typed something else', () => {
-    // The moment has passed: the buttons would otherwise still be live under an answer
-    // that ignored them.
-    assert.deepEqual(choiceOutcome(options, 'actually, what about the icons?'), {
-      picked: null,
-      superseded: true,
-    });
+  it('reads back a typed reply and a skip', () => {
+    assert.deepEqual(parseChoiceResult(formatChoiceReply('A grid'), questions), { kind: 'reply', text: 'A grid' });
+    assert.deepEqual(parseChoiceResult(formatChoiceSkipped(), questions), { kind: 'skipped' });
+    assert.equal(parseChoiceResult('The questions were closed without an answer.', questions), null);
+  });
+
+  it('decodes only an answer list of the right length', () => {
+    assert.deepEqual(decodeChoiceAnswers(encodeChoiceAnswers(['a', null]), 2), ['a', null]);
+    assert.equal(decodeChoiceAnswers(encodeChoiceAnswers(['a']), 2), null);
+    assert.equal(decodeChoiceAnswers('A grid instead', 2), null);
+  });
+
+  it("shows a picked option by its label, and a typed answer as written", () => {
+    const q = { question: 'Ship?', options: [{ label: 'Ship it', prompt: 'Ship it as 0.9.5.' }, { label: 'Hold', prompt: 'Hold' }] };
+    assert.equal(answerLabel(q, '  Ship it as 0.9.5. '), 'Ship it');
+    assert.equal(answerLabel(q, 'actually, the icons'), 'actually, the icons');
+    const multi = { question: 'Ship?', options: [{ label: 'Ship', prompt: 'Ship it\nnow' }, { label: 'Hold', prompt: 'Hold' }] };
+    assert.equal(answerLabel(multi, 'Ship it now'), 'Ship', 'a prompt with a line break, read back on one line');
   });
 });
 
