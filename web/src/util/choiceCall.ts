@@ -5,7 +5,6 @@ import { leadInOf } from './widgetCall.js';
 
 interface ChoiceOption {
   label: string;
-  detail?: string;
   /** Sent when tapped. The label is the sensible default. */
   prompt: string;
 }
@@ -32,9 +31,8 @@ export function choiceCallOf(tool: ToolCallView): ChoiceData | null {
     const o = (item ?? {}) as Record<string, unknown>;
     const label = typeof o.label === 'string' && o.label.trim() ? o.label : '';
     if (!label) continue;
-    const detail = typeof o.detail === 'string' && o.detail.trim() ? o.detail : undefined;
     const prompt = typeof o.prompt === 'string' && o.prompt.trim() ? o.prompt : label;
-    options.push({ label, detail, prompt });
+    options.push({ label, prompt });
   }
   if (!question || options.length < 2) return null;
   return { leadIn: leadInOf(data), question, options };

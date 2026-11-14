@@ -111,8 +111,7 @@ const TOOLS = [
           items: {
             type: 'object',
             properties: {
-              label: { type: 'string', description: 'Short, tappable phrase.' },
-              detail: { type: 'string', description: 'One line of context.' },
+              label: { type: 'string', description: 'The option, as a short phrase on one line.' },
               prompt: {
                 type: 'string',
                 description: 'Message sent when tapped. Defaults to the label.',

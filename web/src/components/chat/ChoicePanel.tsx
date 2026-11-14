@@ -72,10 +72,7 @@ export function ChoicePanel() {
           <li key={option.label}>
             <button className="choice-panel-opt" onClick={() => answer(option.prompt)} disabled={busy}>
               <span className="choice-panel-num">{i + 1}</span>
-              <span className="choice-panel-text">
-                <span className="choice-panel-label">{option.label}</span>
-                {option.detail && <span className="choice-panel-detail" title={option.detail}>{option.detail}</span>}
-              </span>
+              <span className="choice-panel-label">{option.label}</span>
             </button>
           </li>
         ))}

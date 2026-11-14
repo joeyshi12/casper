@@ -29,9 +29,6 @@ export function validateChoice(data: unknown): string | null {
     if (o.prompt !== undefined && typeof o.prompt !== 'string') {
       return `options[${i}].prompt must be a string when given.`;
     }
-    if (o.detail !== undefined && typeof o.detail !== 'string') {
-      return `options[${i}].detail must be a string when given.`;
-    }
   }
   return null;
 }

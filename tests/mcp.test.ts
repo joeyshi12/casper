@@ -142,6 +142,6 @@ describe('choice validation', () => {
   });
 
   it('names the option that is wrong', () => {
-    fails({ question: 'Which?', options: [{ label: 'A' }, { detail: 'no label' }] }, /options\[1\]\.label/);
+    fails({ question: 'Which?', options: [{ label: 'A' }, { prompt: 'no label' }] }, /options\[1\]\.label/);
   });
 });

@@ -24,7 +24,7 @@ const input = {
   lead_in: 'Both **fit** the page.',
   question: 'Which one?',
   options: [
-    { label: 'First', prompt: 'Take the first', detail: 'The plain one' },
+    { label: 'First', prompt: 'Take the first' },
     { label: 'Second', prompt: 'Take the second' },
   ],
 };
@@ -84,7 +84,7 @@ describe('the choice panel above the composer', () => {
     show(createElement(ChoicePanel));
     assert.equal(host.querySelector('.choice-panel-q')?.textContent, 'Which one?');
     assert.deepEqual(options().map((b) => b.querySelector('.choice-panel-num')?.textContent), ['1', '2']);
-    assert.equal(options()[0]!.querySelector('.choice-panel-detail')?.textContent, 'The plain one');
+    assert.equal(options()[0]!.querySelector('.choice-panel-label')?.textContent, 'First');
     act(() => options()[1]!.click());
     assert.deepEqual(answered, [['choice-1', 'Take the second']]);
     assert.deepEqual(options().map((b) => b.disabled), [true, true], 'one answer per question');
