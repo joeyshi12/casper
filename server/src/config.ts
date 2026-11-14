@@ -27,14 +27,12 @@ const KNOWN_KEYS = new Set([
   'host',
   'port',
   'token',
-  'sessionTtlSeconds',
   'kiroBin',
   'kiroSessionsDir',
   'defaultCwd',
   'maxLiveSessions',
   'defaultAgent',
   'fileRoot',
-  'eventBufferSize',
   'maxUploadBytes',
 ]);
 
@@ -116,11 +114,41 @@ export function pickInt(
   return fallback;
 }
 
-const setting = (envName: string, key: string, fallback: string): string =>
+// The environment can set only the few settings that differ per launch: where to listen,
+// the token, and the kiro-cli binary. Everything else comes from the config file.
+const envSetting = (envName: string, key: string, fallback: string): string =>
   pickString(process.env[envName], fileConfig[key], fallback);
 
-const settingInt = (envName: string, key: string, fallback: number): number =>
+const envSettingInt = (envName: string, key: string, fallback: number): number =>
   pickInt(process.env[envName], fileConfig[key], fallback);
+
+const setting = (key: string, fallback: string): string => pickString(undefined, fileConfig[key], fallback);
+
+const settingInt = (key: string, fallback: number): number => pickInt(undefined, fileConfig[key], fallback);
+
+/** Environment variables earlier versions read, and what replaced each. */
+const RETIRED_ENV: Record<string, string> = {
+  HOST: 'CASPER_HOST',
+  PORT: 'CASPER_PORT',
+  KIRO_BIN: 'CASPER_KIRO_BIN',
+  DEFAULT_CWD: 'defaultCwd in the config file',
+  DEFAULT_AGENT: 'defaultAgent in the config file',
+  CASPER_FILE_ROOT: 'fileRoot in the config file',
+  CASPER_KIRO_SESSIONS_DIR: 'kiroSessionsDir in the config file',
+  MAX_LIVE_SESSIONS: 'maxLiveSessions in the config file',
+  CASPER_MAX_UPLOAD_BYTES: 'maxUploadBytes in the config file',
+  CASPER_SESSION_TTL_SECONDS: 'nothing; the login lifetime is fixed at 7 days',
+  EVENT_BUFFER_SIZE: 'nothing; the replay buffer is fixed',
+};
+
+/** A warning for each retired variable that is set, so an old override is not lost silently. */
+export function retiredEnvWarnings(env: NodeJS.ProcessEnv): string[] {
+  return Object.entries(RETIRED_ENV)
+    .filter(([name]) => env[name] !== undefined && env[name] !== '')
+    .map(([name, now]) => `${name} is no longer read; use ${now}`);
+}
+
+for (const msg of retiredEnvWarnings(process.env)) logger.warn(`config: ${msg}`);
 
 // Resolves kiro-cli to an absolute path: a minimal systemd/bare-node PATH may
 // omit ~/.toolbox/bin, so `spawn kiro-cli` would otherwise ENOENT.
@@ -149,33 +177,24 @@ function resolveKiroBin(explicit: string, home: string): string {
 }
 
 export const config = {
-  host: setting('HOST', 'host', '0.0.0.0'),
-  port: settingInt('PORT', 'port', 4319),
+  host: envSetting('CASPER_HOST', 'host', '0.0.0.0'),
+  port: envSettingInt('CASPER_PORT', 'port', 4319),
   /** Shared secret for login. Empty disables auth (dev only). */
-  token: setting('CASPER_TOKEN', 'token', ''),
-  /** Device-login lifetime in seconds, slid forward on activity. Default 7 days. */
-  sessionTtlSeconds: settingInt('CASPER_SESSION_TTL_SECONDS', 'sessionTtlSeconds', 60 * 60 * 24 * 7),
-  kiroBin: resolveKiroBin(setting('KIRO_BIN', 'kiroBin', 'kiro-cli'), home),
-  defaultCwd: setting('DEFAULT_CWD', 'defaultCwd', process.cwd()),
-  maxLiveSessions: settingInt('MAX_LIVE_SESSIONS', 'maxLiveSessions', 6),
+  token: envSetting('CASPER_TOKEN', 'token', ''),
+  kiroBin: resolveKiroBin(envSetting('CASPER_KIRO_BIN', 'kiroBin', 'kiro-cli'), home),
+  defaultCwd: setting('defaultCwd', process.cwd()),
+  maxLiveSessions: settingInt('maxLiveSessions', 6),
   /** The agent Casper installs, with the widget tools. kiro falls back to its Default
    *  mode if it is missing rather than failing. */
-  defaultAgent: setting('DEFAULT_AGENT', 'defaultAgent', 'casper'),
+  defaultAgent: setting('defaultAgent', 'casper'),
   /** Filesystem root the file endpoints are confined to. Defaults to /; narrow it
    *  to keep authenticated users out of system files such as /etc or SSH keys. */
-  fileRoot: path.resolve(setting('CASPER_FILE_ROOT', 'fileRoot', '/')),
+  fileRoot: path.resolve(setting('fileRoot', '/')),
   /** kiro's session store, one directory per workspace. */
-  kiroSessionsDir: path.resolve(
-    setting(
-      'CASPER_KIRO_SESSIONS_DIR',
-      'kiroSessionsDir',
-      path.join(home, '.kiro', 'sessions'),
-    ),
-  ),
+  kiroSessionsDir: path.resolve(setting('kiroSessionsDir', path.join(home, '.kiro', 'sessions'))),
   casperDataDir: dataDirPath(),
   webDist: env('CASPER_WEB_DIST', defaultWebDist()),
-  eventBufferSize: settingInt('EVENT_BUFFER_SIZE', 'eventBufferSize', 5000),
-  maxUploadBytes: settingInt('CASPER_MAX_UPLOAD_BYTES', 'maxUploadBytes', 100 * 1024 * 1024),
+  maxUploadBytes: settingInt('maxUploadBytes', 100 * 1024 * 1024),
   configFile: configFilePath(),
 } as const;
 

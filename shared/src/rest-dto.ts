@@ -208,7 +208,7 @@ export interface PinChatRequest {
 }
 
 export interface SetCwdRequest {
-  /** Absolute path, or relative to the server's DEFAULT_CWD. Created if absent. */
+  /** Absolute path, or relative to the server's defaultCwd. Created if absent. */
   cwd: string;
 }
 
@@ -224,7 +224,7 @@ export interface PromptRequest {
 export interface DirListing {
   dir: string;
   entries: string[];
-  /** Resolved the same way session creation resolves it, against DEFAULT_CWD;
+  /** Resolved the same way session creation resolves it, against defaultCwd;
    *  may not exist yet. */
   target: string;
   /** 'missing' means creating a session there will create the folder; 'file'

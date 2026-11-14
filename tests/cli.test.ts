@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { config, parseConfigDoc, pickInt, pickString } from '../server/src/config.js';
+import { config, parseConfigDoc, pickInt, pickString, retiredEnvWarnings } from '../server/src/config.js';
 import { readSettings, updateSettings } from '../server/src/cli/settings.js';
 import { configFilePath, dataDirPath } from '../server/src/paths.js';
 import {
@@ -381,5 +381,18 @@ describe('shipped agent config', () => {
       assert.equal(kiro.status, 0, `kiro rejected it: ${kiro.stdout}${kiro.stderr}`);
     }
     fs.rmSync(home, { recursive: true, force: true });
+  });
+});
+
+describe('retired environment variables', () => {
+  it('warns for each one that is set, naming what replaced it', () => {
+    assert.deepEqual(retiredEnvWarnings({ PORT: '5000', MAX_LIVE_SESSIONS: '3', CASPER_PORT: '5000', HOME: '/h' }), [
+      'PORT is no longer read; use CASPER_PORT',
+      'MAX_LIVE_SESSIONS is no longer read; use maxLiveSessions in the config file',
+    ]);
+  });
+
+  it('says nothing for an empty or absent one', () => {
+    assert.deepEqual(retiredEnvWarnings({ HOST: '' }), []);
   });
 });

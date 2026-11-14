@@ -1,10 +1,11 @@
 import { EventEmitter } from 'node:events';
 import type { CasperEvent, CasperEventPayload } from '@casper/shared';
-import { config } from '../config.js';
 
 // Per-session event log: a bounded in-memory ring buffer, each event with a strictly
 // increasing seq. Memory-only: a client whose cursor predates the buffer resyncs by
 // refetching the transcript instead.
+const EVENT_BUFFER_SIZE = 5000;
+
 export class EventStore extends EventEmitter {
   private readonly chatId: string;
   private readonly buffer: CasperEvent[] = [];
@@ -14,7 +15,7 @@ export class EventStore extends EventEmitter {
   constructor(chatId: string) {
     super();
     this.chatId = chatId;
-    this.capacity = config.eventBufferSize;
+    this.capacity = EVENT_BUFFER_SIZE;
   }
 
   append(payload: CasperEventPayload): CasperEvent {

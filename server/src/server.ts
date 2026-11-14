@@ -5,13 +5,13 @@ import { isWithinRoot } from './util/paths.js';
 
 /** Starts the HTTP/WebSocket server and blocks until a signal stops it. */
 export async function serve(): Promise<void> {
-  // Fail fast on a misconfigured DEFAULT_CWD outside the file-access boundary,
+  // Fail fast on a misconfigured defaultCwd outside the file-access boundary,
   // or the directory picker and session creation silently break for every request.
   if (!isWithinRoot(config.fileRoot, config.defaultCwd)) {
     logger.warn(
       { fileRoot: config.fileRoot, defaultCwd: config.defaultCwd },
-      'DEFAULT_CWD is outside CASPER_FILE_ROOT; new sessions and the directory ' +
-        'picker will be rejected. Set CASPER_FILE_ROOT to an ancestor of DEFAULT_CWD.',
+      'defaultCwd is outside fileRoot; new sessions and the directory ' +
+        'picker will be rejected. Set fileRoot to an ancestor of defaultCwd.',
     );
   }
 
@@ -23,7 +23,7 @@ export async function serve(): Promise<void> {
     'Casper server listening',
   );
   if (!config.token) {
-    logger.warn('CASPER_TOKEN is empty - auth is DISABLED. Set it before exposing on a network.');
+    logger.warn('The token is empty - auth is DISABLED. Set it before exposing on a network.');
   }
 
   const shutdown = async (signal: string) => {

@@ -13,7 +13,7 @@ import {
 import { sendFilePreview } from './filePreview.js';
 
 // Suggests directory paths for the New Session working-directory input, matching
-// the last segment of a partial path. Relative input resolves against DEFAULT_CWD,
+// the last segment of a partial path. Relative input resolves against defaultCwd,
 // confined to fileRoot.
 export function registerFsRoutes(app: FastifyInstance): void {
   app.get<{ Querystring: { path?: string } }>(

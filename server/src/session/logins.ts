@@ -1,5 +1,4 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { config } from '../config.js';
 import { db } from './db.js';
 import { sha256 } from '../util/hash.js';
 
@@ -42,13 +41,16 @@ const toRecord = (r: Row): LoginRecord => ({
  * database can't be used to authenticate, which enables per-device revocation,
  * a device list, and log-out-everywhere.
  */
+/** How long a device stays logged in, slid forward on activity: 7 days. */
+export const LOGIN_TTL_SECONDS = 60 * 60 * 24 * 7;
+
 export class LoginStore {
   constructor() {
     this.pruneExpired();
   }
 
   private ttlMs(): number {
-    return config.sessionTtlSeconds * 1000;
+    return LOGIN_TTL_SECONDS * 1000;
   }
 
   private pruneExpired(now = Date.now()): void {
