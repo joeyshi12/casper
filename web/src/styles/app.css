@@ -1719,7 +1719,7 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 6px 2px;
+  padding: 4px 2px;
   border: none;
   border-radius: var(--r-sm);
   background: none;
@@ -1740,8 +1740,8 @@
   display: grid;
   place-items: center;
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--r-sm);
   background: var(--n2);
   font-size: 13px;
@@ -1750,14 +1750,19 @@
 }
 .choice-panel-text {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
+  white-space: nowrap;
 }
 .choice-panel-label {
+  flex: none;
   font-size: 14px;
 }
 .choice-panel-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 12px;
   color: var(--n4);
 }
@@ -1765,7 +1770,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 2px;
+  padding: 4px 2px;
 }
 .choice-panel-input {
   flex: 1;
@@ -2476,7 +2481,6 @@ a.websearch-row:hover {
   /* Containing block for the notice banner, which floats just above it. */
   position: relative;
   flex-shrink: 0;
-  border-top: 1px solid var(--n1);
   background: var(--n-abyss);
 }
 .composer {

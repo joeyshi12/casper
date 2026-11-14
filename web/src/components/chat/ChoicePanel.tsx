@@ -74,7 +74,7 @@ export function ChoicePanel() {
               <span className="choice-panel-num">{i + 1}</span>
               <span className="choice-panel-text">
                 <span className="choice-panel-label">{option.label}</span>
-                {option.detail && <span className="choice-panel-detail">{option.detail}</span>}
+                {option.detail && <span className="choice-panel-detail" title={option.detail}>{option.detail}</span>}
               </span>
             </button>
           </li>
