@@ -72,6 +72,7 @@ an environment variable, and the environment wins.
 | `DEFAULT_AGENT` | `defaultAgent` | `casper` | Agent for new chats when kiro's `chat.defaultAgent` is unset |
 | `CASPER_FILE_ROOT` | `fileRoot` | `/` | The only folder the file browser can read |
 | `MAX_LIVE_SESSIONS` | `maxLiveSessions` | `6` | Concurrent kiro processes |
+| `CASPER_IDLE_PROCESS_SECONDS` | `idleProcessSeconds` | `1800` | Idle time before a chat's kiro process stops; `0` keeps it |
 | `EVENT_BUFFER_SIZE` | `eventBufferSize` | `5000` | Events kept per chat for replay on reconnect |
 | `CASPER_MAX_UPLOAD_BYTES` | `maxUploadBytes` | `104857600` | Largest uploaded file |
 | `CASPER_DATA_DIR` | _(env only)_ | `~/.casper` | Where `casper.db` and uploads live |

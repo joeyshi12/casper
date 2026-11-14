@@ -891,6 +891,40 @@ describe('process lifecycle', () => {
     }
   });
 
+  it('stops a process idle past the limit, and keeps busy and recent ones', async () => {
+    const limit = config.idleProcessSeconds;
+    (config as { idleProcessSeconds: number }).idleProcessSeconds = 60;
+    const spawned: FakeProcess[] = [];
+    const mgr = managerWith(() => {
+      const p = fakeKiroProcess({ sessionId: `idle-${spawned.length + 1}` });
+      spawned.push(p);
+      return p;
+    });
+    try {
+      for (const id of ['idle-1', 'idle-2', 'idle-3', 'idle-4']) await mgr.createChat({ cwd: sessionsCwd, chatId: id });
+      const now = Date.now();
+      const [old, busy, compacting, recent] = await Promise.all(
+        ['idle-1', 'idle-2', 'idle-3', 'idle-4'].map((id) => mgr.ensureOpen(id)),
+      );
+      for (const s of [old!, busy!, compacting!]) s.lastActivity = now - 61_000;
+      busy!.running = true;
+      compacting!.record({ kind: 'compaction', params: { sessionId: compacting!.sessionId, status: { type: 'started' }, summary: null } });
+      recent!.lastActivity = now - 30_000;
+
+      mgr.stopIdleProcesses(now);
+      assert.deepEqual(spawned.map((p) => p.disposed()), [true, false, false, false]);
+      assert.equal(old!.proc, undefined, 'the chat goes dormant');
+
+      (config as { idleProcessSeconds: number }).idleProcessSeconds = 0;
+      recent!.lastActivity = 0;
+      mgr.stopIdleProcesses(now);
+      assert.equal(spawned[3]!.disposed(), false, '0 turns the timeout off');
+    } finally {
+      (config as { idleProcessSeconds: number }).idleProcessSeconds = limit;
+      mgr.disposeAll();
+    }
+  });
+
   // kiro's file still says the old directory - its shutdown write uses the cwd it was spawned
   // with - so the override is the only record until a turn completes in the new one. Keyed by
   // chat, which a chat id equal to its session id would not have caught.
