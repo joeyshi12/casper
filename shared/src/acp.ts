@@ -385,6 +385,9 @@ export type ElicitationResult =
  */
 export const CHOICE_ANSWER_PREFIX = 'The user answered: ';
 
+/** The start of show_choice's tool result when the user skipped the question. */
+export const CHOICE_SKIPPED = 'The user skipped the question';
+
 /** kiro's notice that a requested agent could not be used, so the session fell back to
  *  another one. */
 export const KIRO_AGENT_NOT_FOUND = '_kiro/customAgent/not_found';

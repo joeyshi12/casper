@@ -8,6 +8,7 @@ import type { ConnStatus } from '../../api/SessionSocket.js';
 import { PlusIcon, ArrowUpIcon, StopIcon, Spinner } from '../common/icons.js';
 import { AgentPicker, ModelPicker } from '../controls/Pickers.js';
 import { ContextRing } from '../observability/ContextRing.js';
+import { ChoicePanel } from './ChoicePanel.js';
 
 /** Image MIME types that can be inlined as ACP image content blocks. */
 const IMAGE_TYPES = new Set([
@@ -45,6 +46,7 @@ export function Composer({
   const currentModeId = useStore((s) => s.currentModeId);
   const currentModelId = useStore((s) => s.currentModelId);
   const currentEffort = useStore((s) => s.currentEffort);
+  const choiceWaiting = useStore((s) => !!s.observability.waitingChoice);
   const running = turnStatus === 'running';
   const cancelling = turnStatus === 'cancelling';
   const live = draft || connStatus === 'connected';
@@ -235,6 +237,7 @@ export function Composer({
 
   return (
     <div className="composer">
+      <ChoicePanel />
       {error && <div className="composer-error">{error}</div>}
       {attachments.length > 0 && (
         <div className="composer-attachments">
@@ -267,7 +270,7 @@ export function Composer({
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          placeholder="Write a message…"
+          placeholder={choiceWaiting ? 'Or reply directly…' : 'Write a message…'}
           rows={1}
         />
         <div className="composer-actions">

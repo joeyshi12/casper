@@ -162,7 +162,8 @@ export interface ClientSteer {
   clientId?: string;
 }
 
-/** The user's answer to the show_choice call the turn is waiting on. */
+/** The user's answer to the show_choice call the turn is waiting on. An empty answer
+ *  skips the question. */
 export interface ClientChoice {
   type: 'choice';
   toolCallId: string;

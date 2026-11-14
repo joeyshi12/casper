@@ -65,6 +65,13 @@ describe("show_choice in Casper's MCP server", () => {
     assert.equal(resultText(sent[1]), 'The question was closed without an answer.');
   });
 
+  it('tells the model the user skipped when the client declines', async () => {
+    const { conn, sent } = connect({ elicitation: {} });
+    conn.receive({ id: sent[0]!.id as string, result: { action: 'decline' } });
+    await waitFor('the tool result', () => sent.length === 2);
+    assert.match(resultText(sent[1]), /^The user skipped the question/);
+  });
+
   it('tells the model to end its turn when the client refuses the elicitation', async () => {
     const { conn, sent } = connect({ elicitation: { form: {} } });
     conn.receive({ id: sent[0]!.id as string, error: { code: -32601, message: 'Method not found' } });
@@ -122,6 +129,18 @@ describe('a choice the turn waits on', () => {
       assert.deepEqual(c.answers(), [[41, { action: 'accept', content: { answer: 'Use one column' } }]]);
       assert.deepEqual(c.events().at(-1), { kind: 'choice_settled', toolCallId: 'choice-1', answer: 'Use one column' });
       assert.throws(() => c.mgr.answerChoice(c.chatId, 'choice-1', 'Again'), /no longer waiting/);
+      c.finish();
+    } finally {
+      c.mgr.disposeAll();
+    }
+  });
+
+  it('skips the question on an empty answer, so the turn carries on without one', async () => {
+    const c = await waitingChat('sess_skip');
+    try {
+      c.mgr.answerChoice(c.chatId, 'choice-1', '  ');
+      assert.deepEqual(c.answers(), [[41, { action: 'decline' }]]);
+      assert.deepEqual(c.events().at(-1), { kind: 'choice_settled', toolCallId: 'choice-1' });
       c.finish();
     } finally {
       c.mgr.disposeAll();

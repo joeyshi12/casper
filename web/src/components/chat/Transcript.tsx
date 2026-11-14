@@ -64,13 +64,15 @@ export const Transcript = memo(function Transcript() {
   // Stable, so TranscriptEntries can skip re-rendering. It reads the ref when called.
   const arrivedLive = useCallback((id: string) => !hydrated.current.ids.has(id), []);
 
+  const waitingChoice = useStore((s) => !!s.observability.waitingChoice);
   const grouped = useMemo(() => groupToolCalls(items), [items]);
 
   // The last line of a running turn shimmers, so the dots are only for when nothing does.
   const lastActive = turnStatus === 'running' && !streamingText && pending.length === 0;
   const progressShown =
     (!!streamingThought && pending.length === 0) || (lastActive && shimmersWhenLast(grouped.at(-1)));
-  const showDots = (turnStatus === 'running' || waitingToStart) && !streamingText && !progressShown;
+  // A turn waiting on the user's answer to a choice is not working, so it shows no dots.
+  const showDots = (turnStatus === 'running' || waitingToStart) && !streamingText && !progressShown && !waitingChoice;
 
   const pendingBubble = (pm: (typeof allPending)[number]) => (
     <div

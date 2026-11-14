@@ -1,6 +1,6 @@
 import { MODULES, getGuidelines } from './guidelines.js';
 import { MAX_OPTIONS, validateChoice } from './choice.js';
-import { CHOICE_ANSWER_PREFIX } from '@casper/shared';
+import { CHOICE_ANSWER_PREFIX, CHOICE_SKIPPED } from '@casper/shared';
 
 /** Used only when a client states no version; otherwise theirs is echoed back. */
 export const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
@@ -196,6 +196,7 @@ function choiceResult(result: unknown): string {
   const r = (result ?? {}) as { action?: unknown; content?: { answer?: unknown } };
   const answer = typeof r.content?.answer === 'string' ? r.content.answer.trim() : '';
   if (r.action === 'accept' && answer) return `${CHOICE_ANSWER_PREFIX}${answer}`;
+  if (r.action === 'decline') return `${CHOICE_SKIPPED}. Carry on using your own judgement.`;
   return 'The question was closed without an answer.';
 }
 

@@ -370,6 +370,11 @@ export class SessionController {
     return !!clean && (this.socket?.choice(toolCallId, clean) ?? false);
   }
 
+  /** Skips the show_choice call the turn is waiting on, so the turn carries on without an answer. */
+  skipChoice(toolCallId: string): boolean {
+    return this.socket?.choice(toolCallId, '') ?? false;
+  }
+
   private deliverSteer(id: string, text: string): void {
     this.lastSteer = id;
     if (this.socket?.steer(text, id)) return;

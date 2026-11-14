@@ -1,4 +1,4 @@
-import { CHOICE_ANSWER_PREFIX } from '@casper/shared';
+import { CHOICE_ANSWER_PREFIX, CHOICE_SKIPPED } from '@casper/shared';
 import type { ToolCallView } from '../state/store.js';
 import { outputText } from './toolRender.js';
 import { leadInOf } from './widgetCall.js';
@@ -46,6 +46,18 @@ export function choiceCallOf(tool: ToolCallView): ChoiceData | null {
  * fields, and as plain text in its file.
  */
 export function choiceAnswerOf(tool: Pick<ToolCallView, 'content' | 'output'>): string | null {
+  for (const t of resultTexts(tool)) {
+    if (t.startsWith(CHOICE_ANSWER_PREFIX)) return t.slice(CHOICE_ANSWER_PREFIX.length).trim() || null;
+  }
+  return null;
+}
+
+/** Whether the call's result says the user skipped the question. */
+export function choiceSkipped(tool: Pick<ToolCallView, 'content' | 'output'>): boolean {
+  return resultTexts(tool).some((t) => t.startsWith(CHOICE_SKIPPED));
+}
+
+function resultTexts(tool: Pick<ToolCallView, 'content' | 'output'>): string[] {
   const out = tool.output as { response?: unknown; message?: unknown } | string | undefined;
   const texts = [
     typeof out === 'string' ? out : undefined,
@@ -53,10 +65,7 @@ export function choiceAnswerOf(tool: Pick<ToolCallView, 'content' | 'output'>): 
     typeof out === 'object' && out !== null && typeof out.message === 'string' ? out.message : undefined,
     outputText(Array.isArray(tool.content) ? tool.content : []),
   ];
-  for (const t of texts) {
-    if (t?.startsWith(CHOICE_ANSWER_PREFIX)) return t.slice(CHOICE_ANSWER_PREFIX.length).trim() || null;
-  }
-  return null;
+  return texts.filter((t): t is string => !!t);
 }
 
 export interface ChoiceOutcome {

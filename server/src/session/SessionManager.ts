@@ -1059,22 +1059,22 @@ export class SessionManager {
     }
   }
 
-  /** The user picked an option of the choice the turn is waiting on. */
+  /** The user answered the choice the turn is waiting on, or skipped it with an empty answer. */
   answerChoice(chatId: string, toolCallId: string, answer: string): void {
     const s = this.sessions.get(this.store.sessionIdForChat(chatId) ?? '');
-    const text = answer.trim();
-    if (!text) throw new Error('The answer is empty');
     if (!s?.choice || s.choice.toolCallId !== toolCallId) throw new Error('That question is no longer waiting for an answer');
-    this.settleChoice(s, text);
+    const text = answer.trim();
+    if (text) this.settleChoice(s, text);
+    else this.settleChoice(s, undefined, undefined, 'decline');
   }
 
-  /** Ends the wait of the choice the turn is held on, with the user's answer, or with none
-   *  when the turn is stopped or ends. */
-  private settleChoice(s: Session, answer: string | undefined, clientId?: string): void {
+  /** Ends the wait of the choice the turn is held on: with the user's answer, skipped by the
+   *  user (`decline`), or closed because the turn stopped or ended (`cancel`). */
+  private settleChoice(s: Session, answer: string | undefined, clientId?: string, closed: 'decline' | 'cancel' = 'cancel'): void {
     const choice = s.choice;
     if (!choice) return;
     s.choice = undefined;
-    const result: ElicitationResult = answer ? { action: 'accept', content: { answer } } : { action: 'cancel' };
+    const result: ElicitationResult = answer ? { action: 'accept', content: { answer } } : { action: closed };
     // A process that has exited has nothing waiting on the answer.
     if (s.proc === choice.proc) choice.proc.answerElicitation(choice.requestId, result);
     s.record({
