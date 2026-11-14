@@ -68,7 +68,7 @@ assert.deepEqual(tools.map((t) => t.name), ['read_me', 'show_widget', 'show_choi
 
   it('refuses a widget or a choice without a lead_in, or with an essay in it', () => {
     const widget = { i_have_seen_read_me: true, title: 'x', widget_code: '<p>x</p>' };
-    const choice = { question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] };
+    const choice = { questions: [{ question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] }] };
     for (const [name, args] of [['show_widget', widget], ['show_choice', choice]] as const) {
       for (const lead_in of [undefined, '  ', 'x'.repeat(601)]) {
         const res = resultOf(call(name, { ...args, lead_in }));
@@ -86,14 +86,16 @@ assert.deepEqual(tools.map((t) => t.name), ['read_me', 'show_widget', 'show_choi
       tools: { name: string; inputSchema: { required?: string[]; properties: Record<string, unknown> } }[];
     }).tools;
     const byName = new Map(tools.map((t) => [t.name, t.inputSchema]));
-    assert.deepEqual(byName.get('show_choice')?.required, ['lead_in', 'question', 'options']);
+    assert.deepEqual(byName.get('show_choice')?.required, ['lead_in', 'questions']);
     // Nested shapes are described too, not left as bare objects.
-    const options = byName.get('show_choice')?.properties.options as {
-      items: { required: string[] };
+    const questions = byName.get('show_choice')?.properties.questions as {
       maxItems: number;
+      items: { required: string[]; properties: { options: { items: { required: string[] }; maxItems: number } } };
     };
-    assert.deepEqual(options.items.required, ['label']);
-    assert.equal(options.maxItems, 6);
+    assert.equal(questions.maxItems, 3);
+    assert.deepEqual(questions.items.required, ['question', 'options']);
+    assert.deepEqual(questions.items.properties.options.items.required, ['label']);
+    assert.equal(questions.items.properties.options.maxItems, 6);
   });
 
   it('reports an unknown tool as a protocol error, not a tool result', () => {
@@ -123,25 +125,34 @@ describe('widget guidelines', () => {
 });
 
 describe('choice validation', () => {
+  const q = (question: string, options: unknown[]) => ({ question, options });
+  const two = [{ label: 'A' }, { label: 'B' }];
   const fails = (d: unknown, match: RegExp) => {
     const problem = validateChoice(d);
     assert.ok(problem, 'expected a problem');
     assert.match(problem, match);
   };
 
-  it('accepts a usable choice', () => {
-    assert.equal(validateChoice({ question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] }), null);
+  it('accepts one to three questions', () => {
+    assert.equal(validateChoice({ questions: [q('Which?', two)] }), null);
+    assert.equal(validateChoice({ questions: [q('Which?', two), q('And?', two), q('Then?', two)] }), null);
   });
 
-  it('rejects a choice that is not a choice', () => {
-    fails({ question: 'Which?', options: [{ label: 'A' }] }, /two options/);
+  it('rejects no questions, or more than three', () => {
+    fails({ questions: [] }, /one to three/);
+    fails({ questions: Array.from({ length: 4 }, () => q('Which?', two)) }, /at most 3/);
   });
 
-  it('rejects more options than anyone wants to tap', () => {
-    fails({ question: 'Which?', options: Array.from({ length: 7 }, (_, i) => ({ label: `o${i}` })) }, /at most 6/);
+  it('rejects a question that is not a choice', () => {
+    fails({ questions: [q('Which?', [{ label: 'A' }])] }, /two options/);
   });
 
-  it('names the option that is wrong', () => {
-    fails({ question: 'Which?', options: [{ label: 'A' }, { prompt: 'no label' }] }, /options\[1\]\.label/);
+  it('rejects more options than fit', () => {
+    fails({ questions: [q('Which?', Array.from({ length: 7 }, (_, i) => ({ label: `o${i}` })))] }, /at most 6/);
+  });
+
+  it('names the question and option that are wrong', () => {
+    fails({ questions: [q('Which?', two), q('And?', [{ label: 'A' }, { prompt: 'no label' }])] }, /questions\[1\]\.options\[1\]\.label/);
+    fails({ questions: [q(' ', two)] }, /questions\[0\]\.question/);
   });
 });

@@ -1,8 +1,9 @@
-// The show_choice call the turn waits on shows its options in a panel above the composer,
-// and the transcript keeps a record of what was answered.
+// The show_choice call the turn waits on asks its questions one at a time in a panel above
+// the composer, and the transcript keeps a card of what was answered.
 
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { encodeChoiceAnswers, formatChoiceAnswers, formatChoiceReply, formatChoiceSkipped } from '@casper/shared';
 import { installDomGlobals } from './helpers.js';
 
 type Any = any;
@@ -11,7 +12,6 @@ let createElement: Any;
 let act: Any;
 let createRoot: Any;
 let ChoicePanel: Any;
-let ChoiceTemplate: Any;
 let ToolCallCard: Any;
 let useStore: Any;
 let sessionController: Any;
@@ -20,19 +20,17 @@ let host: HTMLElement;
 let answered: [string, string][];
 let skipped: string[];
 
-const input = {
-  lead_in: 'Both **fit** the page.',
-  question: 'Which one?',
-  options: [
-    { label: 'First', prompt: 'Take the first' },
-    { label: 'Second', prompt: 'Take the second' },
-  ],
-};
-const choiceTool = (extra: Any = {}) => ({
-  id: 'choice-1', name: 'casper/show_choice', title: '@casper/show_choice', status: 'in_progress', content: [], input, ...extra,
+const layout = { question: 'Which layout?', options: [{ label: 'One column', prompt: 'Use one column' }, { label: 'Two columns' }] };
+const width = { question: 'How wide?', options: [{ label: 'Narrow' }, { label: 'Wide' }] };
+const input = (questions: Any[]) => ({ lead_in: 'Both **fit** the page.', questions });
+const choiceTool = (extra: Any = {}, questions: Any[] = [layout, width]) => ({
+  id: 'choice-1', name: 'casper/show_choice', title: '@casper/show_choice', status: 'in_progress', content: [],
+  input: input(questions), ...extra,
 });
 
 const options = () => [...host.querySelectorAll('button.choice-panel-opt')] as HTMLButtonElement[];
+const question = () => host.querySelector('.choice-panel-q')?.textContent;
+const key = (k: string) => act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })));
 const setWaiting = (waitingChoice: string | undefined, tool: Any = choiceTool()) => {
   act(() => {
     useStore.setState((s: Any) => ({
@@ -42,6 +40,13 @@ const setWaiting = (waitingChoice: string | undefined, tool: Any = choiceTool())
   });
 };
 const show = (el: Any) => act(() => root.render(el));
+const type = (text: string) => {
+  const field = host.querySelector('.choice-panel-input') as HTMLInputElement;
+  act(() => {
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), 'value')!.set!.call(field, text);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
 
 before(async () => {
   ({ host, react: { createElement, act } } = await installDomGlobals());
@@ -49,7 +54,6 @@ before(async () => {
   (globalThis as Any).requestIdleCallback = () => {};
   ({ createRoot } = await import('react-dom/client'));
   ({ ChoicePanel } = await import('../web/src/components/chat/ChoicePanel.js'));
-  ({ ChoiceTemplate } = await import('../web/src/components/chat/ChoiceTemplate.js'));
   ({ ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js'));
   ({ useStore } = await import('../web/src/state/store.js'));
   ({ sessionController } = await import('../web/src/state/sessionController.js'));
@@ -79,46 +83,52 @@ beforeEach(() => {
 });
 
 describe('the choice panel above the composer', () => {
-  it('shows the waiting question with numbered options, and a tap answers the call', () => {
+  it('asks the questions in turn, then answers the call with all of them', () => {
     setWaiting('choice-1');
     show(createElement(ChoicePanel));
-    assert.equal(host.querySelector('.choice-panel-q')?.textContent, 'Which one?');
+    assert.equal(question(), 'Which layout?');
+    assert.equal(host.querySelector('.choice-panel-step')?.textContent, '1 of 2');
     assert.deepEqual(options().map((b) => b.querySelector('.choice-panel-num')?.textContent), ['1', '2']);
-    assert.equal(options()[0]!.querySelector('.choice-panel-label')?.textContent, 'First');
+    act(() => options()[0]!.click());
+    assert.deepEqual(answered, [], 'nothing is sent until the last question');
+    assert.equal(question(), 'How wide?');
+    assert.equal(host.querySelector('.choice-panel-step')?.textContent, '2 of 2');
     act(() => options()[1]!.click());
-    assert.deepEqual(answered, [['choice-1', 'Take the second']]);
-    assert.deepEqual(options().map((b) => b.disabled), [true, true], 'one answer per question');
+    assert.deepEqual(answered, [['choice-1', encodeChoiceAnswers(['Use one column', 'Wide'])]]);
+    assert.deepEqual(options().map((b) => b.disabled), [true, true], 'one answer per call');
   });
 
-  it("answers with an option's number key, and skips with Escape", () => {
+  it('answers with number keys, and Escape skips the current question', () => {
     setWaiting('choice-1');
     show(createElement(ChoicePanel));
-    act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true })));
-    assert.deepEqual(answered, [['choice-1', 'Take the first']]);
-
-    setWaiting('choice-2', choiceTool({ id: 'choice-2' }));
-    act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-    assert.deepEqual(skipped, ['choice-2']);
+    key('Escape');
+    assert.equal(question(), 'How wide?');
+    key('1');
+    assert.deepEqual(answered, [['choice-1', encodeChoiceAnswers([null, 'Narrow'])]]);
   });
 
-  it('sends what is typed in "Something else", and Skip when nothing is typed', () => {
+  it('skips the call when every question was skipped', () => {
     setWaiting('choice-1');
     show(createElement(ChoicePanel));
-    const field = host.querySelector('.choice-panel-input') as HTMLInputElement;
+    act(() => (host.querySelector('.choice-panel-skip') as HTMLButtonElement).click());
+    act(() => (host.querySelector('.choice-panel-skip') as HTMLButtonElement).click());
+    assert.deepEqual(skipped, ['choice-1']);
+    assert.deepEqual(answered, []);
+  });
+
+  it('takes a typed answer from "Something else"', () => {
+    setWaiting('choice-1', choiceTool({}, [layout]));
+    show(createElement(ChoicePanel));
+    assert.equal(host.querySelector('.choice-panel-step'), null, 'no counter for one question');
     const action = () => host.querySelector('.choice-panel-skip') as HTMLButtonElement;
     assert.equal(action().textContent, 'Skip');
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), 'value')!.set!;
-      setter.call(field, 'A grid');
-      field.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    type('A grid');
     assert.equal(action().textContent, 'Send');
     act(() => action().click());
-    assert.deepEqual(answered, [['choice-1', 'A grid']]);
-    assert.deepEqual(skipped, []);
+    assert.deepEqual(answered, [['choice-1', encodeChoiceAnswers(['A grid'])]]);
   });
 
-  it('closes with the close button as a skip', () => {
+  it('skips the whole call with the close button', () => {
     setWaiting('choice-1');
     show(createElement(ChoicePanel));
     act(() => (host.querySelector('.choice-panel-close') as HTMLButtonElement).click());
@@ -133,41 +143,43 @@ describe('the choice panel above the composer', () => {
 });
 
 describe('the choice in the transcript', () => {
-  const data = { leadIn: '', question: 'Which one?', options: input.options };
-  const record = (tool: Any) => show(createElement(ChoiceTemplate, { data, tool: { id: 'choice-1', content: [], ...tool } }));
+  const card = (extra: Any) => show(createElement(ToolCallCard, { tool: choiceTool({ status: 'completed', ...extra }) }));
+  const rows = () =>
+    [...host.querySelectorAll('.tpl-choice-row')].map((r) => [
+      r.querySelector('.tpl-choice-q')?.textContent,
+      r.querySelector('.tpl-choice-a')?.textContent,
+    ]);
+  const result = (text: string) => ({ content: [{ type: 'text', text }] });
 
-  it('shows nothing while the turn waits on it, since the panel has the options', () => {
-    setWaiting('choice-1');
-    record({ status: 'in_progress' });
-    assert.equal(host.innerHTML, '');
-  });
-
-  it("shows a tapped option's label as the user's answer, read from the result", () => {
-    setWaiting(undefined);
-    record({ status: 'completed', content: [{ type: 'text', text: 'The user answered: Take the second' }] });
-    assert.equal(host.querySelector('.msg-user .msg-user-text')?.textContent, 'Second');
-    record({ status: 'completed', output: { response: 'The user answered: Take the second', message: '' } });
-    assert.equal(host.querySelector('.msg-user .msg-user-text')?.textContent, 'Second');
-  });
-
-  it('shows a typed answer as written', () => {
-    setWaiting(undefined);
-    record({ status: 'completed', content: [{ type: 'text', text: 'The user answered: A grid instead' }] });
-    assert.equal(host.querySelector('.msg-user .msg-user-text')?.textContent, 'A grid instead');
-  });
-
-  it('says when the question was skipped', () => {
-    setWaiting(undefined);
-    record({ status: 'completed', content: [{ type: 'text', text: 'The user skipped the question. Carry on.' }] });
-    assert.equal(host.querySelector('.tpl-choice-closed')?.textContent, 'Skipped: Which one?');
-  });
-
-  it('renders the lead_in as reply text above it', () => {
+  it('shows the lead-in and nothing else while the turn waits on it', () => {
     setWaiting('choice-1');
     show(createElement(ToolCallCard, { tool: choiceTool() }));
     const lead = host.querySelector('.msg-assistant');
     assert.equal(lead?.textContent?.trim(), 'Both fit the page.');
     assert.equal(lead?.querySelector('strong')?.textContent, 'fit');
+    assert.equal(host.querySelector('.tpl-choice-record'), null);
+  });
+
+  it('shows each question with its answer, by option label, read from the result', () => {
+    setWaiting(undefined);
+    card(result(formatChoiceAnswers(['Which layout?', 'How wide?'], ['Use one column', null])));
+    assert.deepEqual(rows(), [['Which layout?', 'One column'], ['How wide?', 'Skipped']]);
+    card({ output: { response: formatChoiceAnswers(['Which layout?', 'How wide?'], ['A grid', 'Wide']), message: '' } });
+    assert.deepEqual(rows(), [['Which layout?', 'A grid'], ['How wide?', 'Wide']]);
+  });
+
+  it('shows a reply typed instead of answering under the questions', () => {
+    setWaiting(undefined);
+    card(result(formatChoiceReply('Neither, a grid')));
+    assert.deepEqual(rows(), [['Which layout? How wide?', 'Neither, a grid']]);
+  });
+
+  it('marks every question skipped, or not answered when the turn stopped', () => {
+    setWaiting(undefined);
+    card(result(formatChoiceSkipped()));
+    assert.deepEqual(rows(), [['Which layout?', 'Skipped'], ['How wide?', 'Skipped']]);
+    card(result('The questions were closed without an answer.'));
+    assert.deepEqual(rows(), [['Which layout?', 'Not answered'], ['How wide?', 'Not answered']]);
   });
 });
 

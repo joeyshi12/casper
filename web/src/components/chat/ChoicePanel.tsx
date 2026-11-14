@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
+import { encodeChoiceAnswers, type ChoiceAnswers } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 import { sessionController } from '../../state/sessionController.js';
 import { choiceCallOf } from '../../util/choiceCall.js';
 import { CloseIcon, PencilIcon } from '../common/icons.js';
 
 /**
- * The options of the show_choice call the turn is waiting on, above the composer. Tapping an
- * option, or pressing its number, answers the call. "Something else" and the composer below
- * both send a typed answer; Skip and the close button let the turn carry on without one.
+ * The questions of the show_choice call the turn is waiting on, above the composer, asked
+ * one at a time. Tapping an option, or pressing its number, answers the current question;
+ * "Something else" answers it with typed text, and Skip passes over it. The answers go to
+ * the call together after the last question. The close button skips them all, and a message
+ * sent from the composer answers the call in their place.
  */
 export function ChoicePanel() {
   const waitingId = useStore((s) => s.observability.waitingChoice);
@@ -20,57 +23,83 @@ export function ChoicePanel() {
     return null;
   });
   const choice = tool ? choiceCallOf(tool) : null;
+  const [step, setStep] = useState(0);
+  const [answers, setAnswers] = useState<ChoiceAnswers>([]);
   const [other, setOther] = useState('');
   const [sent, setSent] = useState<string | null>(null);
 
   useEffect(() => {
+    setStep(0);
+    setAnswers([]);
     setOther('');
     setSent(null);
   }, [waitingId]);
 
-  const answer = (text: string) => {
-    if (!waitingId || sent === waitingId) return;
-    if (sessionController.answerChoice(waitingId, text)) setSent(waitingId);
-  };
-  const skip = () => {
-    if (!waitingId || sent === waitingId) return;
+  const busy = !waitingId || sent === waitingId;
+
+  const skipAll = () => {
+    if (busy) return;
     if (sessionController.skipChoice(waitingId)) setSent(waitingId);
   };
 
+  /** Records the current question's answer, or null to skip it, and moves on. */
+  const settle = (answer: string | null) => {
+    if (busy || !choice) return;
+    const next = [...answers];
+    next[step] = answer?.trim() || null;
+    setOther('');
+    if (step < choice.questions.length - 1) {
+      setAnswers(next);
+      setStep(step + 1);
+      return;
+    }
+    const sentOk = next.every((a) => a === null)
+      ? sessionController.skipChoice(waitingId)
+      : sessionController.answerChoice(waitingId, encodeChoiceAnswers(next));
+    if (sentOk) setSent(waitingId);
+  };
+
+  const current = choice?.questions[step];
+
   useEffect(() => {
-    if (!choice) return;
+    if (!current) return;
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const n = Number(e.key);
-      if (Number.isInteger(n) && n >= 1 && n <= choice.options.length) {
+      if (Number.isInteger(n) && n >= 1 && n <= current.options.length) {
         e.preventDefault();
-        answer(choice.options[n - 1]!.prompt);
+        settle(current.options[n - 1]!.prompt);
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        skip();
+        settle(null);
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   });
 
-  if (!waitingId || !choice) return null;
-  const busy = sent === waitingId;
+  if (!waitingId || !choice || !current) return null;
+  const count = choice.questions.length;
 
   return (
-    <div className="choice-panel" role="group" aria-label={choice.question}>
+    <div className="choice-panel" role="group" aria-label={current.question}>
       <div className="choice-panel-head">
-        <p className="choice-panel-q">{choice.question}</p>
-        <button className="choice-panel-close" onClick={skip} disabled={busy} title="Skip" aria-label="Skip the question">
+        <p className="choice-panel-q">{current.question}</p>
+        {count > 1 && (
+          <span className="choice-panel-step">
+            {step + 1} of {count}
+          </span>
+        )}
+        <button className="choice-panel-close" onClick={skipAll} disabled={busy} title="Skip" aria-label="Skip the questions">
           <CloseIcon size={16} />
         </button>
       </div>
       <ol className="choice-panel-opts">
-        {choice.options.map((option, i) => (
+        {current.options.map((option, i) => (
           <li key={option.label}>
-            <button className="choice-panel-opt" onClick={() => answer(option.prompt)} disabled={busy}>
+            <button className="choice-panel-opt" onClick={() => settle(option.prompt)} disabled={busy}>
               <span className="choice-panel-num">{i + 1}</span>
               <span className="choice-panel-label">{option.label}</span>
             </button>
@@ -87,14 +116,14 @@ export function ChoicePanel() {
             onKeyDown={(e) => {
               if (e.key === 'Enter' && other.trim()) {
                 e.preventDefault();
-                answer(other);
+                settle(other);
               }
             }}
             placeholder="Something else"
             aria-label="Something else"
             disabled={busy}
           />
-          <button className="choice-panel-skip" onClick={other.trim() ? () => answer(other) : skip} disabled={busy}>
+          <button className="choice-panel-skip" onClick={() => settle(other.trim() ? other : null)} disabled={busy}>
             {other.trim() ? 'Send' : 'Skip'}
           </button>
         </li>

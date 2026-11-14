@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { CHOICE_ANSWER_PREFIX, type CasperEvent } from '@casper/shared';
+import { encodeChoiceAnswers, type CasperEvent } from '@casper/shared';
 import { config } from '../server/src/config.js';
 import { closeDb } from '../server/src/session/db.js';
 import { SessionManager } from '../server/src/session/SessionManager.js';
@@ -29,8 +29,10 @@ after(() => {
 
 const choiceArgs = {
   lead_in: 'Two layouts fit this page.',
-  question: 'Which layout?',
-  options: [{ label: 'One column', prompt: 'Use one column' }, { label: 'Two columns' }],
+  questions: [
+    { question: 'Which layout?', options: [{ label: 'One column', prompt: 'Use one column' }, { label: 'Two columns' }] },
+    { question: 'How wide?', options: [{ label: 'Narrow' }, { label: 'Wide' }] },
+  ],
 };
 
 describe("show_choice in Casper's MCP server", () => {
@@ -50,26 +52,34 @@ describe("show_choice in Casper's MCP server", () => {
     assert.equal(sent.length, 1, 'the tool call waits: only the elicitation is sent');
     const ask = sent[0]!;
     assert.equal(ask.method, 'elicitation/create');
-    assert.equal((ask.params as { message: string }).message, 'Which layout?');
+    assert.equal((ask.params as { message: string }).message, 'Which layout?\nHow wide?');
 
-    conn.receive({ id: ask.id as string, result: { action: 'accept', content: { answer: 'Use one column' } } });
+    const answer = encodeChoiceAnswers(['Use one column', null]);
+    conn.receive({ id: ask.id as string, result: { action: 'accept', content: { answer } } });
     await waitFor('the tool result', () => sent.length === 2);
     assert.equal(sent[1]!.id, 7);
-    assert.equal(resultText(sent[1]), `${CHOICE_ANSWER_PREFIX}Use one column`);
+    assert.equal(resultText(sent[1]), 'The user answered:\n- Which layout? → Use one column\n- How wide? → (skipped)');
+  });
+
+  it('passes on a reply typed instead of answering', async () => {
+    const { conn, sent } = connect({ elicitation: {} });
+    conn.receive({ id: sent[0]!.id as string, result: { action: 'accept', content: { answer: 'A grid instead' } } });
+    await waitFor('the tool result', () => sent.length === 2);
+    assert.equal(resultText(sent[1]), 'The user replied instead of picking: A grid instead');
   });
 
   it('says the question closed when the user stopped the turn instead', async () => {
     const { conn, sent } = connect({ elicitation: {} });
     conn.receive({ id: sent[0]!.id as string, result: { action: 'cancel' } });
     await waitFor('the tool result', () => sent.length === 2);
-    assert.equal(resultText(sent[1]), 'The question was closed without an answer.');
+    assert.equal(resultText(sent[1]), 'The questions were closed without an answer.');
   });
 
   it('tells the model the user skipped when the client declines', async () => {
     const { conn, sent } = connect({ elicitation: {} });
     conn.receive({ id: sent[0]!.id as string, result: { action: 'decline' } });
     await waitFor('the tool result', () => sent.length === 2);
-    assert.match(resultText(sent[1]), /^The user skipped the question/);
+    assert.match(resultText(sent[1]), /^The user skipped the questions/);
   });
 
   it('tells the model to end its turn when the client refuses the elicitation', async () => {
