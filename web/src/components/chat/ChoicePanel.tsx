@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { encodeChoiceAnswers, type ChoiceAnswers } from '@casper/shared';
 import { useStore } from '../../state/store.js';
 import { sessionController } from '../../state/sessionController.js';
-import { choiceCallOf } from '../../util/choiceCall.js';
+import { choiceCallOf, type ChoiceData } from '../../util/choiceCall.js';
 import { CloseIcon, PencilIcon } from '../common/icons.js';
 
 /**
@@ -23,28 +23,23 @@ export function ChoicePanel() {
     return null;
   });
   const choice = tool ? choiceCallOf(tool) : null;
+  // Keyed by the call, so a new call starts on its first question with nothing answered.
+  return waitingId && choice ? <ChoiceSteps key={waitingId} toolCallId={waitingId} choice={choice} /> : null;
+}
+
+function ChoiceSteps({ toolCallId, choice }: { toolCallId: string; choice: ChoiceData }) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<ChoiceAnswers>([]);
   const [other, setOther] = useState('');
-  const [sent, setSent] = useState<string | null>(null);
-
-  useEffect(() => {
-    setStep(0);
-    setAnswers([]);
-    setOther('');
-    setSent(null);
-  }, [waitingId]);
-
-  const busy = !waitingId || sent === waitingId;
+  const [busy, setBusy] = useState(false);
 
   const skipAll = () => {
-    if (busy) return;
-    if (sessionController.skipChoice(waitingId)) setSent(waitingId);
+    if (!busy && sessionController.skipChoice(toolCallId)) setBusy(true);
   };
 
   /** Records the current question's answer, or null to skip it, and moves on. */
   const settle = (answer: string | null) => {
-    if (busy || !choice) return;
+    if (busy) return;
     const next = [...answers];
     next[step] = answer?.trim() || null;
     setOther('');
@@ -53,16 +48,15 @@ export function ChoicePanel() {
       setStep(step + 1);
       return;
     }
-    const sentOk = next.every((a) => a === null)
-      ? sessionController.skipChoice(waitingId)
-      : sessionController.answerChoice(waitingId, encodeChoiceAnswers(next));
-    if (sentOk) setSent(waitingId);
+    const sent = next.every((a) => a === null)
+      ? sessionController.skipChoice(toolCallId)
+      : sessionController.answerChoice(toolCallId, encodeChoiceAnswers(next));
+    if (sent) setBusy(true);
   };
 
-  const current = choice?.questions[step];
+  const current = choice.questions[step]!;
 
   useEffect(() => {
-    if (!current) return;
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
@@ -80,7 +74,6 @@ export function ChoicePanel() {
     return () => document.removeEventListener('keydown', onKey);
   });
 
-  if (!waitingId || !choice || !current) return null;
   const count = choice.questions.length;
 
   return (

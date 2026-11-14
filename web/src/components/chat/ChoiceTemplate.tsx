@@ -6,7 +6,7 @@ import { answerLabel, choiceResultOf, type ChoiceData } from '../../util/choiceC
  * above the composer, so this shows nothing. Afterwards it shows each question with the answer
  * given, or the reply typed instead.
  */
-export function ChoiceTemplate({ data, tool }: { data: ChoiceData; tool: Pick<ToolCallView, 'id' | 'status' | 'content' | 'output'> }) {
+export function ChoiceTemplate({ data, tool }: { data: ChoiceData; tool: Pick<ToolCallView, 'status' | 'content' | 'output'> }) {
   if (tool.status === 'in_progress' || tool.status === 'pending') return null;
   const result = choiceResultOf(tool, data);
   const rows =

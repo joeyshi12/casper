@@ -74,13 +74,12 @@ export interface ChoiceWaitingEvent {
   toolCallId: string;
 }
 
-/** The choice stopped waiting: answered with `answer`, or closed without one when the turn
- *  was stopped. `clientId` is set when a message typed into the running turn answered it, so
- *  the sender's tab can drop the copy it showed while waiting. */
+/** The choice stopped waiting: answered, skipped, or closed because the turn stopped. The
+ *  answer is in the call's result. `clientId` is set when a message typed into the running
+ *  turn answered it, so the sender's tab can drop the copy it showed while waiting. */
 export interface ChoiceSettledEvent {
   kind: 'choice_settled';
   toolCallId: string;
-  answer?: string;
   clientId?: string;
 }
 
@@ -162,8 +161,8 @@ export interface ClientSteer {
   clientId?: string;
 }
 
-/** The user's answer to the show_choice call the turn is waiting on. An empty answer
- *  skips the question. */
+/** The user's answers to the show_choice call the turn is waiting on. An empty answer
+ *  skips the questions. */
 export interface ClientChoice {
   type: 'choice';
   toolCallId: string;

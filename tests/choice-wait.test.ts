@@ -137,7 +137,7 @@ describe('a choice the turn waits on', () => {
 
       c.mgr.answerChoice(c.chatId, 'choice-1', 'Use one column');
       assert.deepEqual(c.answers(), [[41, { action: 'accept', content: { answer: 'Use one column' } }]]);
-      assert.deepEqual(c.events().at(-1), { kind: 'choice_settled', toolCallId: 'choice-1', answer: 'Use one column' });
+      assert.deepEqual(c.events().at(-1), { kind: 'choice_settled', toolCallId: 'choice-1' });
       assert.throws(() => c.mgr.answerChoice(c.chatId, 'choice-1', 'Again'), /no longer waiting/);
       c.finish();
     } finally {
@@ -164,7 +164,7 @@ describe('a choice the turn waits on', () => {
       assert.equal(c.proc.calls.includes('steer'), false);
       assert.deepEqual(c.answers(), [[41, { action: 'accept', content: { answer: 'Neither, use a grid' } }]]);
       assert.deepEqual(c.events().at(-1), {
-        kind: 'choice_settled', toolCallId: 'choice-1', answer: 'Neither, use a grid', clientId: 'pending-3',
+        kind: 'choice_settled', toolCallId: 'choice-1', clientId: 'pending-3',
       });
       c.finish();
     } finally {

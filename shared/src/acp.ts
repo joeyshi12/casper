@@ -379,7 +379,6 @@ export type ElicitationResult =
   | { action: 'accept'; content: Record<string, string> }
   | { action: 'decline' | 'cancel' };
 
-
 /** kiro's notice that a requested agent could not be used, so the session fell back to
  *  another one. */
 export const KIRO_AGENT_NOT_FOUND = '_kiro/customAgent/not_found';

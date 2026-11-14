@@ -190,7 +190,7 @@ describe('choice events in the store', () => {
     useStore.setState({ appliedSeq: 0, pending: [{ id: 'pending-3', text: 'A grid', content: [], steer: true }] } as Any);
     useStore.getState().applyEvent(event(1, { kind: 'choice_waiting', toolCallId: 'choice-1' }));
     assert.equal(useStore.getState().observability.waitingChoice, 'choice-1');
-    useStore.getState().applyEvent(event(2, { kind: 'choice_settled', toolCallId: 'choice-1', answer: 'A grid', clientId: 'pending-3' }));
+    useStore.getState().applyEvent(event(2, { kind: 'choice_settled', toolCallId: 'choice-1', clientId: 'pending-3' }));
     assert.equal(useStore.getState().observability.waitingChoice, undefined);
     assert.deepEqual(useStore.getState().pending, []);
   });
