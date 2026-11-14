@@ -1,4 +1,4 @@
-import { parseChoiceResult, type ChoiceResult } from '@casper/shared';
+import { oneLine, parseChoiceResult, type ChoiceResult } from '@casper/shared';
 import type { ToolCallView } from '../state/store.js';
 import { outputText } from './toolRender.js';
 import { leadInOf } from './widgetCall.js';
@@ -70,5 +70,6 @@ export function choiceResultOf(tool: Pick<ToolCallView, 'content' | 'output'>, d
 
 /** The label of the option an answer picked, or the answer itself when it was typed. */
 export function answerLabel(question: ChoiceQuestion, answer: string): string {
-  return question.options.find((o) => o.prompt.trim() === answer.trim())?.label ?? answer;
+  // The result holds each answer on one line, so compare one-line forms.
+  return question.options.find((o) => oneLine(o.prompt) === oneLine(answer))?.label ?? answer;
 }

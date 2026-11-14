@@ -1455,6 +1455,13 @@ describe('choice results', () => {
     assert.deepEqual(parseChoiceResult(text, questions), { kind: 'answers', answers: ['Use one column', null] });
   });
 
+  it('reads answers by position, with line breaks and lookalike questions', () => {
+    const qs = ['Theme → dark or light?', 'Theme', 'Two\nlines?'];
+    const text = formatChoiceAnswers(qs, ['Dark', 'Warm\ncolours', 'Yes']);
+    assert.equal(text.split('\n').length, 4, 'one line per question');
+    assert.deepEqual(parseChoiceResult(text, qs), { kind: 'answers', answers: ['Dark', 'Warm colours', 'Yes'] });
+  });
+
   it('reads back a typed reply and a skip', () => {
     assert.deepEqual(parseChoiceResult(formatChoiceReply('A grid'), questions), { kind: 'reply', text: 'A grid' });
     assert.deepEqual(parseChoiceResult(formatChoiceSkipped(), questions), { kind: 'skipped' });
@@ -1471,6 +1478,8 @@ describe('choice results', () => {
     const q = { question: 'Ship?', options: [{ label: 'Ship it', prompt: 'Ship it as 0.9.5.' }, { label: 'Hold', prompt: 'Hold' }] };
     assert.equal(answerLabel(q, '  Ship it as 0.9.5. '), 'Ship it');
     assert.equal(answerLabel(q, 'actually, the icons'), 'actually, the icons');
+    const multi = { question: 'Ship?', options: [{ label: 'Ship', prompt: 'Ship it\nnow' }, { label: 'Hold', prompt: 'Hold' }] };
+    assert.equal(answerLabel(multi, 'Ship it now'), 'Ship', 'a prompt with a line break, read back on one line');
   });
 });
 

@@ -28,8 +28,8 @@ const choiceTool = (extra: Any = {}, questions: Any[] = [layout, width]) => ({
   input: input(questions), ...extra,
 });
 
-const options = () => [...host.querySelectorAll('button.choice-panel-opt')] as HTMLButtonElement[];
-const question = () => host.querySelector('.choice-panel-q')?.textContent;
+const options = () => [...host.querySelectorAll('.choice-panel-opts.is-current button.choice-panel-opt')] as HTMLButtonElement[];
+const question = () => host.querySelector('.choice-panel-q.is-current')?.textContent;
 const key = (k: string) => act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })));
 const setWaiting = (waitingChoice: string | undefined, tool: Any = choiceTool()) => {
   act(() => {
@@ -125,6 +125,43 @@ describe('the choice panel above the composer', () => {
     key('ArrowLeft');
     act(() => options()[0]!.click());
     assert.deepEqual(answered, [['choice-1', encodeChoiceAnswers(['Use one column', 'Wide'])]]);
+  });
+
+  it('renders every question, so the panel keeps the height of the tallest', () => {
+    setWaiting('choice-1', choiceTool({}, [layout, { question: 'Which?', options: [{ label: 'A' }, { label: 'B' }, { label: 'C' }] }]));
+    show(createElement(ChoicePanel));
+    assert.deepEqual([...host.querySelectorAll('.choice-panel-opts')].map((ol) => ol.children.length), [2, 3]);
+    assert.equal(host.querySelectorAll('.choice-panel-opts.is-current').length, 1);
+  });
+
+  it('keeps what was typed in "Something else" when moving between questions', () => {
+    setWaiting('choice-1');
+    show(createElement(ChoicePanel));
+    type('A grid');
+    act(() => (host.querySelector('button[aria-label="Next question"]') as HTMLButtonElement).click());
+    assert.equal((host.querySelector('.choice-panel-input') as HTMLInputElement).value, '');
+    act(() => (host.querySelector('button[aria-label="Previous question"]') as HTMLButtonElement).click());
+    assert.equal((host.querySelector('.choice-panel-input') as HTMLInputElement).value, 'A grid');
+  });
+
+  it('ignores its keys while a dialog or menu is open, or focus is elsewhere', () => {
+    setWaiting('choice-1');
+    show(createElement(ChoicePanel));
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    document.body.appendChild(dialog);
+    key('Escape');
+    key('1');
+    dialog.remove();
+    assert.equal(question(), 'Which layout?', 'the dialog had the keys');
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+    key('1');
+    outside.remove();
+    assert.equal(question(), 'Which layout?', 'a focused control elsewhere had the keys');
+    key('1');
+    assert.equal(question(), 'How wide?');
   });
 
   it('skips the call when every question was skipped', () => {

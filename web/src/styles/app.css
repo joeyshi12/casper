@@ -1692,8 +1692,22 @@
   gap: 8px;
   padding: 0 2px 6px;
 }
-.choice-panel-q {
+/* Every question sits in the same cell; only the current one is visible. */
+.choice-panel-stack {
+  display: grid;
+}
+.choice-panel-stack > * {
+  grid-area: 1 / 1;
+  align-self: start;
+}
+.choice-panel-stack > :not(.is-current) {
+  visibility: hidden;
+}
+.choice-panel-head > .choice-panel-stack {
   flex: 1;
+  min-width: 0;
+}
+.choice-panel-q {
   margin: 0;
   font-size: 14px;
   color: var(--n6);
@@ -1812,6 +1826,7 @@
   align-items: center;
   gap: 10px;
   padding: 9px 8px;
+  border-top: 1px solid var(--n2);
 }
 .choice-panel-input {
   flex: 1;

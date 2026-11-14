@@ -29,9 +29,15 @@ export function decodeChoiceAnswers(raw: string, count: number): ChoiceAnswers |
   }
 }
 
+/** `text` on one line, so it fits on a line of the tool result. */
+export function oneLine(text: string): string {
+  return text.replace(/\s*\n\s*/g, ' ').trim();
+}
+
 /** The tool result for answers to `questions`, one line each. */
 export function formatChoiceAnswers(questions: string[], answers: ChoiceAnswers): string {
-  return [ANSWERED, ...questions.map((q, i) => `- ${q} → ${answers[i] ?? SKIP_MARK}`)].join('\n');
+  const lines = questions.map((q, i) => `- ${oneLine(q)} → ${answers[i] ? oneLine(answers[i]) : SKIP_MARK}`);
+  return [ANSWERED, ...lines].join('\n');
 }
 
 export function formatChoiceReply(text: string): string {
@@ -52,11 +58,11 @@ export function parseChoiceResult(text: string, questions: string[]): ChoiceResu
   if (text.startsWith(REPLIED)) return { kind: 'reply', text: text.slice(REPLIED.length).trim() };
   if (text.startsWith(SKIPPED)) return { kind: 'skipped' };
   if (!text.startsWith(ANSWERED)) return null;
-  const lines = text.slice(ANSWERED.length).split('\n');
-  const answers = questions.map((q) => {
-    const head = `- ${q} → `;
-    const line = lines.find((l) => l.startsWith(head));
-    const value = line?.slice(head.length).trim();
+  // Line i holds question i.
+  const lines = text.slice(ANSWERED.length).split('\n').filter((l) => l.startsWith('- '));
+  const answers = questions.map((q, i) => {
+    const head = `- ${oneLine(q)} → `;
+    const value = lines[i]?.startsWith(head) ? lines[i].slice(head.length).trim() : '';
     return value && value !== SKIP_MARK ? value : null;
   });
   return { kind: 'answers', answers };
