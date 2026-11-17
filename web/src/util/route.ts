@@ -12,3 +12,6 @@ export function pathForChat(id: string): string {
  * than a chat id, so nothing has to reserve the name "new" among real ones.
  */
 export const DRAFT_PATH = '/new';
+
+/** Every chat, with search, an age filter and bulk delete. */
+export const CHATS_PAGE = '/chats';

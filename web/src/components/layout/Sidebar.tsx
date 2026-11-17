@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { pathForChat } from '../../util/route.js';
+import { CHATS_PAGE, pathForChat } from '../../util/route.js';
 import { groupByDate } from '../../util/chatGroups.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatSummary } from '@casper/shared';
@@ -28,6 +28,8 @@ interface Props {
   /** The pointer or focus reached a row, so its chat is likely to be opened next. */
   onPrefetch: (id: string) => void;
   onNew: () => void;
+  /** Fired when the link to the chats page is followed. */
+  onViewAll: () => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onPin: (id: string, pinned: boolean) => void;
@@ -38,6 +40,9 @@ interface Props {
 const GROUPED_KEY = 'casper.groupChatsByDate';
 
 const SCROLLBAR_IDLE_MS = 1000;
+
+/** Unpinned chats listed in the sidebar; the rest are on the chats page. */
+export const SIDEBAR_CHATS = 30;
 
 /** How long the pointer rests on a row before its chat is prefetched, so moving the
  *  pointer across the list does not fetch every chat it passes. */
@@ -67,6 +72,7 @@ export function Sidebar({
   onOpen,
   onPrefetch,
   onNew,
+  onViewAll,
   onDelete,
   onRename,
   onPin,
@@ -127,7 +133,14 @@ export function Sidebar({
   };
 
   const pinned = sessions.filter((s) => s.pinned);
-  const unpinned = sessions.filter((s) => !s.pinned);
+  const allUnpinned = sessions.filter((s) => !s.pinned);
+  // The open chat stays listed even when it is older than the ones shown.
+  const unpinned = allUnpinned.filter((s, i) => i < SIDEBAR_CHATS || s.chatId === activeId);
+  const viewAll = sessions.length > 0 && (
+    <Link className="sidebar-viewall" to={CHATS_PAGE} onClick={onViewAll}>
+      {allUnpinned.length > unpinned.length ? `View all ${sessions.length}` : 'View all'}
+    </Link>
+  );
 
   const toggleGrouped = () => {
     saveGrouped(!grouped);
@@ -326,6 +339,7 @@ export function Sidebar({
         ) : (
           unpinned.length > 0 && section('Chats', unpinned, groupButton)
         )}
+        {viewAll}
       </div>
 
       {searchOpen && (

@@ -19,6 +19,7 @@ import type { SessionSocketHandlers } from '../web/src/api/SessionSocket.js';
 import { lineDiff } from '../web/src/util/diff.js';
 import { matchPath } from 'react-router';
 import { CHAT_ROUTE, DRAFT_PATH, pathForChat } from '../web/src/util/route.js';
+import { lastActive } from '../web/src/util/relTime.js';
 import { answerLabel, choiceCallOf } from '../web/src/util/choiceCall.js';
 import {
   decodeChoiceAnswers,
@@ -2026,6 +2027,23 @@ describe('session controller', () => {
     assert.ok(rest.calls.includes('deleteChat:other'));
   });
 
+  it('bulk delete removes every chat, reports failures, and goes home if the open one went', async () => {
+    const { controller, nav, rest } = build({
+      api: {
+        deleteChat: async (id) => {
+          rest.calls.push(`deleteChat:${id}`);
+          if (id === 'bad') throw new Error('nope');
+          return { ok: true };
+        },
+      },
+    });
+    await controller.openChat('s1');
+    const failed = await controller.deleteChats(['a', 'bad', 's1', 'b', 'c', 'd']);
+    assert.deepEqual(failed, ['bad']);
+    for (const id of ['a', 'bad', 's1', 'b', 'c', 'd']) assert.ok(rest.calls.includes(`deleteChat:${id}`), id);
+    assert.deepEqual(nav.to, ['/']);
+  });
+
   it('a rename shows immediately and is persisted after', async () => {
     useStore.setState({
       chats: [{ chatId: 's1', title: 'old' } as unknown as ChatSummary],
@@ -2150,5 +2168,21 @@ describe('uuid (chat ids outside a secure context)', () => {
     swapCrypto({ getRandomValues: (a: Uint8Array) => real.getRandomValues(a) });
     // Mirrors isValidChatId in server/src/util/paths.ts: nothing that could traverse.
     assert.match(uuid(), /^[A-Za-z0-9._-]+$/);
+  });
+});
+
+describe('when a chat was last active', () => {
+  const now = new Date(2026, 10, 14, 15, 0);
+  const at = (...a: [number, number, number, number?, number?]) => new Date(...a).toISOString();
+
+  it('counts minutes and hours today, then days, then shows the date', () => {
+    assert.equal(lastActive(at(2026, 10, 14, 14, 59, 40), now), 'Just now');
+    assert.equal(lastActive(at(2026, 10, 14, 14, 33), now), '27 minutes ago');
+    assert.equal(lastActive(at(2026, 10, 14, 14, 0), now), '1 hour ago');
+    assert.equal(lastActive(at(2026, 10, 14, 0, 30), now), '14 hours ago');
+    assert.equal(lastActive(at(2026, 10, 13, 23, 50), now), 'Yesterday');
+    assert.equal(lastActive(at(2026, 10, 11, 9, 0), now), '3 days ago');
+    assert.match(lastActive(at(2026, 10, 2, 9, 0), now), /Nov/);
+    assert.match(lastActive(at(2025, 10, 2, 9, 0), now), /2025/);
   });
 });
