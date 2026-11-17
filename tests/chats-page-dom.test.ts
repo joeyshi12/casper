@@ -42,6 +42,10 @@ const render = (el: Any) =>
 const click = (el: Element | null) => act(() => (el as HTMLElement).dispatchEvent(new w.MouseEvent('click', { bubbles: true })));
 const buttonNamed = (text: string) =>
   [...host.querySelectorAll('button')].find((b) => b.textContent?.trim() === text) ?? null;
+const filter = (label: string) => {
+  click(host.querySelector('button[aria-label="Filter by age"]'));
+  click([...w.document.body.querySelectorAll('.chats-age')].find((b: Any) => b.textContent === label) ?? null);
+};
 const titles = () => [...host.querySelectorAll('.chats-title')].map((t) => t.textContent);
 const typeInto = (input: HTMLInputElement, text: string) =>
   act(() => {
@@ -122,12 +126,26 @@ describe('the chats page', () => {
 
   it('filters by title or folder, and by how long the chat has been idle', () => {
     page();
+    assert.equal(host.querySelector('.chats-heading')?.textContent, 'Chats');
+    click(host.querySelector('button[aria-label="Search chats"]'));
     typeInto(host.querySelector('.chats-search input') as HTMLInputElement, 'fft');
     assert.deepEqual(titles(), ['Plotting FFT', 'Old notes'], 'the folder matches too');
-    typeInto(host.querySelector('.chats-search input') as HTMLInputElement, '');
-    click(host.querySelector('button[aria-label="Filter by age"]'));
-    click(buttonNamed('Idle a week or more'));
+    click(host.querySelector('button[aria-label="Close search"]'));
+    assert.equal(titles().length, 4, 'closing the search clears it');
+    filter('Idle a week or more');
     assert.deepEqual(titles(), ['Old notes', 'Ancient']);
+    assert.ok(host.querySelector('button[aria-label="Filter by age"]')?.classList.contains('is-on'));
+  });
+
+  it('fades its scrollbar like the sidebar, and draws a line under the header once scrolled', () => {
+    page();
+    const scroller = host.querySelector('.chats-scroll') as HTMLElement;
+    assert.ok(scroller.classList.contains('fade-scroll'));
+    assert.ok(scroller.contains(host.querySelector('.chats-head')), 'the header sticks inside the scroller');
+    scroller.scrollTop = 120;
+    act(() => scroller.dispatchEvent(new w.Event('scroll', { bubbles: true })));
+    assert.ok(scroller.classList.contains('is-scrolling'));
+    assert.ok(host.querySelector('.chats-head')?.classList.contains('is-scrolled'));
   });
 
   it('selects chats and deletes them after confirming, keeping failures selected', async () => {
@@ -153,8 +171,7 @@ describe('the chats page', () => {
     const rows = () => [...host.querySelectorAll('button.chats-row')];
     click(rows()[1]!);
     click(rows()[3]!);
-    click(host.querySelector('button[aria-label="Filter by age"]'));
-    click(buttonNamed('Idle a week or more'));
+    filter('Idle a week or more');
     assert.equal(host.querySelector('.chats-count')?.textContent, '1 selected');
     click(buttonNamed('Delete'));
     await act(async () => {
@@ -165,8 +182,7 @@ describe('the chats page', () => {
 
   it('selects every listed chat at once, and only those', () => {
     page();
-    click(host.querySelector('button[aria-label="Filter by age"]'));
-    click(buttonNamed('Idle a month or more'));
+    filter('Idle a month or more');
     click(buttonNamed('Select'));
     click(buttonNamed('Select all 1'));
     assert.equal(host.querySelector('.chats-count')?.textContent, '1 selected');

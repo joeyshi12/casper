@@ -132,7 +132,7 @@ describe('sidebar sections (rendered in a DOM)', () => {
 
   it('scrolls the nav and the chats together, under a fixed header', () => {
     const aside = host.querySelector('aside.sidebar')!;
-    assert.deepEqual([...aside.children].map((el) => el.className), ['sidebar-head', 'sidebar-scroll']);
+    assert.deepEqual([...aside.children].map((el) => el.className), ['sidebar-head', 'sidebar-scroll fade-scroll']);
     assert.deepEqual(
       [...host.querySelectorAll('.sidebar-nav button')].map((b) => b.textContent?.trim()),
       ['New', 'Search', 'Settings'],

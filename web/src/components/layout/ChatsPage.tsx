@@ -5,8 +5,9 @@ import { sessionController } from '../../state/sessionController.js';
 import { pathForChat } from '../../util/route.js';
 import { lastActive } from '../../util/relTime.js';
 import { ConfirmDialog } from '../common/ConfirmDialog.js';
-import { Dropdown } from '../common/Dropdown.js';
-import { CheckIcon, MenuIcon, SearchIcon } from '../common/icons.js';
+import { PopoverMenu } from '../common/PopoverMenu.js';
+import { useFadingScrollbar } from '../common/useFadingScrollbar.js';
+import { CheckIcon, CloseIcon, FilterIcon, MenuIcon, SearchIcon } from '../common/icons.js';
 
 const DAY = 86_400_000;
 
@@ -34,6 +35,9 @@ export function ChatsPage({ chats, navOpen, onToggleNav, onNew }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null);
+  const { scrolled, onScroll } = useFadingScrollbar();
 
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -64,6 +68,11 @@ export function ChatsPage({ chats, navOpen, onToggleNav, onNew }: Props) {
     setSelected(new Set());
   };
 
+  const closeSearch = () => {
+    setQuery('');
+    setSearching(false);
+  };
+
   const remove = async () => {
     setConfirming(false);
     setDeleting(true);
@@ -77,69 +86,92 @@ export function ChatsPage({ chats, navOpen, onToggleNav, onNew }: Props) {
 
   return (
     <main className="chatpane chats-page">
-      <header className="chat-head">
-        <button
-          className="navbtn"
-          onClick={onToggleNav}
-          aria-label={navOpen ? 'Hide sessions' : 'Show sessions'}
-          aria-expanded={navOpen}
-        >
-          <MenuIcon size={20} />
-        </button>
-        <span className="chat-title">Chats</span>
-      </header>
-
-      <div className="chats-body">
-        <div className="chats-tools">
-          <label className="chats-search">
-            <SearchIcon size={15} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search chats"
-              aria-label="Search chats"
-            />
-          </label>
-          <Dropdown ariaLabel="Filter by age" value={minAge} options={AGES} onChange={setMinAge} />
-          {selecting ? (
-            <button className="btn-ghost chats-btn" onClick={stopSelecting}>
-              Cancel
-            </button>
-          ) : (
-            <button className="btn-ghost chats-btn" onClick={() => setSelecting(true)} disabled={chats.length === 0}>
-              Select
-            </button>
-          )}
-          <button className="btn-primary chats-btn" onClick={onNew}>
-            New
-          </button>
-        </div>
-
-        {selecting && (
-          <div className="chats-selectbar">
+      <div className="chats-scroll fade-scroll" onScroll={onScroll}>
+        <header className={`chats-head${scrolled ? ' is-scrolled' : ''}`}>
+          <div className="chats-head-row">
             <button
-              className="chats-check-all"
-              onClick={() => setSelected(allPicked ? new Set() : new Set(shown.map((c) => c.chatId)))}
-              disabled={shown.length === 0}
+              className="navbtn"
+              onClick={onToggleNav}
+              aria-label={navOpen ? 'Hide sessions' : 'Show sessions'}
+              aria-expanded={navOpen}
             >
-              {allPicked ? 'Clear selection' : `Select all ${shown.length}`}
+              <MenuIcon size={20} />
             </button>
-            <span className="chats-count">{picked.length} selected</span>
+            {searching ? (
+              <label className="chats-search">
+                <SearchIcon size={15} />
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Escape' && closeSearch()}
+                  onBlur={() => !query && setSearching(false)}
+                  placeholder="Search chats"
+                  aria-label="Search chats"
+                />
+                <button className="iconbtn chats-search-x" onClick={closeSearch} aria-label="Close search">
+                  <CloseIcon size={14} />
+                </button>
+              </label>
+            ) : (
+              <>
+                <h1 className="chats-heading">Chats</h1>
+                <button className="iconbtn chats-icon" onClick={() => setSearching(true)} aria-label="Search chats" title="Search">
+                  <SearchIcon size={17} />
+                </button>
+              </>
+            )}
             <button
-              className="btn-danger chats-btn"
-              onClick={() => setConfirming(true)}
-              disabled={picked.length === 0 || deleting}
+              className={`iconbtn chats-icon${minAge !== '0' ? ' is-on' : ''}`}
+              onClick={(e) => setFilterAnchor(filterAnchor ? null : e.currentTarget)}
+              aria-label="Filter by age"
+              aria-haspopup="menu"
+              aria-expanded={!!filterAnchor}
+              title={AGES.find((a) => a.value === minAge)?.label}
             >
-              {deleting ? 'Deleting…' : 'Delete'}
+              <FilterIcon size={16} />
+            </button>
+            {selecting ? (
+              <button className="btn-ghost chats-btn" onClick={stopSelecting}>
+                Cancel
+              </button>
+            ) : (
+              <button className="btn-ghost chats-btn" onClick={() => setSelecting(true)} disabled={chats.length === 0}>
+                Select
+              </button>
+            )}
+            <button className="btn-primary chats-btn" onClick={onNew}>
+              New
             </button>
           </div>
-        )}
-        {error && (
-          <p className="chats-error" role="alert">
-            {error}
-          </p>
-        )}
 
+          {selecting && (
+            <div className="chats-selectbar">
+              <button
+                className="chats-check-all"
+                onClick={() => setSelected(allPicked ? new Set() : new Set(shown.map((c) => c.chatId)))}
+                disabled={shown.length === 0}
+              >
+                {allPicked ? 'Clear selection' : `Select all ${shown.length}`}
+              </button>
+              <span className="chats-count">{picked.length} selected</span>
+              <button
+                className="btn-danger chats-btn"
+                onClick={() => setConfirming(true)}
+                disabled={picked.length === 0 || deleting}
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          )}
+          {error && (
+            <p className="chats-error" role="alert">
+              {error}
+            </p>
+          )}
+        </header>
+
+        <div className="chats-body">
         <ul className="chats-list">
           {shown.map((c) => {
             const on = selected.has(c.chatId);
@@ -173,7 +205,28 @@ export function ChatsPage({ chats, navOpen, onToggleNav, onNew }: Props) {
         {shown.length === 0 && (
           <p className="chats-empty">{chats.length === 0 ? 'No chats yet.' : 'No chats match.'}</p>
         )}
+        </div>
       </div>
+
+      {filterAnchor && (
+        <PopoverMenu anchor={filterAnchor} onClose={() => setFilterAnchor(null)}>
+          {AGES.map((a) => (
+            <button
+              key={a.value}
+              className="menu-item chats-age"
+              role="menuitemradio"
+              aria-checked={a.value === minAge}
+              onClick={() => {
+                setMinAge(a.value);
+                setFilterAnchor(null);
+              }}
+            >
+              <span>{a.label}</span>
+              {a.value === minAge && <CheckIcon size={14} />}
+            </button>
+          ))}
+        </PopoverMenu>
+      )}
 
       {confirming && (
         <ConfirmDialog

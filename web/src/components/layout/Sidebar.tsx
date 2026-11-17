@@ -16,6 +16,7 @@ import { PopoverMenu } from '../common/PopoverMenu.js';
 import { SearchModal } from '../sessions/SearchModal.js';
 import { SettingsModal } from '../sessions/SettingsModal.js';
 import { ConfirmDialog } from '../common/ConfirmDialog.js';
+import { useFadingScrollbar } from '../common/useFadingScrollbar.js';
 
 interface Props {
   sessions: ChatSummary[];
@@ -38,8 +39,6 @@ interface Props {
 
 /** Whether to group by date is a choice for this browser, so it lives in localStorage. */
 const GROUPED_KEY = 'casper.groupChatsByDate';
-
-const SCROLLBAR_IDLE_MS = 1000;
 
 /** Unpinned chats listed in the sidebar; the rest are on the chats page. */
 export const SIDEBAR_CHATS = 30;
@@ -87,8 +86,7 @@ export function Sidebar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [grouped, setGrouped] = useState(loadGrouped);
-  /** Whether the list is scrolled down, which draws a line under the header. */
-  const [scrolled, setScrolled] = useState(false);
+  const { scrolled, onScroll: onListScroll } = useFadingScrollbar();
   /** Labels of the sections the user folded away, for this page load. */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -99,13 +97,9 @@ export function Sidebar({
     setMenuAnchor(null);
   }, []);
 
-  // Shows the scrollbar while the list scrolls. The class is set on the element, so
-  // scrolling does not re-render the sidebar.
-  const scrollIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
-      if (scrollIdleTimer.current) clearTimeout(scrollIdleTimer.current);
       if (hoverTimer.current) clearTimeout(hoverTimer.current);
     },
     [],
@@ -117,13 +111,6 @@ export function Sidebar({
   const hoverPrefetch = (id: string) => {
     cancelHoverPrefetch();
     hoverTimer.current = setTimeout(() => onPrefetch(id), PREFETCH_HOVER_MS);
-  };
-  const onListScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    setScrolled(el.scrollTop > 0);
-    el.classList.add('is-scrolling');
-    if (scrollIdleTimer.current) clearTimeout(scrollIdleTimer.current);
-    scrollIdleTimer.current = setTimeout(() => el.classList.remove('is-scrolling'), SCROLLBAR_IDLE_MS);
   };
 
   const commitRename = (id: string) => {
@@ -301,7 +288,7 @@ export function Sidebar({
         </span>
       </header>
 
-      <div className="sidebar-scroll" onScroll={onListScroll}>
+      <div className="sidebar-scroll fade-scroll" onScroll={onListScroll}>
         <nav className="sidebar-nav" aria-label="Casper">
           <button className="snav-item" onClick={onNew}>
             <span className="sb-icon">
