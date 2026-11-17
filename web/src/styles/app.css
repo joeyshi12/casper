@@ -3917,9 +3917,11 @@ a.btn-sm {
   min-height: 0;
   overflow-y: auto;
   width: 100%;
-  max-width: 760px;
+  /* As wide as the transcript. Not --chat-inset: its percentage would resolve against
+     the whole pane and squeeze this column to nothing. */
+  max-width: calc(var(--chat-max) + 2 * var(--gutter));
   margin: 0 auto;
-  padding: 18px var(--chat-inset) calc(24px + var(--safe-bottom));
+  padding: 18px var(--gutter) calc(24px + var(--safe-bottom));
 }
 .chats-tools,
 .chats-selectbar {

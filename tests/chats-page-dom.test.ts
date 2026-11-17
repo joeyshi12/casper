@@ -98,7 +98,7 @@ describe('the sidebar list', () => {
     assert.equal(rowTitles().length, 1 + SIDEBAR_CHATS);
     assert.equal(SIDEBAR_CHATS, 30);
     const link = host.querySelector('a.sidebar-viewall');
-    assert.equal(link?.textContent, 'View all 41');
+    assert.equal(link?.textContent, 'View all');
     assert.equal(link?.getAttribute('href'), '/chats');
   });
 

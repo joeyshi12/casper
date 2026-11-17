@@ -133,12 +133,11 @@ export function Sidebar({
   };
 
   const pinned = sessions.filter((s) => s.pinned);
-  const allUnpinned = sessions.filter((s) => !s.pinned);
   // The open chat stays listed even when it is older than the ones shown.
-  const unpinned = allUnpinned.filter((s, i) => i < SIDEBAR_CHATS || s.chatId === activeId);
+  const unpinned = sessions.filter((s) => !s.pinned).filter((s, i) => i < SIDEBAR_CHATS || s.chatId === activeId);
   const viewAll = sessions.length > 0 && (
     <Link className="sidebar-viewall" to={CHATS_PAGE} onClick={onViewAll}>
-      {allUnpinned.length > unpinned.length ? `View all ${sessions.length}` : 'View all'}
+      View all
     </Link>
   );
 
