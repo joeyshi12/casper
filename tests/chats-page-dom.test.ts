@@ -129,6 +129,7 @@ describe('the chats page', () => {
     assert.equal(host.querySelector('.chats-heading')?.textContent, 'Chats');
     click(host.querySelector('button[aria-label="Search chats"]'));
     typeInto(host.querySelector('.chats-search input') as HTMLInputElement, 'fft');
+    assert.equal(host.querySelector('.chats-heading')?.textContent, 'Chats', 'the heading stays while searching');
     assert.deepEqual(titles(), ['Plotting FFT', 'Old notes'], 'the folder matches too');
     click(host.querySelector('button[aria-label="Close search"]'));
     assert.equal(titles().length, 4, 'closing the search clears it');

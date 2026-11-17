@@ -97,6 +97,7 @@ export function ChatsPage({ chats, navOpen, onToggleNav, onNew }: Props) {
             >
               <MenuIcon size={20} />
             </button>
+            <h1 className="chats-heading">Chats</h1>
             {searching ? (
               <label className="chats-search">
                 <SearchIcon size={15} />
@@ -114,12 +115,9 @@ export function ChatsPage({ chats, navOpen, onToggleNav, onNew }: Props) {
                 </button>
               </label>
             ) : (
-              <>
-                <h1 className="chats-heading">Chats</h1>
-                <button className="iconbtn chats-icon" onClick={() => setSearching(true)} aria-label="Search chats" title="Search">
-                  <SearchIcon size={17} />
-                </button>
-              </>
+              <button className="iconbtn chats-icon" onClick={() => setSearching(true)} aria-label="Search chats" title="Search">
+                <SearchIcon size={17} />
+              </button>
             )}
             <button
               className={`iconbtn chats-icon${minAge !== '0' ? ' is-on' : ''}`}

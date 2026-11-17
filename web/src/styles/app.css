@@ -3952,8 +3952,9 @@ a.btn-sm {
   min-height: 40px;
 }
 .chats-heading {
-  flex: 1;
-  margin: 0 0 0 4px;
+  flex: none;
+  /* Pushes the controls to the right; the open search field takes this space instead. */
+  margin: 0 auto 0 4px;
   font-family: var(--font-display);
   font-size: 24px;
   font-weight: 600;
@@ -3983,6 +3984,8 @@ a.btn-sm {
   gap: 8px;
   flex: 1;
   min-width: 0;
+  max-width: 420px;
+  margin-left: 12px;
   padding: 4px 4px 4px 10px;
   border: 1px solid var(--frost-deep);
   border-radius: var(--r-md);
@@ -3999,6 +4002,21 @@ a.btn-sm {
   font-size: 14px;
   color: var(--n6);
   outline: none;
+}
+/* When the row is too narrow to share, the open search field takes its own line under it. */
+.chats-head {
+  container-type: inline-size;
+}
+@container (max-width: 560px) {
+  .chats-head-row {
+    flex-wrap: wrap;
+  }
+  .chats-search {
+    order: 1;
+    flex-basis: 100%;
+    max-width: none;
+    margin: 4px 0 0;
+  }
 }
 .chats-search-x {
   width: 26px;
