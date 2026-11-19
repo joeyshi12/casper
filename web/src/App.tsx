@@ -4,9 +4,10 @@ import { useStore } from './state/store.js';
 import { api, logout } from './api/rest.js';
 import { sessionController } from './state/sessionController.js';
 import { Sidebar } from './components/layout/Sidebar.js';
+import { ChatsPage } from './components/layout/ChatsPage.js';
 import { ChatPane } from './components/layout/ChatPane.js';
 import { TokenGate } from './components/common/TokenGate.js';
-import { CHAT_ROUTE, DRAFT_PATH } from './util/route.js';
+import { CHAT_ROUTE, CHATS_PAGE, DRAFT_PATH } from './util/route.js';
 
 type AuthState = 'checking' | 'gate' | 'ready';
 
@@ -35,6 +36,7 @@ export function App() {
         <Route element={<Shell onLock={() => setAuth('gate')} />}>
           <Route index element={null} />
           <Route path={DRAFT_PATH} element={null} />
+          <Route path={CHATS_PAGE} element={null} />
           <Route path={CHAT_ROUTE} element={null} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -57,7 +59,9 @@ function Shell({ onLock }: { onLock: () => void }) {
   const navigate = useNavigate();
   // useMatch, not useParams: the param belongs to the child route, invisible here.
   const matchedId = useMatch(CHAT_ROUTE)?.params.chatId ?? null;
-  const isDraft = useMatch(DRAFT_PATH) !== null || (!matchedId && activeId === null);
+  const onChatsPage = useMatch(CHATS_PAGE) !== null;
+  const draftMatch = useMatch(DRAFT_PATH) !== null;
+  const isDraft = !onChatsPage && (draftMatch || (!matchedId && activeId === null));
 
   // Re-attached rather than set once: navigate's identity changes with router state.
   useEffect(() => {
@@ -106,6 +110,7 @@ function Shell({ onLock }: { onLock: () => void }) {
           closeNavOnMobile();
         }}
         onPrefetch={(id) => sessionController.prefetchChat(id)}
+        onViewAll={closeNavOnMobile}
         onNew={() => {
           sessionController.startDraft();
           closeNavOnMobile();
@@ -122,11 +127,20 @@ function Shell({ onLock }: { onLock: () => void }) {
           onClick={() => setNavOpen(false)}
         />
       )}
-      <ChatPane
-        navOpen={navOpen}
-        onToggleNav={() => setNavOpen((o) => !o)}
-        isDraft={isDraft}
-      />
+      {onChatsPage ? (
+        <ChatsPage
+          chats={sessions}
+          navOpen={navOpen}
+          onToggleNav={() => setNavOpen((o) => !o)}
+          onNew={() => sessionController.startDraft()}
+        />
+      ) : (
+        <ChatPane
+          navOpen={navOpen}
+          onToggleNav={() => setNavOpen((o) => !o)}
+          isDraft={isDraft}
+        />
+      )}
     </div>
   );
 }

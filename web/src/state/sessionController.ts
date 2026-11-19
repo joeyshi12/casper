@@ -78,6 +78,9 @@ const ACTION_LABEL: Record<string, string> = {
 /** How long a prefetched chat detail is used for. Past this it is fetched again. */
 const PREFETCH_TTL_MS = 10_000;
 
+// Chats deleted at once by a bulk delete.
+const DELETE_BATCH = 4;
+
 export class SessionController {
   private readonly api: SessionApi;
   private readonly createSocket: CreateSocket;
@@ -532,6 +535,21 @@ export class SessionController {
     }
     if (this.state.activeId === id) this.host?.navigate('/');
     else this.refreshSessions();
+  }
+
+  /** Deletes the chats `ids`, a few at a time since each waits for its kiro process to
+   *  exit. Resolves with the ids that could not be deleted. */
+  async deleteChats(ids: string[]): Promise<string[]> {
+    const failed: string[] = [];
+    for (let i = 0; i < ids.length; i += DELETE_BATCH) {
+      const batch = ids.slice(i, i + DELETE_BATCH);
+      const results = await Promise.allSettled(batch.map((id) => (this.dropPrefetch(id), this.api.deleteChat(id))));
+      results.forEach((r, j) => r.status === 'rejected' && failed.push(batch[j]!));
+    }
+    const active = this.state.activeId;
+    if (active && ids.includes(active) && !failed.includes(active)) this.host?.navigate('/');
+    this.refreshSessions();
+    return failed;
   }
 
   async renameChat(id: string, title: string): Promise<void> {

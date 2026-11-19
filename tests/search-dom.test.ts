@@ -21,7 +21,7 @@ let root: Any;
 const navigated: string[] = [];
 
 const chats = [
-  { chatId: 'chat-alpha', title: 'Alpha', agentId: 'casper' },
+  { chatId: 'chat-alpha', title: 'Alpha', agentId: 'casper', updatedAt: new Date().toISOString() },
   { chatId: 'chat-tailoring', title: 'Tailoring', agentId: 'casper' },
 ] as unknown as ChatSummary[];
 
@@ -70,6 +70,13 @@ describe('opening a chat from the search palette', () => {
     assert.deepEqual(opened, ['chat-alpha']);
     assert.equal(closed, 1, 'the palette closes');
     assert.deepEqual(navigated, ['/c/chat-alpha']);
+  });
+
+  it('shows when each chat was last active in place of its agent', () => {
+    mount();
+    const alpha = results().find((b) => b.textContent?.includes('Alpha'))!;
+    assert.equal(alpha.querySelector('.search-result-time')?.textContent, 'Just now');
+    assert.equal(results().some((b) => b.textContent?.includes('casper')), false);
   });
 
   it('encodes the id it puts in the path', () => {

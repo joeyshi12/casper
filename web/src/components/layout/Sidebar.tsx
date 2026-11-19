@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { pathForChat } from '../../util/route.js';
+import { CHATS_PAGE, pathForChat } from '../../util/route.js';
 import { groupByDate } from '../../util/chatGroups.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatSummary } from '@casper/shared';
@@ -16,6 +16,7 @@ import { PopoverMenu } from '../common/PopoverMenu.js';
 import { SearchModal } from '../sessions/SearchModal.js';
 import { SettingsModal } from '../sessions/SettingsModal.js';
 import { ConfirmDialog } from '../common/ConfirmDialog.js';
+import { useFadingScrollbar } from '../common/useFadingScrollbar.js';
 
 interface Props {
   sessions: ChatSummary[];
@@ -28,6 +29,8 @@ interface Props {
   /** The pointer or focus reached a row, so its chat is likely to be opened next. */
   onPrefetch: (id: string) => void;
   onNew: () => void;
+  /** Fired when the link to the chats page is followed. */
+  onViewAll: () => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onPin: (id: string, pinned: boolean) => void;
@@ -37,7 +40,8 @@ interface Props {
 /** Whether to group by date is a choice for this browser, so it lives in localStorage. */
 const GROUPED_KEY = 'casper.groupChatsByDate';
 
-const SCROLLBAR_IDLE_MS = 1000;
+/** Unpinned chats listed in the sidebar; the rest are on the chats page. */
+export const SIDEBAR_CHATS = 30;
 
 /** How long the pointer rests on a row before its chat is prefetched, so moving the
  *  pointer across the list does not fetch every chat it passes. */
@@ -67,6 +71,7 @@ export function Sidebar({
   onOpen,
   onPrefetch,
   onNew,
+  onViewAll,
   onDelete,
   onRename,
   onPin,
@@ -81,8 +86,7 @@ export function Sidebar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [grouped, setGrouped] = useState(loadGrouped);
-  /** Whether the list is scrolled down, which draws a line under the header. */
-  const [scrolled, setScrolled] = useState(false);
+  const { scrolled, onScroll: onListScroll } = useFadingScrollbar();
   /** Labels of the sections the user folded away, for this page load. */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -93,13 +97,9 @@ export function Sidebar({
     setMenuAnchor(null);
   }, []);
 
-  // Shows the scrollbar while the list scrolls. The class is set on the element, so
-  // scrolling does not re-render the sidebar.
-  const scrollIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
-      if (scrollIdleTimer.current) clearTimeout(scrollIdleTimer.current);
       if (hoverTimer.current) clearTimeout(hoverTimer.current);
     },
     [],
@@ -112,13 +112,6 @@ export function Sidebar({
     cancelHoverPrefetch();
     hoverTimer.current = setTimeout(() => onPrefetch(id), PREFETCH_HOVER_MS);
   };
-  const onListScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    setScrolled(el.scrollTop > 0);
-    el.classList.add('is-scrolling');
-    if (scrollIdleTimer.current) clearTimeout(scrollIdleTimer.current);
-    scrollIdleTimer.current = setTimeout(() => el.classList.remove('is-scrolling'), SCROLLBAR_IDLE_MS);
-  };
 
   const commitRename = (id: string) => {
     const t = draft.trim();
@@ -127,7 +120,13 @@ export function Sidebar({
   };
 
   const pinned = sessions.filter((s) => s.pinned);
-  const unpinned = sessions.filter((s) => !s.pinned);
+  // The open chat stays listed even when it is older than the ones shown.
+  const unpinned = sessions.filter((s) => !s.pinned).filter((s, i) => i < SIDEBAR_CHATS || s.chatId === activeId);
+  const viewAll = sessions.length > 0 && (
+    <Link className="sidebar-viewall" to={CHATS_PAGE} onClick={onViewAll}>
+      View all
+    </Link>
+  );
 
   const toggleGrouped = () => {
     saveGrouped(!grouped);
@@ -289,7 +288,7 @@ export function Sidebar({
         </span>
       </header>
 
-      <div className="sidebar-scroll" onScroll={onListScroll}>
+      <div className="sidebar-scroll fade-scroll" onScroll={onListScroll}>
         <nav className="sidebar-nav" aria-label="Casper">
           <button className="snav-item" onClick={onNew}>
             <span className="sb-icon">
@@ -326,6 +325,7 @@ export function Sidebar({
         ) : (
           unpinned.length > 0 && section('Chats', unpinned, groupButton)
         )}
+        {viewAll}
       </div>
 
       {searchOpen && (

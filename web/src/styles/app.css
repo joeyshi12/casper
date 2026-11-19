@@ -188,32 +188,32 @@
   overflow-y: auto;
   padding-bottom: 6px;
 }
-/* The thumb fades out once the list has been still for a second; the track keeps its
-   width, so nothing moves. Sidebar.tsx sets is-scrolling. A transition on the thumb
-   itself does not run in Chromium, so the colour is a registered property on the list,
-   which can be transitioned, and the thumb reads it. */
-@property --sidebar-thumb {
+/* The thumb of a .fade-scroll list fades out once the list has been still for a second;
+   the track keeps its width, so nothing moves. useFadingScrollbar sets is-scrolling. A
+   transition on the thumb itself does not run in Chromium, so the colour is a registered
+   property on the list, which can be transitioned, and the thumb reads it. */
+@property --fade-thumb {
   syntax: '<color>';
   inherits: true;
   initial-value: transparent;
 }
-.sidebar-scroll {
-  --sidebar-thumb: transparent;
-  transition: --sidebar-thumb 0.2s ease-out;
+.fade-scroll {
+  --fade-thumb: transparent;
+  transition: --fade-thumb 0.2s ease-out;
 }
-.sidebar-scroll.is-scrolling {
-  --sidebar-thumb: var(--n2);
+.fade-scroll.is-scrolling {
+  --fade-thumb: var(--n2);
   transition-duration: 0s;
 }
-.sidebar-scroll::-webkit-scrollbar-thumb {
-  background-color: var(--sidebar-thumb);
+.fade-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--fade-thumb);
 }
 @supports not selector(::-webkit-scrollbar) {
-  .sidebar-scroll {
+  .fade-scroll {
     scrollbar-color: transparent transparent;
     transition: scrollbar-color 0.2s ease-out;
   }
-  .sidebar-scroll.is-scrolling {
+  .fade-scroll.is-scrolling {
     scrollbar-color: var(--n2) transparent;
     transition-duration: 0s;
   }
@@ -594,10 +594,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.search-result-agent {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--frost-teal);
+.search-result-time {
+  font-size: 12px;
+  color: var(--n4);
   flex-shrink: 0;
 }
 
@@ -3889,4 +3888,229 @@ a.btn-sm {
   .mcp-form {
     grid-template-columns: 1fr;
   }
+}
+
+/* The sidebar's link to the chats page, under the list. */
+.sidebar-viewall {
+  display: block;
+  margin: 2px 8px 10px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  color: var(--n4);
+  text-decoration: none;
+}
+.sidebar-viewall:hover {
+  background: var(--n1);
+  color: var(--n6);
+}
+
+/* The chats page: every chat, with search, an age filter and bulk delete. The page itself
+   scrolls, so the scrollbar is at the window's edge, and the header sticks to the top. */
+.chats-page {
+  min-height: 0;
+}
+.chats-scroll {
+  height: 100%;
+  overflow-y: auto;
+}
+.chats-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: calc(14px + var(--safe-top)) 0 14px;
+  background: var(--n-abyss);
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+.chats-head.is-scrolled {
+  border-bottom-color: var(--n1);
+}
+.chats-head-row,
+.chats-head > .chats-error,
+.chats-body {
+  width: 100%;
+  /* As wide as the transcript. Not --chat-inset: its percentage would resolve against
+     the whole pane and squeeze this column to nothing. */
+  max-width: calc(980px + 2 * var(--gutter));
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--gutter);
+  padding-right: var(--gutter);
+}
+.chats-head-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.chats-heading {
+  flex: none;
+  /* Pushes the controls to the right; the open search field takes this space instead. */
+  margin: 0 auto 0 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--n6);
+}
+.chats-icon {
+  width: 36px;
+  height: 36px;
+}
+/* The search and filter buttons sit together, closer than the rest of the row. */
+.chats-icon + .chats-icon {
+  margin-left: -6px;
+}
+.chats-icon.is-on {
+  color: var(--frost);
+}
+.chats-body {
+  padding-bottom: calc(24px + var(--safe-bottom));
+}
+.chats-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  max-width: 420px;
+  margin-left: 12px;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--frost-deep);
+  border-radius: var(--r-md);
+  background: var(--n1);
+  color: var(--n4);
+}
+.chats-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--n6);
+  outline: none;
+}
+/* When the row is too narrow to share, the open search field takes its own line under it. */
+.chats-head {
+  container-type: inline-size;
+}
+@container (max-width: 560px) {
+  .chats-head-row {
+    flex-wrap: wrap;
+  }
+  .chats-search {
+    order: 1;
+    flex-basis: 100%;
+    max-width: none;
+    margin: 4px 0 0;
+  }
+}
+.chats-search-x {
+  width: 26px;
+  height: 26px;
+}
+.chats-age {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.chats-btn {
+  padding: 7px 12px;
+  font-size: 14px;
+}
+.chats-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.chats-count {
+  margin-right: 4px;
+  font-size: 14px;
+  color: var(--n4);
+}
+.chats-btn-fill {
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--n2);
+  font-family: var(--font-body);
+  font-weight: 500;
+  color: var(--n6);
+  cursor: pointer;
+}
+.chats-btn-fill:hover:not(:disabled) {
+  background: var(--n3);
+}
+.chats-close {
+  margin-left: 12px;
+}
+.chats-error {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--aurora-red);
+}
+.chats-list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.chats-list > li + li {
+  border-top: 1px solid var(--n1);
+}
+.chats-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 15px 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--n6);
+  text-decoration: none;
+  cursor: pointer;
+}
+.chats-row:hover {
+  background: var(--n1);
+}
+.chats-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+.chats-running {
+  flex: none;
+  font-size: 12px;
+  color: var(--aurora-green);
+}
+.chats-time {
+  flex: none;
+  font-size: 13px;
+  color: var(--n4);
+}
+.chats-box {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--n3);
+  border-radius: 4px;
+  color: var(--n-abyss);
+}
+.chats-box.is-on {
+  border-color: var(--frost);
+  background: var(--frost);
+}
+.chats-empty {
+  margin: 24px 0;
+  text-align: center;
+  font-size: 14px;
+  color: var(--n4);
 }
