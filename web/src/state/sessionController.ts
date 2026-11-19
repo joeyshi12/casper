@@ -381,7 +381,7 @@ export class SessionController {
   private deliverSteer(id: string, text: string): void {
     this.lastSteer = id;
     if (this.socket?.steer(text, id)) return;
-    this.state.markPendingFailed(id, 'Not connected to the server - reconnecting. Retry once the status dot is green.');
+    this.state.markPendingFailed(id, 'Not connected to the server - reconnecting. Retry once the connection status in the header is gone.');
   }
 
   private deliver(
@@ -395,7 +395,7 @@ export class SessionController {
     this.state.markPendingFailed(
       id,
       this.socket
-        ? 'Not connected to the server - reconnecting. Retry once the status dot is green.'
+        ? 'Not connected to the server - reconnecting. Retry once the connection status in the header is gone.'
         : 'No active session socket.',
     );
   }

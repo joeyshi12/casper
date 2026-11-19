@@ -661,12 +661,6 @@
   font-size: 11px;
   letter-spacing: 0.02em;
 }
-.conndot-ok .conndot-blip {
-  background: var(--aurora-green);
-}
-.conndot-ok .conndot-label {
-  color: var(--aurora-green);
-}
 .conndot-busy .conndot-blip {
   background: var(--aurora-yellow);
   animation: pulse 1.2s ease-in-out infinite;
