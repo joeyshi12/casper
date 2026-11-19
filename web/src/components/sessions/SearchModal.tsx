@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ChatSummary } from '@casper/shared';
 import { fuzzyScore } from '../../util/fuzzy.js';
+import { lastActive } from '../../util/relTime.js';
 import { sessionController } from '../../state/sessionController.js';
 import { SearchIcon } from '../common/icons.js';
 
@@ -98,7 +99,7 @@ export function SearchModal({ sessions, onOpen, onClose }: Props) {
                 onClick={() => choose(s.chatId)}
               >
                 <span className="search-result-title">{s.title}</span>
-                <span className="search-result-agent">{s.agentId ?? 'vibe'}</span>
+                <span className="search-result-time">{lastActive(s.updatedAt)}</span>
               </button>
             ))
           )}

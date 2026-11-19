@@ -594,10 +594,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.search-result-agent {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--frost-teal);
+.search-result-time {
+  font-size: 12px;
+  color: var(--n4);
   flex-shrink: 0;
 }
 
