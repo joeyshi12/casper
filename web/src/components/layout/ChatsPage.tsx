@@ -114,7 +114,7 @@ export function ChatsPage({ chats, navOpen, onToggleNav, onNew }: Props) {
                   </button>
                 )}
                 <button className="iconbtn chats-icon chats-close" onClick={stopSelecting} aria-label="Stop selecting" title="Done">
-                  <CloseIcon size={18} />
+                  <CloseIcon size={20} />
                 </button>
               </>
             ) : (
@@ -137,7 +137,7 @@ export function ChatsPage({ chats, navOpen, onToggleNav, onNew }: Props) {
                   </label>
                 ) : (
                   <button className="iconbtn chats-icon" onClick={() => setSearching(true)} aria-label="Search chats" title="Search">
-                    <SearchIcon size={17} />
+                    <SearchIcon size={20} />
                   </button>
                 )}
                 <button
@@ -148,7 +148,7 @@ export function ChatsPage({ chats, navOpen, onToggleNav, onNew }: Props) {
                   aria-expanded={!!filterAnchor}
                   title={AGES.find((a) => a.value === minAge)?.label}
                 >
-                  <FilterIcon size={16} />
+                  <FilterIcon size={19} />
                 </button>
                 <button className="chats-btn chats-btn-fill" onClick={() => setSelecting(true)} disabled={chats.length === 0}>
                   Select

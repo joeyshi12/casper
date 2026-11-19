@@ -3955,8 +3955,12 @@ a.btn-sm {
   color: var(--n6);
 }
 .chats-icon {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
+}
+/* The search and filter buttons sit together, closer than the rest of the row. */
+.chats-icon + .chats-icon {
+  margin-left: -6px;
 }
 .chats-icon.is-on {
   color: var(--frost);
