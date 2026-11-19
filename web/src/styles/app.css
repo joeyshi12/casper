@@ -3945,23 +3945,12 @@ a.btn-sm {
   gap: 8px;
   min-height: 44px;
 }
-/* The sidebar toggle sits at the pane's edge, so the title lines up with the list. */
-.chats-head .navbtn {
-  position: absolute;
-  left: 9px;
-  top: calc(14px + var(--safe-top) + 4px);
-}
-@media (max-width: 1100px) {
-  .chats-head .navbtn {
-    position: static;
-  }
-}
 .chats-heading {
   flex: none;
   /* Pushes the controls to the right; the open search field takes this space instead. */
   margin: 0 auto 0 0;
   font-family: var(--font-display);
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 500;
   color: var(--n6);
 }
@@ -4071,7 +4060,7 @@ a.btn-sm {
   align-items: center;
   gap: 16px;
   width: 100%;
-  padding: 17px 8px;
+  padding: 15px 8px;
   border: none;
   border-radius: var(--r-sm);
   background: none;
@@ -4090,7 +4079,7 @@ a.btn-sm {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 15px;
+  font-size: 14px;
 }
 .chats-running {
   flex: none;
@@ -4099,7 +4088,7 @@ a.btn-sm {
 }
 .chats-time {
   flex: none;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--n4);
 }
 .chats-box {
