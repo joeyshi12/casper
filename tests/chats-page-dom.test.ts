@@ -166,13 +166,14 @@ describe('the chats page', () => {
     assert.equal(host.querySelector('.chats-count')?.textContent, '1 selected');
   });
 
-  it('deletes only selected chats the filter still lists', async () => {
+  it('deletes only selected chats still listed, when the list changes under a selection', async () => {
     page();
     click(buttonNamed('Select'));
     const rows = () => [...host.querySelectorAll('button.chats-row')];
     click(rows()[1]!);
     click(rows()[3]!);
-    filter('Idle a week or more');
+    // c2 is deleted from another tab, so the next list no longer has it.
+    render(createElement(ChatsPage, { chats: chats.filter((c) => c.chatId !== 'c2'), navOpen: false, onToggleNav: () => {}, onNew: () => {} }));
     assert.equal(host.querySelector('.chats-count')?.textContent, '1 selected');
     click(buttonNamed('Delete'));
     await act(async () => {
@@ -185,9 +186,12 @@ describe('the chats page', () => {
     page();
     filter('Idle a month or more');
     click(buttonNamed('Select'));
-    click(buttonNamed('Select all 1'));
+    click(buttonNamed('Select all'));
     assert.equal(host.querySelector('.chats-count')?.textContent, '1 selected');
     click(buttonNamed('Clear selection'));
     assert.equal(host.querySelector('.chats-count')?.textContent, '0 selected');
+    assert.equal(buttonNamed('Delete'), null, 'Delete shows only once something is selected');
+    click(host.querySelector('button[aria-label="Stop selecting"]'));
+    assert.ok(buttonNamed('Select'), 'the normal header is back');
   });
 });

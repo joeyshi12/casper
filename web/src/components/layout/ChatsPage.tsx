@@ -98,70 +98,67 @@ export function ChatsPage({ chats, navOpen, onToggleNav, onNew }: Props) {
               <MenuIcon size={20} />
             </button>
             <h1 className="chats-heading">Chats</h1>
-            {searching ? (
-              <label className="chats-search">
-                <SearchIcon size={15} />
-                <input
-                  autoFocus
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Escape' && closeSearch()}
-                  onBlur={() => !query && setSearching(false)}
-                  placeholder="Search chats"
-                  aria-label="Search chats"
-                />
-                <button className="iconbtn chats-search-x" onClick={closeSearch} aria-label="Close search">
-                  <CloseIcon size={14} />
-                </button>
-              </label>
-            ) : (
-              <button className="iconbtn chats-icon" onClick={() => setSearching(true)} aria-label="Search chats" title="Search">
-                <SearchIcon size={17} />
-              </button>
-            )}
-            <button
-              className={`iconbtn chats-icon${minAge !== '0' ? ' is-on' : ''}`}
-              onClick={(e) => setFilterAnchor(filterAnchor ? null : e.currentTarget)}
-              aria-label="Filter by age"
-              aria-haspopup="menu"
-              aria-expanded={!!filterAnchor}
-              title={AGES.find((a) => a.value === minAge)?.label}
-            >
-              <FilterIcon size={16} />
-            </button>
             {selecting ? (
-              <button className="btn-ghost chats-btn" onClick={stopSelecting}>
-                Cancel
-              </button>
+              <>
+                <span className="chats-count">{picked.length} selected</span>
+                <button
+                  className="chats-btn chats-btn-fill"
+                  onClick={() => setSelected(allPicked ? new Set() : new Set(shown.map((c) => c.chatId)))}
+                  disabled={shown.length === 0}
+                >
+                  {allPicked ? 'Clear selection' : 'Select all'}
+                </button>
+                {picked.length > 0 && (
+                  <button className="btn-danger chats-btn" onClick={() => setConfirming(true)} disabled={deleting}>
+                    {deleting ? 'Deleting…' : 'Delete'}
+                  </button>
+                )}
+                <button className="iconbtn chats-icon chats-close" onClick={stopSelecting} aria-label="Stop selecting" title="Done">
+                  <CloseIcon size={18} />
+                </button>
+              </>
             ) : (
-              <button className="btn-ghost chats-btn" onClick={() => setSelecting(true)} disabled={chats.length === 0}>
-                Select
-              </button>
+              <>
+                {searching ? (
+                  <label className="chats-search">
+                    <SearchIcon size={15} />
+                    <input
+                      autoFocus
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Escape' && closeSearch()}
+                      onBlur={() => !query && setSearching(false)}
+                      placeholder="Search chats"
+                      aria-label="Search chats"
+                    />
+                    <button className="iconbtn chats-search-x" onClick={closeSearch} aria-label="Close search">
+                      <CloseIcon size={14} />
+                    </button>
+                  </label>
+                ) : (
+                  <button className="iconbtn chats-icon" onClick={() => setSearching(true)} aria-label="Search chats" title="Search">
+                    <SearchIcon size={17} />
+                  </button>
+                )}
+                <button
+                  className={`iconbtn chats-icon${minAge !== '0' ? ' is-on' : ''}`}
+                  onClick={(e) => setFilterAnchor(filterAnchor ? null : e.currentTarget)}
+                  aria-label="Filter by age"
+                  aria-haspopup="menu"
+                  aria-expanded={!!filterAnchor}
+                  title={AGES.find((a) => a.value === minAge)?.label}
+                >
+                  <FilterIcon size={16} />
+                </button>
+                <button className="chats-btn chats-btn-fill" onClick={() => setSelecting(true)} disabled={chats.length === 0}>
+                  Select
+                </button>
+                <button className="btn-primary chats-btn" onClick={onNew}>
+                  New
+                </button>
+              </>
             )}
-            <button className="btn-primary chats-btn" onClick={onNew}>
-              New
-            </button>
           </div>
-
-          {selecting && (
-            <div className="chats-selectbar">
-              <button
-                className="chats-check-all"
-                onClick={() => setSelected(allPicked ? new Set() : new Set(shown.map((c) => c.chatId)))}
-                disabled={shown.length === 0}
-              >
-                {allPicked ? 'Clear selection' : `Select all ${shown.length}`}
-              </button>
-              <span className="chats-count">{picked.length} selected</span>
-              <button
-                className="btn-danger chats-btn"
-                onClick={() => setConfirming(true)}
-                disabled={picked.length === 0 || deleting}
-              >
-                {deleting ? 'Deleting…' : 'Delete'}
-              </button>
-            </div>
-          )}
           {error && (
             <p className="chats-error" role="alert">
               {error}

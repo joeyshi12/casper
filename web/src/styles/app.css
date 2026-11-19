@@ -3919,7 +3919,7 @@ a.btn-sm {
   position: sticky;
   top: 0;
   z-index: 2;
-  padding: calc(14px + var(--safe-top)) 0 10px;
+  padding: calc(14px + var(--safe-top)) 0 14px;
   background: var(--n-abyss);
   border-bottom: 1px solid transparent;
   transition: border-color 0.15s;
@@ -3928,36 +3928,41 @@ a.btn-sm {
   border-bottom-color: var(--n1);
 }
 .chats-head-row,
-.chats-head > .chats-selectbar,
 .chats-head > .chats-error,
 .chats-body {
   width: 100%;
   /* As wide as the transcript. Not --chat-inset: its percentage would resolve against
      the whole pane and squeeze this column to nothing. */
-  max-width: calc(var(--chat-max) + 2 * var(--gutter));
+  max-width: calc(980px + 2 * var(--gutter));
   margin-left: auto;
   margin-right: auto;
   padding-left: var(--gutter);
   padding-right: var(--gutter);
 }
-.chats-head > .chats-selectbar {
-  width: calc(100% - 2 * var(--gutter));
-  max-width: var(--chat-max);
-  padding: 6px 6px 6px 10px;
-}
 .chats-head-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 40px;
+  gap: 8px;
+  min-height: 44px;
+}
+/* The sidebar toggle sits at the pane's edge, so the title lines up with the list. */
+.chats-head .navbtn {
+  position: absolute;
+  left: 9px;
+  top: calc(14px + var(--safe-top) + 4px);
+}
+@media (max-width: 1100px) {
+  .chats-head .navbtn {
+    position: static;
+  }
 }
 .chats-heading {
   flex: none;
   /* Pushes the controls to the right; the open search field takes this space instead. */
-  margin: 0 auto 0 4px;
+  margin: 0 auto 0 0;
   font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 600;
+  font-size: 28px;
+  font-weight: 500;
   color: var(--n6);
 }
 .chats-icon {
@@ -3969,14 +3974,6 @@ a.btn-sm {
 }
 .chats-body {
   padding-bottom: calc(24px + var(--safe-bottom));
-}
-.chats-selectbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  border: 1px solid var(--n2);
-  border-radius: var(--r-md);
 }
 .chats-search {
   display: flex;
@@ -4036,20 +4033,25 @@ a.btn-sm {
   opacity: 0.5;
   cursor: default;
 }
-.chats-check-all {
-  padding: 4px 6px;
+.chats-count {
+  margin-right: 4px;
+  font-size: 14px;
+  color: var(--n4);
+}
+.chats-btn-fill {
   border: none;
-  border-radius: var(--r-sm);
-  background: none;
-  font: inherit;
-  font-size: 13px;
-  color: var(--frost);
+  border-radius: var(--r-md);
+  background: var(--n2);
+  font-family: var(--font-body);
+  font-weight: 500;
+  color: var(--n6);
   cursor: pointer;
 }
-.chats-count {
-  flex: 1;
-  font-size: 13px;
-  color: var(--n4);
+.chats-btn-fill:hover:not(:disabled) {
+  background: var(--n3);
+}
+.chats-close {
+  margin-left: 12px;
 }
 .chats-error {
   margin: 10px 0 0;
@@ -4067,9 +4069,9 @@ a.btn-sm {
 .chats-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   width: 100%;
-  padding: 13px 8px;
+  padding: 17px 8px;
   border: none;
   border-radius: var(--r-sm);
   background: none;
@@ -4088,7 +4090,7 @@ a.btn-sm {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: 15px;
 }
 .chats-running {
   flex: none;
@@ -4097,7 +4099,7 @@ a.btn-sm {
 }
 .chats-time {
   flex: none;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--n4);
 }
 .chats-box {
