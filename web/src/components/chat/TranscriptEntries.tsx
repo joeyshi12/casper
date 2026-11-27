@@ -21,6 +21,7 @@ import {
 } from '../common/icons.js';
 import { Collapse } from './Collapse.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
+import { SubagentToolCall } from './SubagentToolCall.js';
 import { ToolCallCard, ToolCallGroupCard, ThoughtLineCard, type RunRowInput } from './ToolCallCard.js';
 
 /* The messages, grouped tool calls and thinking of one conversation, shared by the chat
@@ -100,6 +101,10 @@ export const TranscriptEntries = memo(function TranscriptEntries({
               active={active}
             />
           );
+        }
+        if (entry.type === 'subagents') {
+          // Keyed by the first call, so a call joining the fold keeps it mounted.
+          return <SubagentToolCall key={entry.tools[0]!.id} tools={entry.tools} />;
         }
         if (entry.type === 'thought') {
           if (joiningThought !== undefined) {

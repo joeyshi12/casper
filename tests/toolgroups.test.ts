@@ -13,6 +13,8 @@ const toolItem = (id: string, name: string, input: unknown = {}, status = 'compl
     tool: { id, name, title: name, status, content: [], input },
   }) as unknown as TranscriptItem;
 
+type Any = any;
+
 const message = (id: string, role: 'user' | 'assistant' = 'assistant'): TranscriptItem =>
   ({ type: 'message', message: { id, role, text: 'hi' } }) as unknown as TranscriptItem;
 
@@ -102,10 +104,17 @@ describe('groupToolCalls', () => {
     assert.equal(out[1]!.type, 'other');
   });
 
-  it('a subagent call is never grouped and breaks a run around it', () => {
+  it('a subagent call is never put in a run and breaks a run around it', () => {
     const out = groupToolCalls([toolItem('t1', 'shell'), subagentItem('s1'), toolItem('t2', 'read')]);
     assert.equal(out.length, 3);
-    assert.equal(out[1]!.type, 'other');
+    assert.equal(out[1]!.type, 'subagents');
+  });
+
+  it('subagent calls made one after another share one fold, and others get their own', () => {
+    const out = groupToolCalls([subagentItem('s1'), subagentItem('s2'), message('m1'), subagentItem('s3')]);
+    assert.deepEqual(out.map((e) => e.type), ['subagents', 'other', 'subagents']);
+    assert.deepEqual((out[0] as Any).tools.map((t: Any) => t.id), ['s1', 's2']);
+    assert.deepEqual((out[2] as Any).tools.map((t: Any) => t.id), ['s3']);
   });
 
   it('two runs stay separate across the message that splits them', () => {
