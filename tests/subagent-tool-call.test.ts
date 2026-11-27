@@ -16,6 +16,7 @@ let createElement: Any;
 let act: Any;
 let createRoot: Any;
 let ToolCallCard: Any;
+let SubagentToolCall: Any;
 let useStore: Any;
 let api: Any;
 let root: Any;
@@ -50,6 +51,7 @@ before(async () => {
   (globalThis as Any).requestIdleCallback = () => {};
   ({ createRoot } = await import('react-dom/client'));
   ({ ToolCallCard } = await import('../web/src/components/chat/ToolCallCard.js'));
+  ({ SubagentToolCall } = await import('../web/src/components/chat/SubagentToolCall.js'));
   ({ useStore } = await import('../web/src/state/store.js'));
   ({ api } = await import('../web/src/api/rest.js'));
 });
@@ -109,6 +111,19 @@ describe('the subagent tool call (rendered in a DOM)', () => {
   after(() => {
     api.subagents = originalSubagents;
     api.subagentDetail = originalDetail;
+  });
+
+  it('lists the subagents of calls made together in one fold', async () => {
+    const second = { ...subagentTool('in_progress'), id: 'call-2', input: { name: 'map_web', prompt: 'Map web/.' } };
+    act(() => {
+      root?.unmount();
+      root = createRoot(host);
+      root.render(createElement(SubagentToolCall, { tools: [subagentTool('in_progress'), second] }));
+    });
+    await flush();
+    assert.equal(host.querySelectorAll('.toolline').length, 1, 'one fold');
+    assert.deepEqual([...rows()].map((r) => r.querySelector('.agent-name')?.textContent), ['map_server', 'map_web']);
+    assert.equal(pipelineLine()!.textContent, 'Running 2 subagents, 0 done');
   });
 
   it('fetches the list once on mount, while still closed', async () => {

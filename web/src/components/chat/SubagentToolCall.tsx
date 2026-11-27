@@ -13,10 +13,12 @@ interface StageInput {
   name: string;
 }
 
-/** The subagent a call starts, named in its input. */
-function stagesOf(tool: ToolCallView): StageInput[] {
-  const input = tool.input as { name?: unknown } | undefined;
-  return typeof input?.name === 'string' ? [{ name: input.name }] : [];
+/** The subagents the calls start, each named in its call's input. */
+function stagesOf(tools: ToolCallView[]): StageInput[] {
+  return tools.flatMap((tool) => {
+    const input = tool.input as { name?: unknown } | undefined;
+    return typeof input?.name === 'string' ? [{ name: input.name }] : [];
+  });
 }
 
 export function elapsedSeconds(subagent: Pick<SubagentSummary, 'status' | 'createdAt' | 'updatedAt'>): number {
@@ -34,18 +36,21 @@ function pipelineLine(subagents: SubagentSummary[], running: boolean): string {
   return `Running ${n} ${noun}, ${done} done`;
 }
 
-function SubagentToolCallBody({ tool }: { tool: ToolCallView }) {
+/** One fold for subagent calls made one after another, listing every subagent they started. */
+function SubagentToolCallBody({ tools }: { tools: ToolCallView[] }) {
   const activeId = useStore((s) => s.activeId);
   const allSubagents = useStore((s) => s.subagents);
   const setSubagents = useStore((s) => s.setSubagents);
 
-  const stages = useMemo(() => stagesOf(tool), [tool]);
-  const subagents = useMemo(
-    () => allSubagents.filter((a) => a.toolCallId === tool.id),
-    [allSubagents, tool.id],
-  );
+  const stages = useMemo(() => stagesOf(tools), [tools]);
+  const ids = tools.map((t) => t.id).join(' ');
+  const subagents = useMemo(() => {
+    const calls = new Set(ids.split(' '));
+    return allSubagents.filter((a) => a.toolCallId !== undefined && calls.has(a.toolCallId));
+  }, [allSubagents, ids]);
+  const callRunning = tools.some((t) => t.status === 'in_progress');
   const running = subagents.some((a) => a.status === 'working' || a.status === 'pending');
-  const [open, setOpen] = useState(tool.status === 'in_progress' || running);
+  const [open, setOpen] = useState(callRunning || running);
   useEffect(() => {
     if (running) setOpen(true);
   }, [running]);
@@ -71,7 +76,6 @@ function SubagentToolCallBody({ tool }: { tool: ToolCallView }) {
 
   const [openRow, setOpenRow] = useState<string | null>(null);
 
-  const callRunning = tool.status === 'in_progress';
   if (list === 'loaded' && subagents.length === 0 && !callRunning) return null;
   const text =
     subagents.length > 0

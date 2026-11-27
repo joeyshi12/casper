@@ -23,7 +23,18 @@ export interface OtherEntry {
 
 export type RunMember = ToolEntry | ThoughtEntry;
 
-export type GroupedEntry = ToolEntry | ThoughtEntry | OtherEntry | { type: 'run'; members: RunMember[] };
+/** Subagent calls made one after another, as in one step, shown together in one fold. */
+export interface SubagentsEntry {
+  type: 'subagents';
+  tools: ToolCallView[];
+}
+
+export type GroupedEntry =
+  | ToolEntry
+  | ThoughtEntry
+  | OtherEntry
+  | SubagentsEntry
+  | { type: 'run'; members: RunMember[] };
 
 // A widget, a choice, or the subagent list must render inline exactly where it
 // arrived, so it never collapses into a run.
@@ -60,6 +71,12 @@ export function groupToolCalls(items: TranscriptItem[]): GroupedEntry[] {
       continue;
     }
     flush();
+    if (item.type === 'tool_call' && isSubagentCall(item.tool)) {
+      const last = out.at(-1);
+      if (last?.type === 'subagents') last.tools.push(item.tool);
+      else out.push({ type: 'subagents', tools: [item.tool] });
+      continue;
+    }
     out.push({ type: 'other', item });
   }
   flush();

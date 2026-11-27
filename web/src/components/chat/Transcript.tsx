@@ -28,6 +28,7 @@ function shimmersWhenLast(entry: GroupedEntry | undefined): boolean {
   if (!entry) return false;
   if (entry.type === 'run' || entry.type === 'thought') return true;
   if (entry.type === 'tool') return entry.tool.status !== 'failed';
+  if (entry.type === 'subagents') return entry.tools.some((t) => t.status === 'in_progress');
   const item = entry.item;
   if (item.type === 'message') return item.message.role === 'thinking';
   return item.type === 'tool_call' && item.tool.status === 'in_progress';

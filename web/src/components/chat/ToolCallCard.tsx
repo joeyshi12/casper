@@ -102,7 +102,7 @@ interface ToolCallCardProps {
 /** A widget, choice, or subagent list is dispatched here rather than inside the body,
  *  since the body holds hook state and must not change hook count mid-stream. */
 function ToolCallCardBody({ tool, arriving, active }: ToolCallCardProps) {
-  if (isSubagentCall(tool)) return <SubagentToolCall tool={tool} />;
+  if (isSubagentCall(tool)) return <SubagentToolCall tools={[tool]} />;
   const widget = widgetCallOf(tool);
   if (widget) {
     if (tool.status === 'failed') {
